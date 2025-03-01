@@ -114,7 +114,11 @@ class WindowGame:
 
         # Info label
         self.info_label = tk.Label(self.frame_bottom, text="", font=("Arial", 12))
-        self.info_label.pack()
+        self.info_label.pack(side=tk.LEFT, padx=5)
+
+        # Dedicated "End Turn" button, initially disabled.
+        self.stop_turn_button = tk.Button(self.frame_bottom, text="End Turn", command=self.end_turn, state=tk.DISABLED)
+        self.stop_turn_button.pack(side=tk.RIGHT, padx=5)
 
         # Create buttons for each valid slot
         self.buttons = []
@@ -157,11 +161,13 @@ class WindowGame:
         if self.face_up[r][c]:
             return
 
-        # Enforce that when required (at game start or after a handle removal),
-        # only a card adjacent to the handle can be selected.
+        # If required, enforce that only a card adjacent to the handle is selected.
         if self.must_select_adjacent_to_handle:
             if (r, c) not in adjacent_positions(HANDLE_POSITION):
                 return  # Invalid move: do nothing
+
+        # Once the player starts a move, disable the "End Turn" button.
+        self.stop_turn_button.config(state=tk.DISABLED)
 
         # Identify face-up neighbors
         neighbors = [(nr, nc) for (nr, nc) in adjacent_positions((r, c)) if self.face_up[nr][nc]]
@@ -273,20 +279,16 @@ class WindowGame:
 
     def finish_guess(self, r, c, is_correct):
         if is_correct:
-            # Reveal card and clear the handle-adjacent requirement.
+            # Correct guess: reveal card and allow player to choose to end turn.
             self.face_up[r][c] = True
             self.must_select_adjacent_to_handle = False
             self.update_ui()
-
-            # Check if all face-up => game over
+            # Enable the "End Turn" button so the player may stop their turn.
+            self.stop_turn_button.config(state=tk.NORMAL)
+            # Check if game is over.
             if self.check_game_end():
                 return
-
-            # Ask if player continues
-            if messagebox.askyesno("Correct!", "Guess is correct! Continue your turn?"):
-                self.info_label.config(text=f"{self.current_player()}'s turn continues.")
-            else:
-                self.next_player()
+            self.info_label.config(text=f"{self.current_player()}'s turn continues. You may end your turn using the button.")
         else:
             # Wrong guess: remove guessed card and all connected open cards.
             connected = self.collect_connected_open_cards((r, c))
@@ -295,7 +297,6 @@ class WindowGame:
             penalty = len(total_removed)
             self.drink_count[self.current_player()] += penalty
 
-            # Remove cards from the grid.
             for pos in total_removed:
                 rr, cc = pos
                 cid = self.card_grid[rr][cc]
@@ -304,11 +305,14 @@ class WindowGame:
                 self.card_grid[rr][cc] = None
                 self.face_up[rr][cc] = False
 
-            # Determine if the handle was removed; if so, enforce the adjacent rule.
+            # If the handle was removed, enforce the adjacent rule.
             if HANDLE_POSITION in total_removed:
                 self.must_select_adjacent_to_handle = True
             else:
                 self.must_select_adjacent_to_handle = False
+
+            # In a wrong guess the turn is forced to continue so disable "End Turn" button.
+            self.stop_turn_button.config(state=tk.DISABLED)
 
             random.shuffle(self.deck)
             self.redeal_spots()
@@ -317,6 +321,10 @@ class WindowGame:
                 text=f"Wrong guess! {self.current_player()} drinks {penalty}.\n"
                      f"{self.current_player()} goes again."
             )
+
+    def end_turn(self):
+        """Called when the player clicks the 'End Turn' button."""
+        self.next_player()
 
     def redeal_spots(self):
         """
@@ -359,6 +367,7 @@ class WindowGame:
                     self.face_up[r][c] = False
         self.deal_initial_cards()
         self.must_select_adjacent_to_handle = True
+        self.stop_turn_button.config(state=tk.DISABLED)
         self.update_ui()
 
     def current_player(self):
@@ -367,13 +376,15 @@ class WindowGame:
     def next_player(self):
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.info_label.config(text=f"{self.current_player()}'s turn.")
+        # When a new turn starts, disable the "End Turn" button.
+        self.stop_turn_button.config(state=tk.DISABLED)
 
     def update_ui(self):
         # Update scoreboard
         score_text = " | ".join([f"{p}: {self.drink_count[p]} drinks" for p in self.players])
         self.score_label.config(text=f"Scoreboard: {score_text}")
 
-        # Update buttons
+        # Update buttons for card slots
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
