@@ -1,0 +1,4 @@
+- Stop with the turn whenever you want instead of "at the congratulation when you did a correct move"
+- Nicer table for stats
+- Extend table of stats with correct guesses and number of turns (how often did the player make one or more turns (more then one turn is counted as one))
+- Change the blank cards to cards with images

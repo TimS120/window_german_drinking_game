@@ -15,8 +15,8 @@ This project's purpose is the:
 - Typically, 3–8 players participate (but any number from 1 to 100 is also possible).
 
 ### Gameplay
-1. **Initial Guess**:  
-   - The first player must guess the face-down card **adjacent** to the handle (higher or lower than the handle’s rank).  
+1. **Initial/ Handle Rule**:  
+   - At the start of the game and whenever the handle is removed, the only valid move is to select the card that is adjacent to the handle (i.e. the card adjoining the handle’s position). The player must guess the face-down card **adjacent** to the handle (higher or lower than the handle’s rank).
 2. **In-Between Guesses**:  
    - If a face-down card is **between two face-up cards**, the guess is whether its rank is *in between* or *outside* those two ranks (ties with boundary ranks count as *in between*).  
 3. **Multiple Boundaries**:  
@@ -26,10 +26,12 @@ This project's purpose is the:
    - The card is turned face-up.  
    - The player may continue guessing another card or pass the turn.  
 5. **Wrong Guess**:  
-   - The player drinks a number of times equal to the **number of adjacent face-up cards** around the guessed card.  
-   - Those face-up cards, plus the incorrectly guessed card, are removed from the layout and shuffled back into the deck.  
-   - Missing spots are redealt: **corners and handle** are always redealt face-up, others face-down.  
-   - The **same player** takes the next turn (if the handle is removed, it is replaced face-up, and the same player restarts by guessing the new handle-adjacent card).
+   - The player drinks a number of times equal to the total number of cards removed.
+   - The guessed card is removed along with every open card that is directly or indirectly adjoining it (i.e. if an open card touches an open card that is adjacent to the guessed card, it is also removed).
+   - If the handle (the card at the handle position) is removed in this process, it is immediately redealt face-up and the next turn must be played on a card adjacent to the new handle.
+   - All removed cards are shuffled back into the deck.
+   - Missing spots are redealt: corners and handle are always redealt face-up, others face-down.
+   - The same player takes the next turn.
 
 ### Winning Condition
 - The game ends when **all cards** in the window are face-up.

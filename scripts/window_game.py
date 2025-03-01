@@ -7,21 +7,21 @@ from tkinter import messagebox
 # -------------------------------------------------------
 RANKS = ["6", "7", "8", "9", "10", "U", "O", "K", "A"]  # 6 < 7 < 8 < 9 < 10 < U < O < K < A
 SUITS = ["E", "B", "H", "S"]  # Eichel (E), Blatt (B), Herz (H), Schelle (S)
-NUM_CARDS = len(RANKS) * len(SUITS)  # Adapt if your deck differs.
+NUM_CARDS = len(RANKS) * len(SUITS)
 
 # "Window" layout (5 rows, 6 columns), True = card slot, None = empty space:
 WINDOW_LAYOUT = [
     [True, True, True, True, True, None],    # Row 0
-    [True, None, True, None, True, None],    # Row 1
-    [True, True, True, True, True, True],    # Row 2
-    [True, None, True, None, True, None],    # Row 3
-    [True, True, True, True, True, None]     # Row 4
+    [True, None, True, None, True, None],      # Row 1
+    [True, True, True, True, True, True],       # Row 2
+    [True, None, True, None, True, None],       # Row 3
+    [True, True, True, True, True, None]        # Row 4
 ]
 
 # Corners (always face-up):
-CORNER_POSITIONS = [(0,0), (0,4), (4,0), (4,4)]
+CORNER_POSITIONS = [(0, 0), (0, 4), (4, 0), (4, 4)]
 # Handle (also face-up):
-HANDLE_POSITION  = (2,5)
+HANDLE_POSITION  = (2, 5)
 
 def card_id_to_label(card_id):
     """Convert card_id to a string like '8.E' or 'K.S'."""
@@ -51,7 +51,7 @@ def adjacent_positions(pos):
     """
     r, c = pos
     neighbors = []
-    for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
         nr, nc = r + dr, c + dc
         if 0 <= nr < len(WINDOW_LAYOUT) and 0 <= nc < len(WINDOW_LAYOUT[nr]):
             if WINDOW_LAYOUT[nr][nc] is not None:
@@ -70,6 +70,10 @@ class WindowGame:
         self.players = players
         self.current_player_idx = 0
         self.drink_count = {p: 0 for p in players}
+        
+        # Flag to enforce that the move must be on a card adjacent to the handle.
+        # This is True at the start and whenever the handle is removed.
+        self.must_select_adjacent_to_handle = True
 
         # Create and shuffle deck
         self.deck = create_deck()
@@ -151,26 +155,26 @@ class WindowGame:
     def on_card_click(self, r, c):
         """Handle clicking on a face-down card."""
         if self.face_up[r][c]:
-            # Already face-up, ignore
             return
+
+        # Enforce that when required (at game start or after a handle removal),
+        # only a card adjacent to the handle can be selected.
+        if self.must_select_adjacent_to_handle:
+            if (r, c) not in adjacent_positions(HANDLE_POSITION):
+                return  # Invalid move: do nothing
 
         # Identify face-up neighbors
         neighbors = [(nr, nc) for (nr, nc) in adjacent_positions((r, c)) if self.face_up[nr][nc]]
-
         if len(neighbors) == 1:
             self.ask_higher_lower(r, c, neighbors[0])
         elif len(neighbors) == 2:
             (n1r, n1c), (n2r, n2c) = neighbors
-            same_row = (n1r == n2r)
-            same_col = (n1c == n2c)
-            if same_row or same_col:
-                # Straight line => in-between guess
+            if n1r == n2r or n1c == n2c:
                 self.ask_in_between(r, c, neighbors[0], neighbors[1])
             else:
-                # Around the corner => must choose
                 self.ask_user_to_choose_boundaries(r, c, neighbors)
         else:
-            messagebox.showinfo("Invalid", "Cannot guess here (needs 1 or 2 face-up neighbors).")
+            return
 
     def ask_user_to_choose_boundaries(self, r, c, neighbors):
         """If neighbors are 'around the corner,' ask which pair to use."""
@@ -245,10 +249,33 @@ class WindowGame:
         is_correct = (in_range == guess_in)
         self.finish_guess(r, c, is_correct)
 
+    def collect_connected_open_cards(self, start_pos):
+        """
+        Collect all face-up cards that are connected (adjacent via up/down/left/right)
+        to the given position.
+        """
+        visited = set()
+        stack = []
+        for neighbor in adjacent_positions(start_pos):
+            nr, nc = neighbor
+            if self.face_up[nr][nc]:
+                visited.add(neighbor)
+                stack.append(neighbor)
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacent_positions(current):
+                if neighbor not in visited:
+                    nr, nc = neighbor
+                    if self.face_up[nr][nc]:
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+        return visited
+
     def finish_guess(self, r, c, is_correct):
         if is_correct:
-            # Reveal card
+            # Reveal card and clear the handle-adjacent requirement.
             self.face_up[r][c] = True
+            self.must_select_adjacent_to_handle = False
             self.update_ui()
 
             # Check if all face-up => game over
@@ -261,24 +288,30 @@ class WindowGame:
             else:
                 self.next_player()
         else:
-            # Wrong guess => count adjacent face-up
-            neighbors = [(nr, nc) for (nr, nc) in adjacent_positions((r, c)) if self.face_up[nr][nc]]
-            penalty = len(neighbors)
+            # Wrong guess: remove guessed card and all connected open cards.
+            connected = self.collect_connected_open_cards((r, c))
+            total_removed = set(connected)
+            total_removed.add((r, c))
+            penalty = len(total_removed)
             self.drink_count[self.current_player()] += penalty
 
-            # Remove guessed + neighbors
-            to_remove = neighbors + [(r,c)]
-            for (rr, cc) in to_remove:
+            # Remove cards from the grid.
+            for pos in total_removed:
+                rr, cc = pos
                 cid = self.card_grid[rr][cc]
                 if cid is not None:
                     self.deck.append(cid)
                 self.card_grid[rr][cc] = None
                 self.face_up[rr][cc] = False
 
+            # Determine if the handle was removed; if so, enforce the adjacent rule.
+            if HANDLE_POSITION in total_removed:
+                self.must_select_adjacent_to_handle = True
+            else:
+                self.must_select_adjacent_to_handle = False
+
             random.shuffle(self.deck)
             self.redeal_spots()
-
-            # Same player goes again
             self.update_ui()
             self.info_label.config(
                 text=f"Wrong guess! {self.current_player()} drinks {penalty}.\n"
@@ -308,7 +341,6 @@ class WindowGame:
                 if WINDOW_LAYOUT[r][c]:
                     if not self.face_up[r][c]:
                         return False
-        # All face-up => game ends
         messagebox.showinfo("Game Over", "All cards are face-up! Game ends.")
         if messagebox.askyesno("Play Again?", "Start a new game?"):
             self.reset_game()
@@ -326,6 +358,7 @@ class WindowGame:
                     self.card_grid[r][c] = None
                     self.face_up[r][c] = False
         self.deal_initial_cards()
+        self.must_select_adjacent_to_handle = True
         self.update_ui()
 
     def current_player(self):
@@ -354,7 +387,6 @@ class WindowGame:
                         self.buttons[r][c].config(text=" ", state=tk.DISABLED)
 
         self.info_label.config(text=f"{self.current_player()}'s turn.")
-
 
 # -------------------------------------------------------
 # MAIN
