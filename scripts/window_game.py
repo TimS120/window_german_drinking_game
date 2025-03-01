@@ -66,20 +66,22 @@ class WindowGame:
         self.root = root
         self.root.title("Window Drinking Game")
 
-        # Players & scoreboard
+        # Players & initial statistics
         self.players = players
         self.current_player_idx = 0
         self.drink_count = {p: 0 for p in players}
-        
+        self.player_correct_guesses = {p: 0 for p in players}
+        self.player_changed_cards = {p: 0 for p in players}
+        self.player_turns = {p: 0 for p in players}
+
         # Flag to enforce that the move must be on a card adjacent to the handle.
-        # This is True at the start and whenever the handle is removed.
         self.must_select_adjacent_to_handle = True
 
         # Create and shuffle deck
         self.deck = create_deck()
         random.shuffle(self.deck)
 
-        # Prepare card ID grid and face-up grid
+        # Prepare card grid and face-up grid
         self.card_grid = []
         self.face_up = []
         for row in WINDOW_LAYOUT:
@@ -98,21 +100,24 @@ class WindowGame:
         # Deal initial cards
         self.deal_initial_cards()
 
-        # Build UI
+        # Build UI: top frame, center (game grid + stats table), and bottom frame.
         self.frame_top = tk.Frame(root)
         self.frame_top.pack(side=tk.TOP, fill=tk.X)
+        # (Optional: add a title or instructions here)
 
-        self.frame_game = tk.Frame(root)
-        self.frame_game.pack(side=tk.TOP)
+        self.frame_center = tk.Frame(root)
+        self.frame_center.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self.frame_game = tk.Frame(self.frame_center)
+        self.frame_game.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.frame_stats = tk.Frame(self.frame_center)
+        self.frame_stats.pack(side=tk.RIGHT, padx=5, pady=5)
 
         self.frame_bottom = tk.Frame(root)
         self.frame_bottom.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Scoreboard
-        self.score_label = tk.Label(self.frame_top, text="", font=("Arial", 12, "bold"))
-        self.score_label.pack()
-
-        # Info label
+        # Info label in bottom frame
         self.info_label = tk.Label(self.frame_bottom, text="", font=("Arial", 12))
         self.info_label.pack(side=tk.LEFT, padx=5)
 
@@ -120,7 +125,7 @@ class WindowGame:
         self.stop_turn_button = tk.Button(self.frame_bottom, text="End Turn", command=self.end_turn, state=tk.DISABLED)
         self.stop_turn_button.pack(side=tk.RIGHT, padx=5)
 
-        # Create buttons for each valid slot
+        # Create buttons for the card grid
         self.buttons = []
         for r in range(len(WINDOW_LAYOUT)):
             btn_row = []
@@ -135,12 +140,13 @@ class WindowGame:
             self.buttons.append(btn_row)
 
         self.update_ui()
+        # Record the starting count of face-up cards and count the turn.
+        self.turn_start_face_up = self.count_face_up_cards()
+        self.player_turns[self.current_player()] += 1
 
     def deal_initial_cards(self):
-        """
-        Deal cards from the deck into the layout.
-        Corners & handle => face-up; others => face-down.
-        """
+        """Deal cards from the deck into the layout.
+        Corners & handle are dealt face-up; others face-down."""
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -150,26 +156,31 @@ class WindowGame:
                     else:
                         card = self.deck.pop()
                         self.card_grid[r][c] = card
-                        # If corner or handle, face-up
                         if (r, c) in CORNER_POSITIONS or (r, c) == HANDLE_POSITION:
                             self.face_up[r][c] = True
                         else:
                             self.face_up[r][c] = False
 
+    def count_face_up_cards(self):
+        """Return the number of face-up cards in the grid."""
+        count = 0
+        for r in range(len(WINDOW_LAYOUT)):
+            for c in range(len(WINDOW_LAYOUT[r])):
+                if WINDOW_LAYOUT[r][c] and self.face_up[r][c]:
+                    count += 1
+        return count
+
     def on_card_click(self, r, c):
         """Handle clicking on a face-down card."""
         if self.face_up[r][c]:
             return
-
-        # If required, enforce that only a card adjacent to the handle is selected.
+        # Enforce adjacent-to-handle rule if required.
         if self.must_select_adjacent_to_handle:
             if (r, c) not in adjacent_positions(HANDLE_POSITION):
-                return  # Invalid move: do nothing
-
-        # Once the player starts a move, disable the "End Turn" button.
+                return
+        # When a move is initiated, disable the "End Turn" button.
         self.stop_turn_button.config(state=tk.DISABLED)
-
-        # Identify face-up neighbors
+        # Identify face-up neighbors.
         neighbors = [(nr, nc) for (nr, nc) in adjacent_positions((r, c)) if self.face_up[nr][nc]]
         if len(neighbors) == 1:
             self.ask_higher_lower(r, c, neighbors[0])
@@ -183,37 +194,30 @@ class WindowGame:
             return
 
     def ask_user_to_choose_boundaries(self, r, c, neighbors):
-        """If neighbors are 'around the corner,' ask which pair to use."""
+        """Ask the user to choose boundaries if two valid options exist."""
         choose_win = tk.Toplevel(self.root)
         choose_win.title("Choose Boundaries")
-
         tk.Label(choose_win, text="Select which two neighbors to use for in-between guess:").pack()
-
         def use_first_pair():
             self.ask_in_between(r, c, neighbors[0], neighbors[1])
             choose_win.destroy()
-
         def use_second_pair():
             self.ask_in_between(r, c, neighbors[1], neighbors[0])
             choose_win.destroy()
-
         tk.Button(choose_win, text="Option 1", command=use_first_pair).pack(side=tk.LEFT, padx=5)
         tk.Button(choose_win, text="Option 2", command=use_second_pair).pack(side=tk.RIGHT, padx=5)
 
     def ask_higher_lower(self, r, c, neighbor):
+        """Open a window to ask for a higher/lower guess."""
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess Higher or Lower")
-
         tk.Label(guess_win, text="Is the selected card Higher or Lower than neighbor?").pack()
-
         def guess_higher():
             self.resolve_higher_lower(r, c, neighbor, "higher")
             guess_win.destroy()
-
         def guess_lower():
             self.resolve_higher_lower(r, c, neighbor, "lower")
             guess_win.destroy()
-
         tk.Button(guess_win, text="Higher", command=guess_higher).pack(side=tk.LEFT, padx=10)
         tk.Button(guess_win, text="Lower", command=guess_lower).pack(side=tk.RIGHT, padx=10)
 
@@ -222,27 +226,22 @@ class WindowGame:
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
         neighbor_rank = get_rank_index(neighbor_id)
-
-        if (guess == "higher" and card_rank > neighbor_rank) or \
-           (guess == "lower" and card_rank < neighbor_rank):
+        if (guess == "higher" and card_rank > neighbor_rank) or (guess == "lower" and card_rank < neighbor_rank):
             self.finish_guess(r, c, True)
         else:
             self.finish_guess(r, c, False)
 
     def ask_in_between(self, r, c, n1, n2):
+        """Open a window to ask for an in-between/outside guess."""
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess In-Between or Outside")
-
         tk.Label(guess_win, text="Is the card In-Between or Outside these two?").pack()
-
         def guess_in():
             self.resolve_in_between(r, c, n1, n2, True)
             guess_win.destroy()
-
         def guess_out():
             self.resolve_in_between(r, c, n1, n2, False)
             guess_win.destroy()
-
         tk.Button(guess_win, text="In-Between", command=guess_in).pack(side=tk.LEFT, padx=10)
         tk.Button(guess_win, text="Outside", command=guess_out).pack(side=tk.RIGHT, padx=10)
 
@@ -250,16 +249,12 @@ class WindowGame:
         card_id = self.card_grid[r][c]
         n1_id = self.card_grid[n1[0]][n1[1]]
         n2_id = self.card_grid[n2[0]][n2[1]]
-
         in_range = is_between(card_id, n1_id, n2_id)
         is_correct = (in_range == guess_in)
         self.finish_guess(r, c, is_correct)
 
     def collect_connected_open_cards(self, start_pos):
-        """
-        Collect all face-up cards that are connected (adjacent via up/down/left/right)
-        to the given position.
-        """
+        """Return all face-up cards connected (adjacent) to the start position."""
         visited = set()
         stack = []
         for neighbor in adjacent_positions(start_pos):
@@ -278,25 +273,25 @@ class WindowGame:
         return visited
 
     def finish_guess(self, r, c, is_correct):
+        current_player = self.current_player()
         if is_correct:
-            # Correct guess: reveal card and allow player to choose to end turn.
+            # Correct guess: reveal card and update correct-guess counters.
             self.face_up[r][c] = True
+            self.player_correct_guesses[current_player] += 1
             self.must_select_adjacent_to_handle = False
             self.update_ui()
-            # Enable the "End Turn" button so the player may stop their turn.
+            # Enable the "End Turn" button so the player may stop his turn.
             self.stop_turn_button.config(state=tk.NORMAL)
-            # Check if game is over.
             if self.check_game_end():
                 return
-            self.info_label.config(text=f"{self.current_player()}'s turn continues. You may end your turn using the button.")
+            self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
         else:
-            # Wrong guess: remove guessed card and all connected open cards.
+            # Wrong guess: remove the guessed card and all connected open cards.
             connected = self.collect_connected_open_cards((r, c))
             total_removed = set(connected)
             total_removed.add((r, c))
             penalty = len(total_removed)
-            self.drink_count[self.current_player()] += penalty
-
+            self.drink_count[current_player] += penalty
             for pos in total_removed:
                 rr, cc = pos
                 cid = self.card_grid[rr][cc]
@@ -304,33 +299,28 @@ class WindowGame:
                     self.deck.append(cid)
                 self.card_grid[rr][cc] = None
                 self.face_up[rr][cc] = False
-
-            # If the handle was removed, enforce the adjacent rule.
             if HANDLE_POSITION in total_removed:
                 self.must_select_adjacent_to_handle = True
             else:
                 self.must_select_adjacent_to_handle = False
-
-            # In a wrong guess the turn is forced to continue so disable "End Turn" button.
+            # On a wrong guess the turn must continue; disable "End Turn" button.
             self.stop_turn_button.config(state=tk.DISABLED)
-
             random.shuffle(self.deck)
             self.redeal_spots()
             self.update_ui()
-            self.info_label.config(
-                text=f"Wrong guess! {self.current_player()} drinks {penalty}.\n"
-                     f"{self.current_player()} goes again."
-            )
+            self.info_label.config(text=f"Wrong guess! {current_player} drinks {penalty}. {current_player} goes again.")
 
     def end_turn(self):
-        """Called when the player clicks the 'End Turn' button."""
+        """Called when the player clicks the 'End Turn' button.
+        Compute the net change in face-up cards during the turn and update the stats."""
+        current_player = self.current_player()
+        delta = self.count_face_up_cards() - self.turn_start_face_up
+        self.player_changed_cards[current_player] += delta
         self.next_player()
 
     def redeal_spots(self):
-        """
-        Refill empty spots in the layout. 
-        Corners & handle => face-up, others => face-down.
-        """
+        """Redeal empty spots in the layout.
+        Corners and handle are always redealt face-up, others face-down."""
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -343,7 +333,7 @@ class WindowGame:
                             self.face_up[r][c] = False
 
     def check_game_end(self):
-        """Check if all card slots are face-up."""
+        """Check if all valid card slots are face-up; if so, end the game."""
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -357,7 +347,7 @@ class WindowGame:
         return True
 
     def reset_game(self):
-        """Reset everything for a new game."""
+        """Reset the game for a new round."""
         self.deck = create_deck()
         random.shuffle(self.deck)
         for r in range(len(WINDOW_LAYOUT)):
@@ -369,22 +359,59 @@ class WindowGame:
         self.must_select_adjacent_to_handle = True
         self.stop_turn_button.config(state=tk.DISABLED)
         self.update_ui()
+        self.turn_start_face_up = self.count_face_up_cards()
 
     def current_player(self):
         return self.players[self.current_player_idx]
 
     def next_player(self):
+        """Advance to the next player's turn.
+        Record the new turn’s starting face-up count and increment the player's turn counter."""
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.info_label.config(text=f"{self.current_player()}'s turn.")
-        # When a new turn starts, disable the "End Turn" button.
+        self.turn_start_face_up = self.count_face_up_cards()
+        self.player_turns[self.current_player()] += 1
         self.stop_turn_button.config(state=tk.DISABLED)
+        self.update_ui()
+
+    def update_stats_table(self):
+        """Update the stats table (displayed in the right-side frame)."""
+        # Clear previous table.
+        for widget in self.frame_stats.winfo_children():
+            widget.destroy()
+        # Column headers.
+        headers = ["Player", "Drinks", "Correct Guesses", "Changed Cards", "Turns"]
+        for col, header in enumerate(headers):
+            label = tk.Label(self.frame_stats, text=header, font=("Arial", 10, "bold"),
+                             borderwidth=1, relief="solid", padx=5, pady=2)
+            label.grid(row=1, column=col, sticky="nsew")
+        # Rows: one per player.
+        for i, player in enumerate(self.players):
+            row = i + 2
+            values = [
+                player,
+                self.drink_count[player],
+                self.player_correct_guesses[player],
+                self.player_changed_cards[player],
+                self.player_turns[player]
+            ]
+            for col, val in enumerate(values):
+                label = tk.Label(self.frame_stats, text=str(val), borderwidth=1, relief="solid",
+                                 padx=5, pady=2)
+                label.grid(row=row, column=col, sticky="nsew")
+        # Add a summary row below the last player.
+        sum_row = len(self.players) + 2
+        total_drinks = sum(self.drink_count[p] for p in self.players)
+        total_correct = sum(self.player_correct_guesses[p] for p in self.players)
+        total_changed = sum(self.player_changed_cards[p] for p in self.players)
+        totals = ["Total", total_drinks, total_correct, f"{total_changed} of 17", ""]
+        for col, val in enumerate(totals):
+            label = tk.Label(self.frame_stats, text=str(val), font=("Arial", 10, "bold"),
+                             borderwidth=1, relief="solid", padx=5, pady=2)
+            label.grid(row=sum_row, column=col, sticky="nsew")
 
     def update_ui(self):
-        # Update scoreboard
-        score_text = " | ".join([f"{p}: {self.drink_count[p]} drinks" for p in self.players])
-        self.score_label.config(text=f"Scoreboard: {score_text}")
-
-        # Update buttons for card slots
+        """Update the grid buttons and info label, then refresh the stats table."""
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -396,8 +423,8 @@ class WindowGame:
                             self.buttons[r][c].config(text="X", state=tk.NORMAL)
                     else:
                         self.buttons[r][c].config(text=" ", state=tk.DISABLED)
-
         self.info_label.config(text=f"{self.current_player()}'s turn.")
+        self.update_stats_table()
 
 # -------------------------------------------------------
 # MAIN

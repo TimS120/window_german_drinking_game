@@ -1,5 +1,5 @@
-- Nicer table for stats
-- Extend table of stats with correct guesses and number of turns (how often did the player make one or more turns (more then one turn is counted as one))
+- Player number and names must be changeable (not hard-coded)
+- Is there the rule to have also the option to say "same"? Figure out, if yes, implement
 
 - Change the blank cards to cards with images
 - It must be better visible which cards will be removed (red box around the cards, one click required and then the removing part?)
