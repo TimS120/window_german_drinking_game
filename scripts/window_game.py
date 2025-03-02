@@ -124,7 +124,6 @@ class WindowGame:
         # Build UI: top frame, center (game grid + stats table), and bottom frame.
         self.frame_top = tk.Frame(root)
         self.frame_top.pack(side=tk.TOP, fill=tk.X)
-        # (Optional: add a title or instructions here)
 
         self.frame_center = tk.Frame(root)
         self.frame_center.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -391,6 +390,8 @@ class WindowGame:
             penalty = len(total_removed)
             self.pending_removals = total_removed
             self.pending_penalty = penalty
+            # Increase drink count for each removed card.
+            self.drink_count[current_player] += penalty
             self.info_label.config(text="Wrong guess! Cards marked for removal. Click 'Confirm Removal' to proceed.")
             # Highlight the cards to be removed by setting their container frame border to red.
             for pos in self.pending_removals:
@@ -405,6 +406,7 @@ class WindowGame:
         """After confirmation, remove the marked cards and add them back to the deck.
         
         Then redeal empty spots and highlight new cards with a green border.
+        Also, update the valid-move flag based on whether the handle was removed.
         """
         # Remove red border from the frames.
         for pos in self.pending_removals:
@@ -419,6 +421,13 @@ class WindowGame:
                 self.deck.append(cid)
             self.card_grid[rr][cc] = None
             self.face_up[rr][cc] = False
+
+        # Update valid move flag: if the handle was among removed cards, enforce handle rule.
+        if HANDLE_POSITION in self.pending_removals:
+            self.must_select_adjacent_to_handle = True
+        else:
+            self.must_select_adjacent_to_handle = False
+
         self.confirm_button.destroy()
         self.confirm_button = None
         random.shuffle(self.deck)
