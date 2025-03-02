@@ -169,15 +169,15 @@ class WindowGame:
             self.buttons.append(btn_row)
             self.button_frames.append(frame_row)
 
+        # Instance variables for confirmation stages (must be set before update_ui is called).
+        self.pending_removals = set()
+        self.pending_new_cards = []
+        self.confirm_button = None
+
         self.update_ui()
         # Record the starting count of face-up cards and count the turn.
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
-
-        # Instance variables for confirmation stages.
-        self.pending_removals = set()
-        self.pending_new_cards = []
-        self.confirm_button = None
 
     def deal_initial_cards(self):
         """Deal cards from the deck into the layout.
@@ -564,7 +564,15 @@ class WindowGame:
             label.grid(row=sum_row, column=col, sticky="nsew")
 
     def update_ui(self):
-        """Update the grid buttons and info label, then refresh the stats table."""
+        """Update the grid buttons and info label, then refresh the stats table.
+        
+        Additionally, set a grey border on selectable (clickable) cards:
+        - A card is selectable if it is face-down and either:
+          * When the 'handle rule' applies, it is adjacent to the handle.
+          * Otherwise, it has at least one face-up adjoining card.
+        Cards that are face-up or not selectable do not get a grey border.
+        Note: If a card is marked for removal (red) or is new (green), its border is not changed.
+        """
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -578,6 +586,26 @@ class WindowGame:
                         self.buttons[r][c].config(text=" ", state=tk.DISABLED)
         self.info_label.config(text=f"{self.current_player()}'s turn.")
         self.update_stats_table()
+        # Set grey border on selectable cards (if not already marked for removal/new cards)
+        for r in range(len(WINDOW_LAYOUT)):
+            for c in range(len(WINDOW_LAYOUT[r])):
+                if WINDOW_LAYOUT[r][c]:
+                    container = self.button_frames[r][c]
+                    # Skip if card is marked for removal or is new (red/green border is active)
+                    if (r, c) in self.pending_removals or (r, c) in self.pending_new_cards:
+                        continue
+                    if self.face_up[r][c]:
+                        container.config(highlightthickness=0)
+                    else:
+                        # Determine if the card is selectable.
+                        if self.must_select_adjacent_to_handle:
+                            selectable = (r, c) in adjacent_positions(HANDLE_POSITION)
+                        else:
+                            selectable = any(self.face_up[nr][nc] for nr, nc in adjacent_positions((r, c)))
+                        if selectable:
+                            container.config(highlightthickness=3, highlightbackground="grey")
+                        else:
+                            container.config(highlightthickness=0)
 
 if __name__ == "__main__":
     root = tk.Tk()
