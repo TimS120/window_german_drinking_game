@@ -368,7 +368,8 @@ class WindowGame:
         """Handle the outcome of a guess.
         
         Correct guess: reveal the card, update statistics, and allow the player to end turn.
-        Wrong guess: mark the guessed card and connected open cards for removal with a red border.
+        Wrong guess: reveal the guessed card so the player can see it, then mark the card
+        and connected open cards for removal with a red border.
         """
         current_player = self.current_player()
         if is_correct:
@@ -383,7 +384,10 @@ class WindowGame:
                 return
             self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
         else:
-            # Wrong guess: mark cards for removal with a red border.
+            # Wrong guess: first, reveal the guessed card so it can be seen.
+            self.face_up[r][c] = True
+            self.update_ui()
+            # Then, mark cards for removal with a red border.
             connected = self.collect_connected_open_cards((r, c))
             total_removed = set(connected)
             total_removed.add((r, c))
