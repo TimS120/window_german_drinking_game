@@ -1,6 +1,0 @@
-- Change the blank cards to cards with images
-- It must be better visible which cards will be removed (red box around the cards, one click required and then the removing part?)
-- It must be better visible which turns are valid and which not (green box around the valid cards to select?)
-- Create turn-tracing (which move was executed (for AI-training))
-
-- Player number and names must be changeable (not hard-coded)
