@@ -146,24 +146,38 @@ class WindowGame:
         self.stop_turn_button = tk.Button(self.frame_bottom, text="End Turn", command=self.end_turn, state=tk.DISABLED)
         self.stop_turn_button.pack(side=tk.RIGHT, padx=5)
 
-        # Create buttons for the card grid
+        # Create containers for the card buttons and store frames.
         self.buttons = []
+        self.button_frames = []
         for r in range(len(WINDOW_LAYOUT)):
             btn_row = []
+            frame_row = []
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
-                    b = tk.Button(self.frame_game, text="", width=6, height=3,
-                                  command=lambda rr=r, cc=c: self.on_card_click(rr, cc))
-                    b.grid(row=r, column=c, padx=5, pady=5)
+                    # Each button is now inside a frame so we can change the frame border.
+                    container = tk.Frame(self.frame_game, highlightthickness=0, bd=0)
+                    container.grid(row=r, column=c, padx=5, pady=5)
+                    b = tk.Button(container, text="", width=6, height=3,
+                                  command=lambda rr=r, cc=c: self.on_card_click(rr, cc),
+                                  highlightthickness=0)
+                    b.pack()
                     btn_row.append(b)
+                    frame_row.append(container)
                 else:
                     btn_row.append(None)
+                    frame_row.append(None)
             self.buttons.append(btn_row)
+            self.button_frames.append(frame_row)
 
         self.update_ui()
         # Record the starting count of face-up cards and count the turn.
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
+
+        # Instance variables for confirmation stages.
+        self.pending_removals = set()
+        self.pending_new_cards = []
+        self.confirm_button = None
 
     def deal_initial_cards(self):
         """Deal cards from the deck into the layout.
@@ -193,6 +207,9 @@ class WindowGame:
 
     def on_card_click(self, r, c):
         """Handle clicking on a face-down card."""
+        # Prevent card clicks if a confirmation button is active.
+        if self.confirm_button is not None:
+            return
         if self.face_up[r][c]:
             return
         if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
@@ -294,6 +311,7 @@ class WindowGame:
         tk.Button(guess_win, text="Lower", command=guess_lower).pack(side=tk.RIGHT, padx=5)
 
     def resolve_higher_same_lower(self, r, c, neighbor, guess):
+        """Resolve a higher/same/lower guess against the neighbor card."""
         card_id = self.card_grid[r][c]
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
@@ -320,6 +338,7 @@ class WindowGame:
         tk.Button(guess_win, text="Outside", command=guess_out).pack(side=tk.RIGHT, padx=10)
 
     def resolve_in_between(self, r, c, n1, n2, guess_in):
+        """Resolve an in-between or outside guess using two neighbor cards."""
         card_id = self.card_grid[r][c]
         n1_id = self.card_grid[n1[0]][n1[1]]
         n2_id = self.card_grid[n2[0]][n2[1]]
@@ -347,6 +366,11 @@ class WindowGame:
         return visited
 
     def finish_guess(self, r, c, is_correct):
+        """Handle the outcome of a guess.
+        
+        Correct guess: reveal the card, update statistics, and allow the player to end turn.
+        Wrong guess: mark the guessed card and connected open cards for removal with a red border.
+        """
         current_player = self.current_player()
         if is_correct:
             # Correct guess: reveal card and update correct-guess counters.
@@ -360,41 +384,83 @@ class WindowGame:
                 return
             self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
         else:
-            # Wrong guess: remove the guessed card and all connected open cards.
+            # Wrong guess: mark cards for removal with a red border.
             connected = self.collect_connected_open_cards((r, c))
             total_removed = set(connected)
             total_removed.add((r, c))
             penalty = len(total_removed)
-            self.drink_count[current_player] += penalty
-            for pos in total_removed:
+            self.pending_removals = total_removed
+            self.pending_penalty = penalty
+            self.info_label.config(text="Wrong guess! Cards marked for removal. Click 'Confirm Removal' to proceed.")
+            # Highlight the cards to be removed by setting their container frame border to red.
+            for pos in self.pending_removals:
                 rr, cc = pos
-                cid = self.card_grid[rr][cc]
-                if cid is not None:
-                    self.deck.append(cid)
-                self.card_grid[rr][cc] = None
-                self.face_up[rr][cc] = False
-            if HANDLE_POSITION in total_removed:
-                self.must_select_adjacent_to_handle = True
-            else:
-                self.must_select_adjacent_to_handle = False
-            # On a wrong guess the turn must continue; disable "End Turn" button.
-            self.stop_turn_button.config(state=tk.DISABLED)
-            random.shuffle(self.deck)
-            self.redeal_spots()
-            self.update_ui()
-            self.info_label.config(text=f"Wrong guess! {current_player} drinks {penalty}. {current_player} goes again.")
+                if self.button_frames[rr][cc]:
+                    self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="red")
+            self.disable_card_buttons()
+            self.confirm_button = tk.Button(self.frame_bottom, text="Confirm Removal", command=self.confirm_removals)
+            self.confirm_button.pack(side=tk.RIGHT, padx=5)
 
-    def end_turn(self):
-        """Called when the player clicks the 'End Turn' button.
-        Compute the net change in face-up cards during the turn and update the stats."""
-        current_player = self.current_player()
-        delta = self.count_face_up_cards() - self.turn_start_face_up
-        self.player_changed_cards[current_player] += delta
-        self.next_player()
+    def confirm_removals(self):
+        """After confirmation, remove the marked cards and add them back to the deck.
+        
+        Then redeal empty spots and highlight new cards with a green border.
+        """
+        # Remove red border from the frames.
+        for pos in self.pending_removals:
+            rr, cc = pos
+            if self.button_frames[rr][cc]:
+                self.button_frames[rr][cc].config(highlightthickness=0)
+        # Remove the cards and add them back to the deck.
+        for pos in self.pending_removals:
+            rr, cc = pos
+            cid = self.card_grid[rr][cc]
+            if cid is not None:
+                self.deck.append(cid)
+            self.card_grid[rr][cc] = None
+            self.face_up[rr][cc] = False
+        self.confirm_button.destroy()
+        self.confirm_button = None
+        random.shuffle(self.deck)
+        # Redeal empty spots and capture positions of new cards.
+        new_cards = self.redeal_spots()
+        self.pending_new_cards = new_cards
+        # Highlight new cards with green border.
+        for pos in self.pending_new_cards:
+            rr, cc = pos
+            if self.button_frames[rr][cc]:
+                self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="green")
+        self.update_ui()
+        self.info_label.config(text="New cards dealt. Click 'Confirm New Cards' to continue.")
+        self.confirm_button = tk.Button(self.frame_bottom, text="Confirm New Cards", command=self.confirm_new_cards)
+        self.confirm_button.pack(side=tk.RIGHT, padx=5)
+
+    def confirm_new_cards(self):
+        """Remove the green border from the new cards and allow the game to continue."""
+        for pos in self.pending_new_cards:
+            rr, cc = pos
+            if self.button_frames[rr][cc]:
+                self.button_frames[rr][cc].config(highlightthickness=0)
+        self.confirm_button.destroy()
+        self.confirm_button = None
+        self.info_label.config(text=f"Wrong guess! {self.current_player()} drinks {self.pending_penalty}. {self.current_player()} goes again.")
+        self.pending_removals = set()
+        self.pending_new_cards = []
+        self.update_ui()
+
+    def disable_card_buttons(self):
+        """Disable all card buttons (used during confirmation stages)."""
+        for r in range(len(self.buttons)):
+            for c in range(len(self.buttons[r])):
+                if self.buttons[r][c] is not None:
+                    self.buttons[r][c].config(state=tk.DISABLED)
 
     def redeal_spots(self):
         """Redeal empty spots in the layout.
-        Corners and handle are always redealt face-up, others face-down."""
+        Corners and handle are always redealt face-up, others face-down.
+        Returns a list of positions where new cards were dealt.
+        """
+        new_cards = []
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -405,6 +471,8 @@ class WindowGame:
                             self.face_up[r][c] = True
                         else:
                             self.face_up[r][c] = False
+                        new_cards.append((r, c))
+        return new_cards
 
     def check_game_end(self):
         """Check if all valid card slots are face-up; if so, end the game."""
@@ -436,17 +504,28 @@ class WindowGame:
         self.turn_start_face_up = self.count_face_up_cards()
 
     def current_player(self):
+        """Return the current player's name."""
         return self.players[self.current_player_idx]
 
     def next_player(self):
         """Advance to the next player's turn.
-        Record the new turn’s starting face-up count and increment the player's turn counter."""
+        Record the new turn’s starting face-up count and increment the player's turn counter.
+        """
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.info_label.config(text=f"{self.current_player()}'s turn.")
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
         self.stop_turn_button.config(state=tk.DISABLED)
         self.update_ui()
+
+    def end_turn(self):
+        """Called when the player clicks the 'End Turn' button.
+        Compute the net change in face-up cards during the turn and update the stats.
+        """
+        current_player = self.current_player()
+        delta = self.count_face_up_cards() - self.turn_start_face_up
+        self.player_changed_cards[current_player] += delta
+        self.next_player()
 
     def update_stats_table(self):
         """Update the stats table (displayed in the right-side frame)."""
