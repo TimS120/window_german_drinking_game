@@ -221,7 +221,7 @@ class WindowGame:
             if opt[0] == "in-between":
                 self.ask_in_between(r, c, opt[2][0], opt[2][1])
             elif opt[0] == "higher-lower":
-                self.ask_higher_lower(r, c, opt[2])
+                self.ask_higher_same_lower(r, c, opt[2])
             return
         
         # If multiple options are available, let the player choose.
@@ -237,7 +237,7 @@ class WindowGame:
             elif opt[0] == "higher-lower":
                 btn_text = f"Higher/Lower (neighbor at {opt[1]})"
                 def make_callback(o=opt):
-                    return lambda: [self.ask_higher_lower(r, c, o[2]), choose_win.destroy()]
+                    return lambda: [self.ask_higher_same_lower(r, c, o[2]), choose_win.destroy()]
                 tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
 
     def ask_user_to_choose_boundaries(self, r, c, neighbors):
@@ -254,26 +254,32 @@ class WindowGame:
         tk.Button(choose_win, text="Option 1", command=use_first_pair).pack(side=tk.LEFT, padx=5)
         tk.Button(choose_win, text="Option 2", command=use_second_pair).pack(side=tk.RIGHT, padx=5)
 
-    def ask_higher_lower(self, r, c, neighbor):
-        """Open a window to ask for a higher/lower guess."""
+    def ask_higher_same_lower(self, r, c, neighbor):
+        """Open a window to ask for a higher, same, or lower guess."""
         guess_win = tk.Toplevel(self.root)
-        guess_win.title("Guess Higher or Lower")
-        tk.Label(guess_win, text="Is the selected card Higher or Lower than neighbor?").pack()
+        guess_win.title("Guess Higher, Same, or Lower")
+        tk.Label(guess_win, text="Is the selected card Higher, Same, or Lower than the neighbor?").pack()
         def guess_higher():
-            self.resolve_higher_lower(r, c, neighbor, "higher")
+            self.resolve_higher_same_lower(r, c, neighbor, "higher")
+            guess_win.destroy()
+        def guess_same():
+            self.resolve_higher_same_lower(r, c, neighbor, "same")
             guess_win.destroy()
         def guess_lower():
-            self.resolve_higher_lower(r, c, neighbor, "lower")
+            self.resolve_higher_same_lower(r, c, neighbor, "lower")
             guess_win.destroy()
-        tk.Button(guess_win, text="Higher", command=guess_higher).pack(side=tk.LEFT, padx=10)
-        tk.Button(guess_win, text="Lower", command=guess_lower).pack(side=tk.RIGHT, padx=10)
+        tk.Button(guess_win, text="Higher", command=guess_higher).pack(side=tk.LEFT, padx=5)
+        tk.Button(guess_win, text="Same", command=guess_same).pack(side=tk.LEFT, padx=5)
+        tk.Button(guess_win, text="Lower", command=guess_lower).pack(side=tk.RIGHT, padx=5)
 
-    def resolve_higher_lower(self, r, c, neighbor, guess):
+    def resolve_higher_same_lower(self, r, c, neighbor, guess):
         card_id = self.card_grid[r][c]
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
         neighbor_rank = get_rank_index(neighbor_id)
-        if (guess == "higher" and card_rank > neighbor_rank) or (guess == "lower" and card_rank < neighbor_rank):
+        if ((guess == "higher" and card_rank > neighbor_rank) or
+            (guess == "lower" and card_rank < neighbor_rank) or
+            (guess == "same" and card_rank == neighbor_rank)):
             self.finish_guess(r, c, True)
         else:
             self.finish_guess(r, c, False)

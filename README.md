@@ -16,7 +16,7 @@ This project's purpose is the:
 
 ### Gameplay
 1. **Initial/ Handle Rule**:  
-   - At the start of the game and whenever the handle is removed, the only valid move is to select the card that is adjacent to the handle (i.e. the card adjoining the handle’s position). The player must guess the face-down card **adjacent** to the handle (higher or lower than the handle’s rank).
+   - At the start of the game and whenever the handle is removed, the only valid move is to select the card adjacent to the handle. The player must guess if that face‑down card is higher, same, or lower than the handle’s rank.
 2. **In-Between Guesses**:  
    - If a face-down card is **between two face-up cards**, the guess is whether its rank is *in between* or *outside* those two ranks (ties with boundary ranks count as *in between*).  
 3. **Multiple Boundaries**:  
