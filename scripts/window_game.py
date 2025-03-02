@@ -23,6 +23,27 @@ CORNER_POSITIONS = [(0, 0), (0, 4), (4, 0), (4, 4)]
 # Handle (also face-up):
 HANDLE_POSITION  = (2, 5)
 
+DEVELOPMENT_MODE = True
+
+
+def get_player_names(root):
+    """Prompt the user to enter player names (comma separated)."""
+    player_names = []
+    def submit():
+        names = entry.get()
+        if names.strip() != "":
+            player_names.extend([name.strip() for name in names.split(",") if name.strip()])
+        top.destroy()
+    top = tk.Toplevel(root)
+    top.title("Player Setup")
+    tk.Label(top, text="Enter player names (comma separated):").pack(padx=10, pady=10)
+    entry = tk.Entry(top, width=40)
+    entry.pack(padx=10, pady=10)
+    tk.Button(top, text="Submit", command=submit).pack(padx=10, pady=10)
+    top.grab_set()
+    root.wait_window(top)
+    return player_names
+
 def card_id_to_label(card_id):
     """Convert card_id to a string like '8.E' or 'K.S'."""
     rank_index = card_id // 4
@@ -481,7 +502,15 @@ class WindowGame:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    # Example: three players
-    players = ["Alice", "Bob", "Charlie"]
+    # If not in development mode, ask the user for player names.
+    if DEVELOPMENT_MODE:
+        players = ["Alice", "Bob", "Charlie"]
+    else:
+        # Hide main window until players are set.
+        root.withdraw()
+        players = get_player_names(root)
+        if not players:
+            players = ["Player1"]
+        root.deiconify()
     game = WindowGame(root, players)
     root.mainloop()
