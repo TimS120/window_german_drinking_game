@@ -39,3 +39,4 @@ This project's purpose is the:
 ### Additional Notes
 - Only **ranks** matter (6–10, U, O, K, A); suits/colors are irrelevant.  
 - “In between” includes matching the boundary ranks.
+- If a face‑down card touches face‑up cards in different configurations—such as having a vertical pair (north and south) and a single horizontal neighbor (east)—the player may choose between using an “in‑between/outside” guess based on the vertical pair or a “higher/lower” guess using the horizontal neighbor.

@@ -174,24 +174,71 @@ class WindowGame:
         """Handle clicking on a face-down card."""
         if self.face_up[r][c]:
             return
-        # Enforce adjacent-to-handle rule if required.
-        if self.must_select_adjacent_to_handle:
-            if (r, c) not in adjacent_positions(HANDLE_POSITION):
-                return
-        # When a move is initiated, disable the "End Turn" button.
-        self.stop_turn_button.config(state=tk.DISABLED)
-        # Identify face-up neighbors.
-        neighbors = [(nr, nc) for (nr, nc) in adjacent_positions((r, c)) if self.face_up[nr][nc]]
-        if len(neighbors) == 1:
-            self.ask_higher_lower(r, c, neighbors[0])
-        elif len(neighbors) == 2:
-            (n1r, n1c), (n2r, n2c) = neighbors
-            if n1r == n2r or n1c == n2c:
-                self.ask_in_between(r, c, neighbors[0], neighbors[1])
-            else:
-                self.ask_user_to_choose_boundaries(r, c, neighbors)
-        else:
+        if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
             return
+        self.stop_turn_button.config(state=tk.DISABLED)
+        # Get face-up neighbors with their relative directions.
+        neighbors = []
+        for nr, nc in adjacent_positions((r, c)):
+            if self.face_up[nr][nc]:
+                # Determine cardinal direction
+                if nr == r - 1 and nc == c:
+                    direction = "north"
+                elif nr == r + 1 and nc == c:
+                    direction = "south"
+                elif nr == r and nc == c - 1:
+                    direction = "west"
+                elif nr == r and nc == c + 1:
+                    direction = "east"
+                else:
+                    direction = ""
+                neighbors.append(((nr, nc), direction))
+        
+        # Group options by axis.
+        options = []  # Each option: (guess_type, axis, details)
+        horizontal = [n for n, d in neighbors if d in ("east", "west")]
+        vertical = [n for n, d in neighbors if d in ("north", "south")]
+        
+        if len(horizontal) >= 2:
+            left = min(horizontal, key=lambda x: x[1])
+            right = max(horizontal, key=lambda x: x[1])
+            options.append(("in-between", "horizontal", (left, right)))
+        elif len(horizontal) == 1:
+            # Single horizontal neighbor yields a higher/lower option.
+            options.append(("higher-lower", "horizontal", horizontal[0]))
+        
+        if len(vertical) >= 2:
+            top = min(vertical, key=lambda x: x[0])
+            bottom = max(vertical, key=lambda x: x[0])
+            options.append(("in-between", "vertical", (top, bottom)))
+        elif len(vertical) == 1:
+            options.append(("higher-lower", "vertical", vertical[0]))
+        
+        if not options:
+            return
+        if len(options) == 1:
+            opt = options[0]
+            if opt[0] == "in-between":
+                self.ask_in_between(r, c, opt[2][0], opt[2][1])
+            elif opt[0] == "higher-lower":
+                self.ask_higher_lower(r, c, opt[2])
+            return
+        
+        # If multiple options are available, let the player choose.
+        choose_win = tk.Toplevel(self.root)
+        choose_win.title("Choose Guess Option")
+        tk.Label(choose_win, text="Select a guessing option:").pack(padx=5, pady=5)
+        for opt in options:
+            if opt[0] == "in-between":
+                btn_text = f"In-between ({opt[1]} boundaries)"
+                def make_callback(o=opt):
+                    return lambda: [self.ask_in_between(r, c, o[2][0], o[2][1]), choose_win.destroy()]
+                tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
+            elif opt[0] == "higher-lower":
+                btn_text = f"Higher/Lower (neighbor at {opt[1]})"
+                def make_callback(o=opt):
+                    return lambda: [self.ask_higher_lower(r, c, o[2]), choose_win.destroy()]
+                tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
 
     def ask_user_to_choose_boundaries(self, r, c, neighbors):
         """Ask the user to choose boundaries if two valid options exist."""
@@ -426,9 +473,6 @@ class WindowGame:
         self.info_label.config(text=f"{self.current_player()}'s turn.")
         self.update_stats_table()
 
-# -------------------------------------------------------
-# MAIN
-# -------------------------------------------------------
 if __name__ == "__main__":
     root = tk.Tk()
     # Example: three players
