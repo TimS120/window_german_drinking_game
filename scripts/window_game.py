@@ -412,10 +412,9 @@ class WindowGame:
             self.confirm_button.pack(side=tk.RIGHT, padx=5)
 
     def confirm_removals(self):
-        """After confirmation, remove the marked cards and add them back to the deck.
-        
-        Then redeal empty spots and highlight new cards with a green border.
-        Also, update the valid-move flag based on whether the handle was removed.
+        """After confirmation, remove the marked cards, add them back to the deck,
+        and immediately redeal empty spots.
+        Update the valid move flag and allow the game to continue.
         """
         # Remove red border from the frames.
         for pos in self.pending_removals:
@@ -440,31 +439,13 @@ class WindowGame:
         self.confirm_button.destroy()
         self.confirm_button = None
         random.shuffle(self.deck)
-        # Redeal empty spots and capture positions of new cards.
-        new_cards = self.redeal_spots()
-        self.pending_new_cards = new_cards
-        # Highlight new cards with green border.
-        for pos in self.pending_new_cards:
-            rr, cc = pos
-            if self.button_frames[rr][cc]:
-                self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="green")
-        self.update_ui()
-        self.info_label.config(text="New cards dealt. Click 'Confirm New Cards' to continue.")
-        self.confirm_button = tk.Button(self.frame_bottom, text="Confirm New Cards", command=self.confirm_new_cards)
-        self.confirm_button.pack(side=tk.RIGHT, padx=5)
-
-    def confirm_new_cards(self):
-        """Remove the green border from the new cards and allow the game to continue."""
-        for pos in self.pending_new_cards:
-            rr, cc = pos
-            if self.button_frames[rr][cc]:
-                self.button_frames[rr][cc].config(highlightthickness=0)
-        self.confirm_button.destroy()
-        self.confirm_button = None
-        self.info_label.config(text=f"Wrong guess! {self.current_player()} drinks {self.pending_penalty}. {self.current_player()} goes again.")
-        self.pending_removals = set()
+        # Redeal empty spots
+        self.redeal_spots()
+        # Clear any new cards flags to allow grey border highlighting.
         self.pending_new_cards = []
+        self.pending_removals = set()
         self.update_ui()
+        self.info_label.config(text=f"Wrong guess! {self.current_player()} drinks {self.pending_penalty}. {self.current_player()} goes again.")
 
     def disable_card_buttons(self):
         """Disable all card buttons (used during confirmation stages)."""
