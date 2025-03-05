@@ -5,6 +5,8 @@ import os
 import cv2
 from tkinter import PhotoImage
 from PIL import Image, ImageTk
+
+import pandas as pd
 # -------------------------------------------------------
 # CONSTANTS & DATA STRUCTURES
 # -------------------------------------------------------
@@ -140,6 +142,9 @@ def adjacent_positions(pos):
 # -------------------------------------------------------
 class WindowGame:
     def __init__(self, root, players):
+
+        self.turn_number = 1
+
         self.root = root
         self.root.title("Window Drinking Game")
         global rueckseite_bild_tk, karten_bilder_tk
@@ -639,16 +644,85 @@ class WindowGame:
                              borderwidth=1, relief="solid", padx=5, pady=2)
             label.grid(row=sum_row, column=col, sticky="nsew")
 
+
+
     def update_ui(self):
         """Update the grid buttons and info label, then refresh the stats table.
+        Additionally, generate an Excel file after every card flip."""
         
-        Additionally, set a grey border on selectable (clickable) cards:
-        - A card is selectable if it is face-down and either:
-          * When the 'handle rule' applies, it is adjacent to the handle.
-          * Otherwise, it has at least one face-up adjoining card.
-        Cards that are face-up or not selectable do not get a grey border.
-        Note: If a card is marked for removal (red) or is new (green), its border is not changed.
-        """
+        # Step 1: Sammeln der relevanten Daten
+        flipped_cards = []
+        covered_cards = []
+        unused_cards = []
+        selectable_cards = []
+        
+        for r in range(len(WINDOW_LAYOUT)):
+            for c in range(len(WINDOW_LAYOUT[r])):
+                if WINDOW_LAYOUT[r][c]:
+                    card_id = self.card_grid[r][c]
+                    if card_id is not None:
+                        card_name = card_id_to_label(card_id)
+                        
+                        # Umdrehte Karten und deren Position speichern
+                        if self.face_up[r][c]:
+                            flipped_cards.append((card_name, (r, c)))
+                        else:
+                            covered_cards.append((card_name, (r, c)))
+                        
+                    # Karten im Stapel (nicht im Spiel) speichern
+                    if (r, c) not in self.card_grid:
+                        unused_cards.append(f"Card at ({r}, {c})")
+                    
+                    # Karten, die als Option zum Umdrehen verfügbar sind
+                    if not self.face_up[r][c]:
+                        # Überprüfe, ob sie auswählbar sind
+                        if self.must_select_adjacent_to_handle:
+                            selectable = (r, c) in adjacent_positions(HANDLE_POSITION)
+                        else:
+                            selectable = any(self.face_up[nr][nc] for nr, nc in adjacent_positions((r, c)))
+                        if selectable:
+                            selectable_cards.append((card_name, (r, c)))
+        
+        # Filter: Entfernen von None-Werten aus den Listen
+        flipped_cards = [(card_name, pos) for card_name, pos in flipped_cards if card_name and pos]
+        covered_cards = [(card_name, pos) for card_name, pos in covered_cards if card_name and pos]
+        unused_cards = [card for card in unused_cards if card is not None]
+        selectable_cards = [(card_name, pos) for card_name, pos in selectable_cards if card_name and pos]
+        
+        # Schritt 2: Auffüllen der Listen auf gleiche Länge
+        max_length = max(len(flipped_cards), len(covered_cards), len(unused_cards), len(selectable_cards))
+
+        # Auffüllen der Listen mit None, um gleiche Länge zu erreichen
+        flipped_cards += [(None, None)] * (max_length - len(flipped_cards))
+        covered_cards += [(None, None)] * (max_length - len(covered_cards))
+        unused_cards += [None] * (max_length - len(unused_cards))
+        selectable_cards += [(None, None)] * (max_length - len(selectable_cards))
+
+        # Schritt 3: Erstelle die Excel-Daten
+        data = {
+            "Flipped Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in flipped_cards],
+            "Covered Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in covered_cards],
+            "Unused Cards": unused_cards,
+            "Selectable Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in selectable_cards],
+        }
+
+        # Erstelle einen DataFrame
+        df = pd.DataFrame(data)
+
+        print(df)
+
+        # Schritt 4: Speichern der Excel-Datei
+        file_name = f"game_state_{self.turn_number}.xlsx"  # Beispiel: game_state_1.xlsx
+        df.to_excel(file_name, index=False)
+        print(f"Excel file saved as {file_name}")
+        
+        # Der Rest des Codes für das Aktualisieren der UI...
+        self.info_label.config(text=f"{self.current_player()}'s turn.")
+        self.update_stats_table()
+
+        self.turn_number += 1
+
+        # Update der Buttons und der Auswahl
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -663,20 +737,18 @@ class WindowGame:
                             self.buttons[r][c].config(image=rueckseite_bild_tk, text="", state=tk.NORMAL)
                     else:
                         self.buttons[r][c].config(text=" ", state=tk.DISABLED)
-        self.info_label.config(text=f"{self.current_player()}'s turn.")
-        self.update_stats_table()
-        # Set grey border on selectable cards (if not already marked for removal/new cards)
+        
+        # Setze graue Ränder für auswählbare Karten
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
                     container = self.button_frames[r][c]
-                    # Skip if card is marked for removal or is new (red/green border is active)
                     if (r, c) in self.pending_removals or (r, c) in self.pending_new_cards:
                         continue
                     if self.face_up[r][c]:
                         container.config(highlightthickness=0)
                     else:
-                        # Determine if the card is selectable.
+                        # Bestimmen, ob die Karte auswählbar ist
                         if self.must_select_adjacent_to_handle:
                             selectable = (r, c) in adjacent_positions(HANDLE_POSITION)
                         else:
@@ -685,6 +757,7 @@ class WindowGame:
                             container.config(highlightthickness=3, highlightbackground="grey")
                         else:
                             container.config(highlightthickness=0)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
