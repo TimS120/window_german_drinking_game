@@ -39,4 +39,5 @@ This project's purpose is the:
 ### Additional Notes
 - Only **ranks** matter (6–10, U, O, K, A); suits/colors are irrelevant.  
 - “In between” includes matching the boundary ranks.
-- If a face‑down card touches face‑up cards in different configurations—such as having a vertical pair (north and south) and a single horizontal neighbor (east)—the player may choose between using an “in‑between/outside” guess based on the vertical pair or a “higher/lower” guess using the horizontal neighbor.
+- If a face‑down card touches face‑up cards in more than one configuration (for example, one horizontal neighbor and two vertical neighbors), then if an in‑between option is available (i.e. from a pair of vertical or horizontal neighbors), it must be used. The player is not allowed to choose a higher/same/lower guess in such cases; they must make the in‑between/outside guess based on the available pair.
+- “Around the corner” (mixing a horizontal card with a vertical card) is not allowed.

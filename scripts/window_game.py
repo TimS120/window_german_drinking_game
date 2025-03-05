@@ -243,7 +243,7 @@ class WindowGame:
         elif len(horizontal) == 1:
             # Single horizontal neighbor yields a higher/lower option.
             options.append(("higher-lower", "horizontal", horizontal[0]))
-        
+
         if len(vertical) >= 2:
             top = min(vertical, key=lambda x: x[0])
             bottom = max(vertical, key=lambda x: x[0])
@@ -251,6 +251,11 @@ class WindowGame:
         elif len(vertical) == 1:
             options.append(("higher-lower", "vertical", vertical[0]))
         
+        # Force in-between guess when available: if any option is "in-between", ignore "higher-lower" options.
+        in_between_options = [opt for opt in options if opt[0] == "in-between"]
+        if in_between_options:
+            options = in_between_options
+
         if not options:
             return
         if len(options) == 1:
