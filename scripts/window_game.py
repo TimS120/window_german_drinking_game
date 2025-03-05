@@ -374,7 +374,7 @@ class WindowGame:
         
         Correct guess: reveal the card, update statistics, and allow the player to end turn.
         Wrong guess: reveal the guessed card so the player can see it, then mark the card
-        and connected open cards for removal with a red border.
+        and connected open cards for removal with a red border and prompt confirmation via a pop-up.
         """
         current_player = self.current_player()
         if is_correct:
@@ -408,8 +408,19 @@ class WindowGame:
                 if self.button_frames[rr][cc]:
                     self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="red")
             self.disable_card_buttons()
-            self.confirm_button = tk.Button(self.frame_bottom, text="Confirm Removal", command=self.confirm_removals)
-            self.confirm_button.pack(side=tk.RIGHT, padx=5)
+            # Create a pop-up window for confirmation that includes the penalty info.
+            self.confirm_window = tk.Toplevel(self.root)
+            self.confirm_window.title("Confirm Removal")
+            tk.Label(
+                self.confirm_window,
+                text=f"Wrong guess! {self.current_player()} must drink {penalty} drink(s). Confirm removal of marked cards."
+            ).pack(padx=10, pady=10)
+            self.confirm_button = tk.Button(
+                self.confirm_window,
+                text="Confirm Removal",
+                command=self.confirm_removals
+            )
+            self.confirm_button.pack(padx=10, pady=10)
 
     def confirm_removals(self):
         """After confirmation, remove the marked cards, add them back to the deck,
@@ -435,8 +446,9 @@ class WindowGame:
             self.must_select_adjacent_to_handle = True
         else:
             self.must_select_adjacent_to_handle = False
-
-        self.confirm_button.destroy()
+        if hasattr(self, 'confirm_window') and self.confirm_window is not None:
+            self.confirm_window.destroy()
+            self.confirm_window = None
         self.confirm_button = None
         random.shuffle(self.deck)
         # Redeal empty spots
@@ -445,7 +457,8 @@ class WindowGame:
         self.pending_new_cards = []
         self.pending_removals = set()
         self.update_ui()
-        self.info_label.config(text=f"Wrong guess! {self.current_player()} drinks {self.pending_penalty}. {self.current_player()} goes again.")
+        # Update the main info label to only indicate that the current player goes again.
+        self.info_label.config(text=f"{self.current_player()} goes again.")
 
     def disable_card_buttons(self):
         """Disable all card buttons (used during confirmation stages)."""
