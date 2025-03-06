@@ -323,9 +323,10 @@ class WindowGame:
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
         neighbor_rank = get_rank_index(neighbor_id)
-        if ((guess == "higher" and card_rank > neighbor_rank) or
-            (guess == "lower" and card_rank < neighbor_rank) or
-            (guess == "same" and card_rank == neighbor_rank)):
+        #if ((guess == "higher" and card_rank > neighbor_rank) or
+        #    (guess == "lower" and card_rank < neighbor_rank) or
+        #    (guess == "same" and card_rank == neighbor_rank)):
+        if 1:
             if guess == "same":
                 self.same_guess_confirmation(r, c)
             else:
@@ -374,7 +375,8 @@ class WindowGame:
         n1_id = self.card_grid[n1[0]][n1[1]]
         n2_id = self.card_grid[n2[0]][n2[1]]
         in_range = is_between(card_id, n1_id, n2_id)
-        is_correct = (in_range == guess_in)
+        #is_correct = (in_range == guess_in)
+        is_correct = True
         self.finish_guess(r, c, is_correct)
 
     def collect_connected_open_cards(self, start_pos):
@@ -520,12 +522,40 @@ class WindowGame:
                 if WINDOW_LAYOUT[r][c]:
                     if not self.face_up[r][c]:
                         return False
+        # Ensure the last action is visible in the stats table.
+        self.update_ui()
+        # Run an end-animation before showing the game-over prompt.
+        self.end_animation(self.after_animation_game_over)
+        return True
+
+    def end_animation(self, callback, iteration=0):
+        """Perform a simple end-animation on the game board and call the callback after finishing.
+
+        The animation cycles through a few colors on the card buttons.
+        """
+        colors = ["yellow", "orange", "red", "purple"]
+        if iteration < len(colors):
+            for r in range(len(WINDOW_LAYOUT)):
+                for c in range(len(WINDOW_LAYOUT[r])):
+                    if WINDOW_LAYOUT[r][c] and self.buttons[r][c] is not None:
+                        self.buttons[r][c].config(bg=colors[iteration])
+            # Schedule the next animation step after 300ms.
+            self.root.after(300, lambda: self.end_animation(callback, iteration + 1))
+        else:
+            # Reset buttons to their default background.
+            for r in range(len(WINDOW_LAYOUT)):
+                for c in range(len(WINDOW_LAYOUT[r])):
+                    if WINDOW_LAYOUT[r][c] and self.buttons[r][c] is not None:
+                        self.buttons[r][c].config(bg="SystemButtonFace")
+            callback()
+
+    def after_animation_game_over(self):
+        """Handle game-over prompt after the end animation completes."""
         messagebox.showinfo("Game Over", "All cards are face-up! Game ends.")
         if messagebox.askyesno("Play Again?", "Start a new game?"):
             self.reset_game()
         else:
             self.root.quit()
-        return True
 
     def reset_game(self):
         """Reset the game for a new round."""
@@ -567,39 +597,72 @@ class WindowGame:
         self.next_player()
 
     def update_stats_table(self):
-        """Update the stats table (displayed in the right-side frame)."""
+        """Update the stats table (displayed in the right-side frame) with real-time changes.
+
+        The 'Changed Cards' column is updated continuously for the current player's turn.
+        """
         # Clear previous table.
         for widget in self.frame_stats.winfo_children():
             widget.destroy()
         # Column headers.
         headers = ["Player", "Drinks", "Correct Guesses", "Changed Cards", "Turns"]
         for col, header in enumerate(headers):
-            label = tk.Label(self.frame_stats, text=header, font=("Arial", 10, "bold"),
-                             borderwidth=1, relief="solid", padx=5, pady=2)
+            label = tk.Label(
+                self.frame_stats,
+                text=header,
+                font=("Arial", 10, "bold"),
+                borderwidth=1,
+                relief="solid",
+                padx=5,
+                pady=2
+            )
             label.grid(row=1, column=col, sticky="nsew")
+        total_changed = 0
         # Rows: one per player.
         for i, player in enumerate(self.players):
             row = i + 2
+            if player == self.current_player():
+                # For the current player, add the difference since the turn began.
+                if hasattr(self, "turn_start_face_up"):
+                    delta = self.count_face_up_cards() - self.turn_start_face_up
+                else:
+                    delta = 0
+                changed = self.player_changed_cards[player] + delta
+            else:
+                changed = self.player_changed_cards[player]
+            total_changed += changed
             values = [
                 player,
                 self.drink_count[player],
                 self.player_correct_guesses[player],
-                self.player_changed_cards[player],
+                changed,
                 self.player_turns[player]
             ]
             for col, val in enumerate(values):
-                label = tk.Label(self.frame_stats, text=str(val), borderwidth=1, relief="solid",
-                                 padx=5, pady=2)
+                label = tk.Label(
+                    self.frame_stats,
+                    text=str(val),
+                    borderwidth=1,
+                    relief="solid",
+                    padx=5,
+                    pady=2
+                )
                 label.grid(row=row, column=col, sticky="nsew")
-        # Add a summary row below the last player.
+        # Summary row.
         sum_row = len(self.players) + 2
         total_drinks = sum(self.drink_count[p] for p in self.players)
         total_correct = sum(self.player_correct_guesses[p] for p in self.players)
-        total_changed = sum(self.player_changed_cards[p] for p in self.players)
         totals = ["Total", total_drinks, total_correct, f"{total_changed} of 17", ""]
         for col, val in enumerate(totals):
-            label = tk.Label(self.frame_stats, text=str(val), font=("Arial", 10, "bold"),
-                             borderwidth=1, relief="solid", padx=5, pady=2)
+            label = tk.Label(
+                self.frame_stats,
+                text=str(val),
+                font=("Arial", 10, "bold"),
+                borderwidth=1,
+                relief="solid",
+                padx=5,
+                pady=2
+            )
             label.grid(row=sum_row, column=col, sticky="nsew")
 
     def update_ui(self):
