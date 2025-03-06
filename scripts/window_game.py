@@ -172,7 +172,10 @@ class WindowGame:
         # Record the starting count of face-up cards and count the turn.
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
-    
+
+        # If a correct guess was made, turn can be ended.
+        self.turn_can_end = False
+
     def init_stats(self):
         self.players = players
         self.current_player_idx = 0
@@ -216,7 +219,9 @@ class WindowGame:
             return
         if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
             return
-        self.stop_turn_button.config(state=tk.DISABLED)
+        # Only disable the End Turn button if turn-end is not allowed.
+        if not self.turn_can_end:
+            self.stop_turn_button.config(state=tk.DISABLED)
         # Get face-up neighbors with their relative directions.
         neighbors = []
         for nr, nc in adjacent_positions((r, c)):
@@ -244,7 +249,6 @@ class WindowGame:
             right = max(horizontal, key=lambda x: x[1])
             options.append(("in-between", "horizontal", (left, right)))
         elif len(horizontal) == 1:
-            # Single horizontal neighbor yields a higher/lower option.
             options.append(("higher-lower", "horizontal", horizontal[0]))
 
         if len(vertical) >= 2:
@@ -289,6 +293,7 @@ class WindowGame:
         """Ask the user to choose boundaries if two valid options exist."""
         choose_win = tk.Toplevel(self.root)
         choose_win.title("Choose Boundaries")
+        choose_win.protocol("WM_DELETE_WINDOW", choose_win.destroy)
         tk.Label(choose_win, text="Select which two neighbors to use for in-between guess:").pack()
         def use_first_pair():
             self.ask_in_between(r, c, neighbors[0], neighbors[1])
@@ -303,6 +308,7 @@ class WindowGame:
         """Open a window to ask for a higher, same, or lower guess."""
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess Higher, Same, or Lower")
+        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
         tk.Label(guess_win, text="Is the selected card Higher, Same, or Lower than the neighbor?").pack()
         def guess_higher():
             self.resolve_higher_same_lower(r, c, neighbor, "higher")
@@ -326,10 +332,9 @@ class WindowGame:
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
         neighbor_rank = get_rank_index(neighbor_id)
-        #if ((guess == "higher" and card_rank > neighbor_rank) or
-        #    (guess == "lower" and card_rank < neighbor_rank) or
-        #    (guess == "same" and card_rank == neighbor_rank)):
-        if 1:
+        if ((guess == "higher" and card_rank > neighbor_rank) or
+            (guess == "lower" and card_rank < neighbor_rank) or
+            (guess == "same" and card_rank == neighbor_rank)):
             if guess == "same":
                 self.same_guess_confirmation(r, c)
             else:
@@ -362,6 +367,7 @@ class WindowGame:
         """Open a window to ask for an in-between/outside guess."""
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess In-Between or Outside")
+        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
         tk.Label(guess_win, text="Is the card In-Between or Outside these two?").pack()
         def guess_in():
             self.resolve_in_between(r, c, n1, n2, True)
@@ -378,8 +384,7 @@ class WindowGame:
         n1_id = self.card_grid[n1[0]][n1[1]]
         n2_id = self.card_grid[n2[0]][n2[1]]
         in_range = is_between(card_id, n1_id, n2_id)
-        #is_correct = (in_range == guess_in)
-        is_correct = True
+        is_correct = (in_range == guess_in)
         self.finish_guess(r, c, is_correct)
 
     def collect_connected_open_cards(self, start_pos):
@@ -414,6 +419,7 @@ class WindowGame:
             self.face_up[r][c] = True
             self.player_correct_guesses[current_player] += 1
             self.must_select_adjacent_to_handle = False
+            self.turn_can_end = True  # Allow turn to end until a wrong guess.
             self.update_ui()
             # Enable the "End Turn" button so the player may stop his turn.
             self.stop_turn_button.config(state=tk.NORMAL)
@@ -453,6 +459,8 @@ class WindowGame:
                 command=self.confirm_removals
             )
             self.confirm_button.pack(padx=10, pady=10)
+            # Reset turn end flag on a wrong guess.
+            self.turn_can_end = False
 
     def confirm_removals(self):
         """After confirmation, remove the marked cards, add them back to the deck,
@@ -574,6 +582,8 @@ class WindowGame:
         self.deal_initial_cards()
         self.must_select_adjacent_to_handle = True
         self.stop_turn_button.config(state=tk.DISABLED)
+        # Reset turn end flag.
+        self.turn_can_end = False
         # Update the starting face-up count BEFORE refreshing the UI.
         self.turn_start_face_up = self.count_face_up_cards()
         self.update_ui()
@@ -591,6 +601,8 @@ class WindowGame:
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
         self.stop_turn_button.config(state=tk.DISABLED)
+        # Reset turn end flag at start of turn.
+        self.turn_can_end = False
         self.update_ui()
 
     def end_turn(self):
