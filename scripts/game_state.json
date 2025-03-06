@@ -1,0 +1,452 @@
+[
+    {
+        "Turn": 1,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Ass at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Blatt_Unter at (3, 4)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Blatt_Koenig at (2, 4)"
+        ]
+    },
+    {
+        "Turn": 2,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Blatt_Unter at (3, 4)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Blatt_Acht at (1, 4)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 3,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Blatt_Acht at (1, 4)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 4,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Schelln_Neun at (2, 3)",
+            "Blatt_Ass at (3, 0)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 5,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Neun at (2, 3)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 6,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Schelln_Zehn at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Schelln_Neun at (2, 3)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 7,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Schelln_Koenig at (1, 0)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 8,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Schelln_Koenig at (1, 0)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Zehn at (1, 2)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 9,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Schelln_Koenig at (1, 0)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Schelln_Ass at (4, 1)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Zehn at (1, 2)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Eichel_Ass at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 10,
+        "Flipped Cards": [
+            "Eichel_Acht at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Schelln_Koenig at (1, 0)",
+            "Blatt_Acht at (1, 4)",
+            "Eichel_Sechs at (2, 0)",
+            "Schelln_Zehn at (2, 1)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Ass at (3, 0)",
+            "Blatt_Unter at (3, 4)",
+            "Herz_Sieben at (4, 0)",
+            "Schelln_Ass at (4, 1)",
+            "Eichel_Ass at (4, 2)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Zehn at (1, 2)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Herz_Acht at (3, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 11,
+        "Flipped Cards": [
+            "Herz_Unter at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Unter at (3, 4)",
+            "Schelln_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Eichel_Sechs at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Eichel_Neun at (2, 0)",
+            "Herz_Sechs at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Eichel_Ober at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Herz_Neun at (4, 1)",
+            "Herz_Sieben at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Eichel_Sechs at (1, 0)",
+            "Schelln_Neun at (2, 3)",
+            "Eichel_Ober at (3, 0)",
+            "Herz_Neun at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    },
+    {
+        "Turn": 12,
+        "Flipped Cards": [
+            "Herz_Unter at (0, 0)",
+            "Schelln_Unter at (0, 4)",
+            "Blatt_Acht at (1, 4)",
+            "Blatt_Koenig at (2, 4)",
+            "Blatt_Sieben at (2, 5)",
+            "Blatt_Unter at (3, 4)",
+            "Schelln_Sieben at (4, 0)",
+            "Blatt_Ober at (4, 4)"
+        ],
+        "Covered Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Acht at (0, 2)",
+            "Schelln_Sechs at (0, 3)",
+            "Eichel_Sechs at (1, 0)",
+            "Herz_Zehn at (1, 2)",
+            "Eichel_Neun at (2, 0)",
+            "Herz_Sechs at (2, 1)",
+            "Herz_Ober at (2, 2)",
+            "Schelln_Neun at (2, 3)",
+            "Eichel_Ober at (3, 0)",
+            "Herz_Acht at (3, 2)",
+            "Herz_Neun at (4, 1)",
+            "Herz_Sieben at (4, 2)",
+            "Eichel_Zehn at (4, 3)"
+        ],
+        "Selectable Cards": [
+            "Eichel_Unter at (0, 1)",
+            "Schelln_Sechs at (0, 3)",
+            "Eichel_Sechs at (1, 0)",
+            "Schelln_Neun at (2, 3)",
+            "Eichel_Ober at (3, 0)",
+            "Herz_Neun at (4, 1)",
+            "Eichel_Zehn at (4, 3)"
+        ]
+    }
+]

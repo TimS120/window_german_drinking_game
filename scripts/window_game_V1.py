@@ -2,14 +2,18 @@ import random
 import tkinter as tk
 from tkinter import messagebox
 import os
-import cv2
+import cv2 # type: ignore
 from tkinter import PhotoImage
-from PIL import Image, ImageTk
-
+from PIL import Image, ImageTk # type: ignore
+import json
+from datetime import datetime
 import pandas as pd
 # -------------------------------------------------------
 # CONSTANTS & DATA STRUCTURES
 # -------------------------------------------------------
+
+
+
 
 # Pfad zum Kartenordner
 karten_ordner = "Schafkopfkarten"
@@ -107,6 +111,11 @@ def card_id_to_label(card_id):
     suit_index = card_id // 4
     #print(f"{farben[rank_index]}_{werte[suit_index]}")
     return f"{farben[rank_index]}_{werte[suit_index]}"
+
+def card_id_to_value(card_id):
+    suit_index = card_id // 4
+    value_mapping = {"Sechs": 6, "Sieben": 7, "Acht": 8, "Neun": 9, "Zehn": 10, "Unter": 11, "Ober": 12, "Koenig": 13, "Ass": 14}
+    return value_mapping[werte[suit_index]]
 
 def create_deck():
     """Create a full list of card IDs [0..NUM_CARDS-1]."""
@@ -650,24 +659,39 @@ class WindowGame:
         """Update the grid buttons and info label, then refresh the stats table.
         Additionally, generate an Excel file after every card flip."""
         
-        # Step 1: Sammeln der relevanten Daten
+        # Erstelle den Dateinamen mit Zeitstempel
+        folder_name = "json_files"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        file_name = os.path.join(folder_name, f"game_state_{timestamp}.json")
+
+        # Relevante Daten sammeln
         flipped_cards = []
         covered_cards = []
         unused_cards = []
         selectable_cards = []
-        
+
+        # Falls die Datei existiert, lade die bisherigen Spielstände
+        game_states = []
+        if os.path.exists(file_name):
+            with open(file_name, "r", encoding="utf-8") as f:
+                try:
+                    game_states = json.load(f)
+                except json.JSONDecodeError:
+                    game_states = []
+
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
                     card_id = self.card_grid[r][c]
                     if card_id is not None:
                         card_name = card_id_to_label(card_id)
-                        
+                        card_value = card_id_to_value(card_id)
+                        print(card_id, card_name, card_value)
                         # Umdrehte Karten und deren Position speichern
                         if self.face_up[r][c]:
-                            flipped_cards.append((card_name, (r, c)))
+                            flipped_cards.append((card_value, (r, c)))
                         else:
-                            covered_cards.append((card_name, (r, c)))
+                            covered_cards.append((card_value, (r, c)))
                         
                     # Karten im Stapel (nicht im Spiel) speichern
                     if (r, c) not in self.card_grid:
@@ -681,40 +705,25 @@ class WindowGame:
                         else:
                             selectable = any(self.face_up[nr][nc] for nr, nc in adjacent_positions((r, c)))
                         if selectable:
-                            selectable_cards.append((card_name, (r, c)))
+                            selectable_cards.append((card_value, (r, c)))
         
-        # Filter: Entfernen von None-Werten aus den Listen
-        flipped_cards = [(card_name, pos) for card_name, pos in flipped_cards if card_name and pos]
-        covered_cards = [(card_name, pos) for card_name, pos in covered_cards if card_name and pos]
-        unused_cards = [card for card in unused_cards if card is not None]
-        selectable_cards = [(card_name, pos) for card_name, pos in selectable_cards if card_name and pos]
-        
-        # Schritt 2: Auffüllen der Listen auf gleiche Länge
-        max_length = max(len(flipped_cards), len(covered_cards), len(unused_cards), len(selectable_cards))
-
-        # Auffüllen der Listen mit None, um gleiche Länge zu erreichen
-        flipped_cards += [(None, None)] * (max_length - len(flipped_cards))
-        covered_cards += [(None, None)] * (max_length - len(covered_cards))
-        unused_cards += [None] * (max_length - len(unused_cards))
-        selectable_cards += [(None, None)] * (max_length - len(selectable_cards))
-
-        # Schritt 3: Erstelle die Excel-Daten
-        data = {
-            "Flipped Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in flipped_cards],
-            "Covered Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in covered_cards],
-            "Unused Cards": unused_cards,
-            "Selectable Cards": [f"{card_name} at {pos}" if card_name else None for card_name, pos in selectable_cards],
+        # Erstelle die JSON-Daten für den aktuellen Spielstand
+        current_game_state = {
+            "Timestamp": timestamp,
+            "Turn": self.turn_number,
+            "Flipped Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in flipped_cards],
+            "Covered Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in covered_cards],
+            "Selectable Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in selectable_cards],
         }
 
-        # Erstelle einen DataFrame
-        df = pd.DataFrame(data)
+        # Füge den neuen Spielstand zur Liste hinzu
+        game_states.append(current_game_state)
 
-        print(df)
+        # Speichere alle Spielstände in die Datei
+        with open(file_name, "w", encoding="utf-8") as f:
+            json.dump(game_states, f, indent=4)
 
-        # Schritt 4: Speichern der Excel-Datei
-        file_name = f"game_state_{self.turn_number}.xlsx"  # Beispiel: game_state_1.xlsx
-        df.to_excel(file_name, index=False)
-        print(f"Excel file saved as {file_name}")
+        print(f"JSON file saved as {file_name} with turn {self.turn_number}")
         
         # Der Rest des Codes für das Aktualisieren der UI...
         self.info_label.config(text=f"{self.current_player()}'s turn.")
