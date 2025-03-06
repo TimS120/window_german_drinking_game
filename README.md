@@ -24,6 +24,7 @@ This project's purpose is the:
    - “Around the corner” (mixing a horizontal card with a vertical card) is not allowed.  
 4. **Correct Guess**:  
    - The card is turned face-up.  
+   - Special rule for 'Same' guesses: If a player correctly guesses "same", all other players must take one swallow.
    - The player may continue guessing another card or pass the turn.  
 5. **Wrong Guess**:  
    - The player drinks a number of times equal to the total number of cards removed.

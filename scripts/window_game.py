@@ -315,7 +315,10 @@ class WindowGame:
         tk.Button(guess_win, text="Lower", command=guess_lower).pack(side=tk.RIGHT, padx=5)
 
     def resolve_higher_same_lower(self, r, c, neighbor, guess):
-        """Resolve a higher/same/lower guess against the neighbor card."""
+        """Resolve a higher/same/lower guess against the neighbor card.
+        
+        For a correct 'same' guess, prompt a pop-up for confirmation that every other player has taken one swallow.
+        """
         card_id = self.card_grid[r][c]
         neighbor_id = self.card_grid[neighbor[0]][neighbor[1]]
         card_rank = get_rank_index(card_id)
@@ -323,9 +326,33 @@ class WindowGame:
         if ((guess == "higher" and card_rank > neighbor_rank) or
             (guess == "lower" and card_rank < neighbor_rank) or
             (guess == "same" and card_rank == neighbor_rank)):
-            self.finish_guess(r, c, True)
+            if guess == "same":
+                self.same_guess_confirmation(r, c)
+            else:
+                self.finish_guess(r, c, True)
         else:
             self.finish_guess(r, c, False)
+
+    def same_guess_confirmation(self, r, c):
+        """Prompt a pop-up to confirm that every other player has taken one swallow 
+        after a correct 'same' guess. Upon confirmation, update drink counts accordingly.
+        """
+        popup = tk.Toplevel(self.root)
+        popup.title("Confirm Swallow Drinking")
+        current_player = self.current_player()
+        msg = (
+            f"Correct 'Same' guess!\n\n"
+            f"All players except {current_player} must take one swallow.\n\n"
+            "Confirm that everyone has taken their swallow."
+        )
+        tk.Label(popup, text=msg, padx=10, pady=10).pack()
+        def confirm():
+            for player in self.players:
+                if player != current_player:
+                    self.drink_count[player] += 1
+            popup.destroy()
+            self.finish_guess(r, c, True)
+        tk.Button(popup, text="Confirm", command=confirm, padx=10, pady=10).pack()
 
     def ask_in_between(self, r, c, n1, n2):
         """Open a window to ask for an in-between/outside guess."""
