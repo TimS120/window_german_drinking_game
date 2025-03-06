@@ -19,7 +19,7 @@ import pandas as pd
 karten_ordner = "Schafkopfkarten"
 rueckseitenordner = 'Rueckseite'
 
-bild_groesse = (70, 120)
+bild_groesse = (150, 85)
 
 # Farben und Werte der Karten
 farben = ["Blatt", "Schelln", "Herz", "Eichel"]
@@ -39,6 +39,13 @@ WINDOW_LAYOUT = [
     [True, True, True, True, True, None]        # Row 4
 ]
 
+
+def adjust_color_balance(img, blue_reduction=-10):
+    b, g, r = cv2.split(img)
+    b = cv2.subtract(b, blue_reduction)  # Blauanteil reduzieren
+    return cv2.merge((b, g, r))
+
+
 # Dictionary zum Speichern der geladenen Bilder
 karten_bilder = {}
 rueckseite_bild = None
@@ -57,7 +64,8 @@ for datei in os.listdir(karten_ordner):
                     bild_pfad = os.path.join(karten_ordner, datei)
                     bild = cv2.imread(bild_pfad)                
                     # Bild auf gewünschte Größe skalieren mit besserer Interpolation
-                    bild = cv2.resize(bild, bild_groesse, interpolation=cv2.INTER_CUBIC)
+                    bild = cv2.resize(bild, bild_groesse, interpolation=cv2.INTER_LANCZOS4)
+                    bild = adjust_color_balance(bild)
                     
                     # Bild unter passendem Variablennamen speichern
                     karten_bilder[name] = bild
@@ -73,7 +81,8 @@ for datei in os.listdir(rueckseitenordner):
             rueckseite_pfad = os.path.join(rueckseitenordner, datei)
             rueckseite_bild = cv2.imread(rueckseite_pfad)  
             # Rückseitenbild auf die gewünschte Größe skalieren mit besserer Interpolation
-            rueckseite_bild = cv2.resize(rueckseite_bild, bild_groesse, interpolation=cv2.INTER_CUBIC)           
+            rueckseite_bild = cv2.resize(rueckseite_bild, bild_groesse, interpolation=cv2.INTER_LANCZOS4)
+            rueckseite_bild = adjust_color_balance(rueckseite_bild)           
             # Rückseitenbild speichern
             karten_bilder["Rueckseite"] = rueckseite_bild
 
@@ -117,6 +126,40 @@ def card_id_to_value(card_id):
     value_mapping = {"Sechs": 6, "Sieben": 7, "Acht": 8, "Neun": 9, "Zehn": 10, "Unter": 11, "Ober": 12, "Koenig": 13, "Ass": 14}
     return value_mapping[werte[suit_index]]
 
+def get_last_flipped_card(turn_number, flipped_cards, previous_flipped):
+    """
+    Bestimmt die zuletzt aufgedeckte Karte für das JSON-Logging.
+
+    - Für Zug 1 wird keine Karte zurückgegeben.
+    - Karten an festen Positionen [(0,0), (0,4), (4,0), (4,4), (2,5)] werden ignoriert.
+    - Bereits früher aufgedeckte Karten werden nicht erneut als "Last Flipped Card" genutzt.
+
+    :param turn_number: Aktuelle Zugnummer
+    :param flipped_cards: Liste der aktuell aufgedeckten Karten [(card_value, (r, c))]
+    :param previous_flipped: Set mit bereits aufgedeckten Karten
+    :return: String mit der zuletzt aufgedeckten Karte oder None
+    """
+    if turn_number == 1:
+        return None  # Kein Eintrag für Zug 1
+    
+    # Ignorierte Startpositionen
+    ignored_positions = {(0, 0), (0, 4), (4, 0), (4, 4), (2, 5)}
+
+    # Filtere Karten heraus, die sich an diesen Positionen befinden oder bereits zuvor aufgedeckt wurden
+    valid_flipped_cards = [
+        (card_value, pos) for card_value, pos in flipped_cards 
+        if pos not in ignored_positions and pos not in previous_flipped
+    ]
+
+    # Falls keine gültige Karte gefunden wurde, None zurückgeben
+    if not valid_flipped_cards:
+        return None
+
+    # Die zuletzt aufgedeckte Karte zurückgeben (die letzte aus der gefilterten Liste)
+    last_card_value, last_card_position = valid_flipped_cards[-1]
+    return f"{last_card_value} at {last_card_position}"
+
+
 def create_deck():
     """Create a full list of card IDs [0..NUM_CARDS-1]."""
     return list(range(NUM_CARDS))
@@ -153,6 +196,9 @@ class WindowGame:
     def __init__(self, root, players):
 
         self.turn_number = 1
+        self.last_guess = None  # Hier wird der letzte Zug gespeichert
+        self.guess_correct = None
+
 
         self.root = root
         self.root.title("Window Drinking Game")
@@ -334,8 +380,10 @@ class WindowGame:
             opt = options[0]
             if opt[0] == "in-between":
                 self.ask_in_between(r, c, opt[2][0], opt[2][1])
+                
             elif opt[0] == "higher-lower":
                 self.ask_higher_same_lower(r, c, opt[2])
+               
             return
         
         # If multiple options are available, let the player choose.
@@ -353,6 +401,9 @@ class WindowGame:
                 def make_callback(o=opt):
                     return lambda: [self.ask_higher_same_lower(r, c, o[2]), choose_win.destroy()]
                 tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
+
+        self.last_clicked_card = (r, c)
+        print(f"Last Clicked Card: {self.last_clicked_card}")  # Debug-Ausgab
 
     def ask_user_to_choose_boundaries(self, r, c, neighbors):
         """Ask the user to choose boundaries if two valid options exist."""
@@ -374,12 +425,15 @@ class WindowGame:
         guess_win.title("Guess Higher, Same, or Lower")
         tk.Label(guess_win, text="Is the selected card Higher, Same, or Lower than the neighbor?").pack()
         def guess_higher():
+            self.last_guess = "Higher"
             self.resolve_higher_same_lower(r, c, neighbor, "higher")
             guess_win.destroy()
         def guess_same():
+            self.last_guess = "Same"
             self.resolve_higher_same_lower(r, c, neighbor, "same")
             guess_win.destroy()
         def guess_lower():
+            self.last_guess = "Lower"
             self.resolve_higher_same_lower(r, c, neighbor, "lower")
             guess_win.destroy()
         tk.Button(guess_win, text="Higher", command=guess_higher).pack(side=tk.LEFT, padx=5)
@@ -405,9 +459,11 @@ class WindowGame:
         guess_win.title("Guess In-Between or Outside")
         tk.Label(guess_win, text="Is the card In-Between or Outside these two?").pack()
         def guess_in():
+            self.last_guess = "In_Between"
             self.resolve_in_between(r, c, n1, n2, True)
             guess_win.destroy()
         def guess_out():
+            self.last_guess = "Outside"
             self.resolve_in_between(r, c, n1, n2, False)
             guess_win.destroy()
         tk.Button(guess_win, text="In-Between", command=guess_in).pack(side=tk.LEFT, padx=10)
@@ -450,6 +506,8 @@ class WindowGame:
         """
         current_player = self.current_player()
         if is_correct:
+            self.guess_correct = 1
+
             # Correct guess: reveal card and update correct-guess counters.
             self.face_up[r][c] = True
             self.player_correct_guesses[current_player] += 1
@@ -461,6 +519,8 @@ class WindowGame:
                 return
             self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
         else:
+            self.guess_correct = 0
+
             # Wrong guess: first, reveal the guessed card so it can be seen.
             self.face_up[r][c] = True
             self.update_ui()
@@ -669,6 +729,7 @@ class WindowGame:
         covered_cards = []
         unused_cards = []
         selectable_cards = []
+        last_flipped_card = None
 
         # Falls die Datei existiert, lade die bisherigen Spielstände
         game_states = []
@@ -679,6 +740,24 @@ class WindowGame:
                 except json.JSONDecodeError:
                     game_states = []
 
+        previous_flipped = set()
+        for state in game_states:
+            for card_entry in state.get("Flipped Cards", []):
+                if card_entry:
+                    #print(card_entry)
+                    card_value, pos_str = card_entry.split(" , Position:")  # Trennt den Wert und die Position
+                    pos_tuple = tuple(map(int, pos_str.strip("()").split(", ")))  # Konvertiert in (r, c)
+                    previous_flipped.add(pos_tuple)
+
+        # Liste für aktuell aufgedeckte Karten
+        flipped_cards = []
+        last_flipped_card = None  # Standardwert
+        last_flipped_card_position = None
+        last_guess = None
+        # Festgelegte Startkarten, die immer offen sind
+        ignored_positions = {(0, 0), (0, 4), (4, 0), (4, 4), (2, 5)}
+
+
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
@@ -686,16 +765,20 @@ class WindowGame:
                     if card_id is not None:
                         card_name = card_id_to_label(card_id)
                         card_value = card_id_to_value(card_id)
-                        print(card_id, card_name, card_value)
-                        # Umdrehte Karten und deren Position speichern
+                        position = (r, c)
+
+                        # Umdrehte Karten speichern
                         if self.face_up[r][c]:
-                            flipped_cards.append((card_value, (r, c)))
+                            flipped_cards.append((card_value, position))
+
+                            # Letzte umgedrehte Karte nur speichern, wenn sie NICHT in ignored_positions ist
+                            if position not in ignored_positions and position not in previous_flipped:
+                                last_flipped_card = card_value
+                                last_flipped_card_position = position
+
                         else:
-                            covered_cards.append((card_value, (r, c)))
-                        
-                    # Karten im Stapel (nicht im Spiel) speichern
-                    if (r, c) not in self.card_grid:
-                        unused_cards.append(f"Card at ({r}, {c})")
+                            covered_cards.append((card_value, position))
+                                
                     
                     # Karten, die als Option zum Umdrehen verfügbar sind
                     if not self.face_up[r][c]:
@@ -711,11 +794,16 @@ class WindowGame:
         current_game_state = {
             "Timestamp": timestamp,
             "Turn": self.turn_number,
-            "Flipped Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in flipped_cards],
-            "Covered Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in covered_cards],
-            "Selectable Cards": [f"{card_value} at {pos}" if card_value else None for card_value, pos in selectable_cards],
+            "Flipped Cards": [f"Card: {card_value} , Position:{pos}" if card_value else None for card_value, pos in flipped_cards],
+            "Covered Cards": [f"Card: {card_value} , Position:{pos}" if card_value else None for card_value, pos in covered_cards],
+            "Selectable Cards": [f"Card: {card_value} , Position:{pos}" if card_value else None for card_value, pos in selectable_cards],
+            "Last Flipped Card": f"Card: {last_flipped_card} , Position:{last_flipped_card_position}",
+            "Last Guess": f"{self.last_guess}",
+            "Guess": f"{self.guess_correct}",
         }
-
+        print(f"Last Flipped Card: {last_flipped_card}")
+        print(f"Last Clicked Card: {self.last_guess}")
+        print(f"Guess: {self.guess_correct}")
         # Füge den neuen Spielstand zur Liste hinzu
         game_states.append(current_game_state)
 
