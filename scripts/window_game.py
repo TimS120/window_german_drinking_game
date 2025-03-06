@@ -88,12 +88,7 @@ class WindowGame:
         self.root.title("Window Drinking Game")
 
         # Players & initial statistics
-        self.players = players
-        self.current_player_idx = 0
-        self.drink_count = {p: 0 for p in players}
-        self.player_correct_guesses = {p: 0 for p in players}
-        self.player_changed_cards = {p: 0 for p in players}
-        self.player_turns = {p: 0 for p in players}
+        self.init_stats()
 
         # Flag to enforce that the move must be on a card adjacent to the handle.
         self.must_select_adjacent_to_handle = True
@@ -177,6 +172,14 @@ class WindowGame:
         # Record the starting count of face-up cards and count the turn.
         self.turn_start_face_up = self.count_face_up_cards()
         self.player_turns[self.current_player()] += 1
+    
+    def init_stats(self):
+        self.players = players
+        self.current_player_idx = 0
+        self.drink_count = {p: 0 for p in players}
+        self.player_correct_guesses = {p: 0 for p in players}
+        self.player_changed_cards = {p: 0 for p in players}
+        self.player_turns = {p: 0 for p in players}
 
     def deal_initial_cards(self):
         """Deal cards from the deck into the layout.
@@ -558,7 +561,9 @@ class WindowGame:
             self.root.quit()
 
     def reset_game(self):
-        """Reset the game for a new round."""
+        """Reset the game for a new round, including all player statistics."""
+        self.init_stats()
+
         self.deck = create_deck()
         random.shuffle(self.deck)
         for r in range(len(WINDOW_LAYOUT)):
@@ -569,8 +574,9 @@ class WindowGame:
         self.deal_initial_cards()
         self.must_select_adjacent_to_handle = True
         self.stop_turn_button.config(state=tk.DISABLED)
-        self.update_ui()
+        # Update the starting face-up count BEFORE refreshing the UI.
         self.turn_start_face_up = self.count_face_up_cards()
+        self.update_ui()
 
     def current_player(self):
         """Return the current player's name."""
