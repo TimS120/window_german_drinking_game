@@ -419,7 +419,7 @@ class WindowGame:
             self.face_up[r][c] = True
             self.player_correct_guesses[current_player] += 1
             self.must_select_adjacent_to_handle = False
-            self.turn_can_end = True  # Allow turn to end until a wrong guess.
+            self.turn_can_end = True  # Allow turn to end after a correct guess.
             self.update_ui()
             # Enable the "End Turn" button so the player may stop his turn.
             self.stop_turn_button.config(state=tk.NORMAL)
@@ -427,10 +427,12 @@ class WindowGame:
                 return
             self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
         else:
-            # Wrong guess: first, reveal the guessed card so it can be seen.
+            # Wrong guess: reveal the guessed card.
             self.face_up[r][c] = True
             self.update_ui()
-            # Then, mark cards for removal with a red border.
+            # Disable the End Turn button to prevent turn passing.
+            self.stop_turn_button.config(state=tk.DISABLED)
+            # Mark cards for removal.
             connected = self.collect_connected_open_cards((r, c))
             total_removed = set(connected)
             total_removed.add((r, c))
@@ -446,12 +448,12 @@ class WindowGame:
                 if self.button_frames[rr][cc]:
                     self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="red")
             self.disable_card_buttons()
-            # Create a pop-up window for confirmation that includes the penalty info.
+            # Create a pop-up window for removal confirmation.
             self.confirm_window = tk.Toplevel(self.root)
             self.confirm_window.title("Confirm Removal")
             tk.Label(
                 self.confirm_window,
-                text=f"Wrong guess! {self.current_player()} must drink {penalty} drink(s). Confirm removal of marked cards."
+                text=f"Wrong guess! {current_player} must drink {penalty} drink(s). Confirm removal of marked cards."
             ).pack(padx=10, pady=10)
             self.confirm_button = tk.Button(
                 self.confirm_window,
@@ -459,7 +461,7 @@ class WindowGame:
                 command=self.confirm_removals
             )
             self.confirm_button.pack(padx=10, pady=10)
-            # Reset turn end flag on a wrong guess.
+            # Ensure turn cannot be ended on a wrong guess.
             self.turn_can_end = False
 
     def confirm_removals(self):
