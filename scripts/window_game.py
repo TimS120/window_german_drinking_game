@@ -1,4 +1,4 @@
-import random, os
+import random, os, time, math
 import tkinter as tk
 from PIL import Image, ImageTk
 
@@ -574,8 +574,8 @@ class WindowGame:
                         return False
         # Ensure the last action is visible in the stats table.
         self.update_ui()
-        # Run an end-animation before showing the game-over prompt.
-        self.end_animation(self.after_animation_game_over)
+        # Use the fireworks animation instead of the old one.
+        self.show_real_fireworks_effect()
         return True
 
     def end_animation(self, callback, iteration=0):
@@ -599,8 +599,120 @@ class WindowGame:
                         self.buttons[r][c].config(bg="SystemButtonFace")
             callback()
 
-    def after_animation_game_over(self):
-        """Handle game-over prompt after the end animation completes."""
+    def show_real_fireworks_effect(self):
+        """Display a full-screen fireworks effect and then prompt for you won."""
+        fireworks_win = tk.Toplevel(self.root)
+        fireworks_win.overrideredirect(True)
+        fireworks_win.attributes("-topmost", True)
+        width = self.root.winfo_screenwidth()
+        height = self.root.winfo_screenheight()
+        fireworks_win.geometry(f"{width}x{height}+0+0")
+        canvas = tk.Canvas(fireworks_win, bg="black", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+
+        # Display "You Won" at the top center.
+        canvas.create_text(width // 2, height // 8, text="You Won", fill="white",
+                        font=("Arial", 100, "bold"))
+
+        start_time = time.time()
+        effect_duration = 5  # seconds
+
+        def launch_rocket():
+            """Launch a single rocket with trail and explosion effect."""
+            rocket_x = random.randint(100, width - 100)
+            rocket_y = height
+            rocket_size = 5
+            rocket = canvas.create_oval(
+                rocket_x - rocket_size, rocket_y - rocket_size,
+                rocket_x + rocket_size, rocket_y + rocket_size,
+                fill="white", outline="white"
+            )
+            rocket_speed = random.randint(12, 15)
+            explosion_height = random.randint(height // 4, height // 2)
+
+            def animate_rocket():
+                nonlocal rocket_y
+                if rocket_y > explosion_height:
+                    current_y = rocket_y
+                    rocket_y -= rocket_speed
+                    canvas.move(rocket, 0, -rocket_speed)
+                    # Create a brief trail effect
+                    trail = canvas.create_oval(
+                        rocket_x - 2, current_y - 2,
+                        rocket_x + 2, current_y + 2,
+                        fill="yellow", outline=""
+                    )
+                    canvas.after(100, lambda: canvas.delete(trail))
+                    canvas.after(20, animate_rocket)
+                else:
+                    canvas.delete(rocket)
+                    create_explosion(rocket_x, rocket_y)
+            animate_rocket()
+
+        def create_explosion(x, y):
+            """Create an explosion effect at (x, y) with particles."""
+            num_particles = 20
+            particles = []
+            for _ in range(num_particles):
+                angle = random.uniform(0, 2 * math.pi)
+                speed = random.uniform(4, 10)
+                dx = speed * math.cos(angle)
+                dy = speed * math.sin(angle) - 10
+                color = "#%06x" % random.randint(0, 0xFFFFFF)
+                particle = {
+                    "id": canvas.create_oval(x, y, x + 2, y + 2, fill=color, outline=color),
+                    "x": x,
+                    "y": y,
+                    "dx": dx,
+                    "dy": dy,
+                    "life": random.randint(30, 60)
+                }
+                particles.append(particle)
+
+            def animate_explosion():
+                nonlocal particles
+                alive_particles = []
+                for particle in particles:
+                    particle["x"] += particle["dx"]
+                    particle["y"] += particle["dy"]
+                    particle["dy"] += 0.5
+                    canvas.coords(
+                        particle["id"],
+                        particle["x"],
+                        particle["y"],
+                        particle["x"] + 4,
+                        particle["y"] + 4
+                    )
+                    particle["life"] -= 1
+                    if particle["life"] > 0:
+                        alive_particles.append(particle)
+                    else:
+                        canvas.delete(particle["id"])
+                particles = alive_particles
+                if particles:
+                    canvas.after(30, animate_explosion)
+            animate_explosion()
+
+        def launch_burst():
+            """Launch a burst of rockets with random delays."""
+            for _ in range(10):
+                delay = random.randint(0, 500)
+                fireworks_win.after(delay, launch_rocket)
+
+        def schedule_burst():
+            """Schedule bursts until the effect duration is reached."""
+            if time.time() - start_time < effect_duration:
+                launch_burst()
+                fireworks_win.after(1500, schedule_burst)
+
+        schedule_burst()
+
+        # End the fireworks effect after effect_duration + delay.
+        fireworks_win.after((effect_duration + 1) * 1000, lambda: (fireworks_win.destroy(), self.end_game_popup()))
+
+    def end_game_popup(self):
+        """Show game over popup and prompt to start a new game."""
+        from tkinter import messagebox  # Ensure messagebox is imported
         messagebox.showinfo("Game Over", "All cards are face-up! Game ends.")
         if messagebox.askyesno("Play Again?", "Start a new game?"):
             self.reset_game()
