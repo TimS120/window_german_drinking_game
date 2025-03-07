@@ -1,6 +1,6 @@
-import random
+import random, os
 import tkinter as tk
-from tkinter import messagebox
+from PIL import Image, ImageTk
 
 # -------------------------------------------------------
 # CONSTANTS & DATA STRUCTURES
@@ -79,14 +79,47 @@ def adjacent_positions(pos):
                 neighbors.append((nr, nc))
     return neighbors
 
+# --- Helper for front images ---
+suit_map = {"E": "Eichel", "B": "Blatt", "H": "Herz", "S": "Schelln"}
+rank_map = {"6": "Sechs", "7": "Sieben", "8": "Acht", "9": "Neun", "10": "Zehn",
+            "U": "Unter", "O": "Ober", "K": "Koenig", "A": "Ass"}
+
+def card_id_to_front_filename(card_id):
+    """
+    Map card_id to the expected front image filename.
+    For example, card_id 0 becomes "Eichel_Sechs.png".
+    """
+    rank = RANKS[card_id // 4]
+    suit = SUITS[card_id % 4]
+    return f"{suit_map[suit]}_{rank_map[rank]}.png"
+
 # -------------------------------------------------------
 # MAIN GAME CLASS
 # -------------------------------------------------------
 class WindowGame:
     def __init__(self, root, players):
+        self.players = players
+        self.confirm_window = None
         self.root = root
         self.root.title("Window Drinking Game")
-
+        
+        # Load images.
+        workspace_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Load back image.
+        back_file = os.path.join(workspace_path, "resources", "back", "back.png")
+        img = Image.open(back_file)
+        img = img.resize((150, 85), Image.LANCZOS)
+        self.back_photo = ImageTk.PhotoImage(img)
+        # Load front images into a dictionary.
+        self.front_images = {}
+        front_dir = os.path.join(workspace_path, "resources", "front")
+        for file in os.listdir(front_dir):
+            if file.endswith(".png"):
+                file_path = os.path.join(front_dir, file)
+                img = Image.open(file_path)
+                img = img.resize((150, 85), Image.LANCZOS)
+                self.front_images[file] = ImageTk.PhotoImage(img)
+                
         # Players & initial statistics
         self.init_stats()
 
@@ -151,7 +184,7 @@ class WindowGame:
                     # Each button is now inside a frame so we can change the frame border.
                     container = tk.Frame(self.frame_game, highlightthickness=0, bd=0)
                     container.grid(row=r, column=c, padx=5, pady=5)
-                    b = tk.Button(container, text="", width=6, height=3,
+                    b = tk.Button(container, text="",
                                   command=lambda rr=r, cc=c: self.on_card_click(rr, cc),
                                   highlightthickness=0)
                     b.pack()
@@ -177,12 +210,11 @@ class WindowGame:
         self.turn_can_end = False
 
     def init_stats(self):
-        self.players = players
         self.current_player_idx = 0
-        self.drink_count = {p: 0 for p in players}
-        self.player_correct_guesses = {p: 0 for p in players}
-        self.player_changed_cards = {p: 0 for p in players}
-        self.player_turns = {p: 0 for p in players}
+        self.drink_count = {p: 0 for p in self.players}
+        self.player_correct_guesses = {p: 0 for p in self.players}
+        self.player_changed_cards = {p: 0 for p in self.players}
+        self.player_turns = {p: 0 for p in self.players}
 
     def deal_initial_cards(self):
         """Deal cards from the deck into the layout.
@@ -441,8 +473,10 @@ class WindowGame:
             self.pending_penalty = penalty
             # Increase drink count for each removed card.
             self.drink_count[current_player] += penalty
-            self.info_label.config(text="Wrong guess! Cards marked for removal. Click 'Confirm Removal' to proceed.")
-            # Highlight the cards to be removed by setting their container frame border to red.
+            self.info_label.config(
+                text="Wrong guess! Cards marked for removal. Click 'Confirm Removal' to proceed."
+            )
+            # Highlight the cards to be removed.
             for pos in self.pending_removals:
                 rr, cc = pos
                 if self.button_frames[rr][cc]:
@@ -463,6 +497,8 @@ class WindowGame:
             self.confirm_button.pack(padx=10, pady=10)
             # Ensure turn cannot be ended on a wrong guess.
             self.turn_can_end = False
+            # Refresh the UI so that removal cards (as Labels) become clickable.
+            self.update_ui()
 
     def confirm_removals(self):
         """After confirmation, remove the marked cards, add them back to the deck,
@@ -503,11 +539,12 @@ class WindowGame:
         self.info_label.config(text=f"{self.current_player()} goes again.")
 
     def disable_card_buttons(self):
-        """Disable all card buttons (used during confirmation stages)."""
+        """Override any disabling so that all card buttons remain enabled."""
         for r in range(len(self.buttons)):
             for c in range(len(self.buttons[r])):
                 if self.buttons[r][c] is not None:
-                    self.buttons[r][c].config(state=tk.DISABLED)
+                    self.buttons[r][c].config(state=tk.NORMAL)
+
 
     def redeal_spots(self):
         """Redeal empty spots in the layout.
@@ -697,25 +734,36 @@ class WindowGame:
         """
         for r in range(len(WINDOW_LAYOUT)):
             for c in range(len(WINDOW_LAYOUT[r])):
-                if WINDOW_LAYOUT[r][c]:
-                    card_id = self.card_grid[r][c]
-                    if card_id is not None:
-                        if self.face_up[r][c]:
-                            self.buttons[r][c].config(text=card_id_to_label(card_id), state=tk.DISABLED)
+                if not WINDOW_LAYOUT[r][c]:
+                    continue
+                container = self.button_frames[r][c]
+                # Always use Button widget.
+                if not isinstance(self.buttons[r][c], tk.Button):
+                    self.buttons[r][c].destroy()
+                    self.buttons[r][c] = tk.Button(
+                        container, command=lambda rr=r, cc=c: self.on_card_click(rr, cc)
+                    )
+                    self.buttons[r][c].pack()
+                widget = self.buttons[r][c]
+                card_id = self.card_grid[r][c]
+                if card_id is not None:
+                    if self.face_up[r][c]:
+                        filename = card_id_to_front_filename(card_id)
+                        if filename in self.front_images:
+                            widget.config(image=self.front_images[filename], text="")
                         else:
-                            self.buttons[r][c].config(text="X", state=tk.NORMAL)
+                            widget.config(text=card_id_to_label(card_id))
                     else:
-                        self.buttons[r][c].config(text=" ", state=tk.DISABLED)
-        self.info_label.config(text=f"{self.current_player()}'s turn.")
-        self.update_stats_table()
-        # Set grey border on selectable cards (if not already marked for removal/new cards)
-        for r in range(len(WINDOW_LAYOUT)):
-            for c in range(len(WINDOW_LAYOUT[r])):
-                if WINDOW_LAYOUT[r][c]:
-                    container = self.button_frames[r][c]
-                    # Skip if card is marked for removal or is new (red/green border is active)
-                    if (r, c) in self.pending_removals or (r, c) in self.pending_new_cards:
-                        continue
+                        widget.config(image=self.back_photo, text="")
+                    # Ensure the widget is enabled and clickable.
+                    widget.config(state=tk.NORMAL, command=lambda rr=r, cc=c: self.on_card_click(rr, cc))
+                else:
+                    widget.config(text=" ", image="", state=tk.DISABLED)
+                # Highlight pending removal cards with a red border;
+                # otherwise, apply grey border if the card is selectable.
+                if (r, c) in self.pending_removals:
+                    container.config(highlightthickness=3, highlightbackground="red")
+                else:
                     if self.face_up[r][c]:
                         container.config(highlightthickness=0)
                     else:
@@ -728,6 +776,8 @@ class WindowGame:
                             container.config(highlightthickness=3, highlightbackground="grey")
                         else:
                             container.config(highlightthickness=0)
+        self.info_label.config(text=f"{self.current_player()}'s turn.")
+        self.update_stats_table()
 
 if __name__ == "__main__":
     root = tk.Tk()
