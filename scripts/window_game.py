@@ -109,6 +109,7 @@ class WindowGame:
         back_file = os.path.join(workspace_path, "resources", "back", "back.png")
         img = Image.open(back_file)
         img = img.resize((150, 85), Image.LANCZOS)
+        img = img.rotate(90, expand=True)
         self.back_photo = ImageTk.PhotoImage(img)
         # Load front images into a dictionary.
         self.front_images = {}
@@ -118,6 +119,7 @@ class WindowGame:
                 file_path = os.path.join(front_dir, file)
                 img = Image.open(file_path)
                 img = img.resize((150, 85), Image.LANCZOS)
+                img = img.rotate(90, expand=True)
                 self.front_images[file] = ImageTk.PhotoImage(img)
                 
         # Players & initial statistics
