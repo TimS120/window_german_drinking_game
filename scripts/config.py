@@ -3,7 +3,7 @@ Configuration constants and mappings for the Window Drinking Game.
 """
 
 # Toggle development mode. If True, default player names are used.
-DEVELOPMENT_MODE = False
+DEVELOPMENT_MODE = True
 
 # Card rank and suit definitions.
 RANKS = ["6", "7", "8", "9", "10", "U", "O", "K", "A"]  # 6 < 7 < ... < A

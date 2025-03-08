@@ -17,18 +17,19 @@ This project's purpose is the:
 - Typically, 3–8 players participate (but any number from 1 to 100 is also possible).
 
 ### Gameplay
-1. **Initial/ Handle Rule**:  
+1. **Initial/ Handle Rule**:
    - At the start of the game and whenever the handle is removed, the only valid move is to select the card adjacent to the handle. The player must guess if that face‑down card is higher, same, or lower than the handle’s rank.
-2. **In-Between Guesses**:  
+2. **Guesses**:
+   - If a face-down card is next to **one** (horizontally or vertically) face-up card, then the guess is either *higher*, *same* or *lower*
    - If a face-down card is **between two face-up cards**, the guess is whether its rank is *in between* or *outside* those two ranks (ties with boundary ranks count as *in between*).  
-3. **Multiple Boundaries**:  
+3. **Multiple Boundaries**:
    - If a face-down card touches more than one pair of face-up cards (e.g., horizontally and vertically), the player must choose **either** the horizontal **or** the vertical pair as the boundaries.  
    - “Around the corner” (mixing a horizontal card with a vertical card) is not allowed.  
-4. **Correct Guess**:  
+4. **Correct Guess**:
    - The card is turned face-up.  
    - Special rule for 'Same' guesses: If a player correctly guesses "same", all other players must take one swallow.
    - The player may continue guessing another card or pass the turn.  
-5. **Wrong Guess**:  
+5. **Wrong Guess**:
    - The player drinks a number of times equal to the total number of cards removed.
    - The guessed card is removed along with every open card that is directly or indirectly adjoining it (i.e. if an open card touches an open card that is adjacent to the guessed card, it is also removed).
    - If the handle (the card at the handle position) is removed in this process, it is immediately redealt face-up and the next turn must be played on a card adjacent to the new handle.
