@@ -1,3 +1,5 @@
+![Windown game](./resources/docs/full_game.png)
+
 # Window - a German drinking game
 
 This project's purpose is the:
