@@ -497,7 +497,13 @@ def flatten_state(state):
             if WINDOW_LAYOUT[r][c]:
                 # Valid card slot: get card id and face-up flag.
                 card = state["card_grid"][r][c]
-                card_val = get_rank_index(card) if card is not None else -1
+                if(state["face_up"][r][c]):
+                    if card is not None:
+                        card_val = get_rank_index(card)
+                    else:
+                        raise Exception("Card is none, shall not be none!")
+                else:
+                    card_val = -1
                 flat.append(card_val)
     return np.array(flat, dtype=np.float32)
 
