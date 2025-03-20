@@ -255,7 +255,7 @@ class SimulatedWindowGame(WindowGame):
             selected_option = options[0]
 
         if guess not in selected_option["guess_options"]:
-            return {"reward": -1, "done": False, "debug": "Invalid guess for selected option."}
+            return {"reward": -0.5, "done": False, "debug": "Invalid guess for selected option."}
 
         # Save current face-up count for reward calculation.
         initial_face_up = self.count_face_up_cards()
@@ -267,11 +267,15 @@ class SimulatedWindowGame(WindowGame):
             guess_in = True if guess == "in-between" else False
             self.resolve_in_between(r, c, neighbor1, neighbor2, guess_in)
         else:
-            return {"reward": -1, "done": False, "debug": "Unknown option type."}
+            return {"reward": -5, "done": False, "debug": "Unknown option type."}
 
         # Check if the guess was wrong before auto-confirming removals.
         was_wrong = bool(self.pending_removals)
         penalty = self.pending_penalty if was_wrong and hasattr(self, "pending_penalty") else 0
+
+        # If the handle was removed, increase penalty by 1.5 times.
+        if was_wrong and HANDLE_POSITION in self.pending_removals:
+            penalty = penalty * 1.5
 
         if self.pending_removals:
             self.auto_confirm_removals()
@@ -284,6 +288,11 @@ class SimulatedWindowGame(WindowGame):
             debug_info = "Correct guess."
 
         done = self.check_game_end()
+
+        # If the game is finished, assign a finishing reward 20 times a normal correct guess.
+        if done and not was_wrong:
+            reward = 20
+
         if self.observer:
             self.update_ui()
             self.root.update_idletasks()
