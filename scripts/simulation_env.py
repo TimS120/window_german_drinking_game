@@ -17,10 +17,10 @@ It now includes:
 """
 
 import tkinter as tk
-import random
 from game import WindowGame
 from config import WINDOW_LAYOUT, HANDLE_POSITION
-from utils import adjacent_positions
+from utils import adjacent_positions, get_rank_index
+import numpy as np
 
 
 def build_global_action_space():
@@ -469,6 +469,38 @@ def get_human_action(env):
         print("Please enter a valid number.")
         return None
 
+def flatten_state(state):
+    """
+    Flatten the game board state into a consistent vector representation for DQN input.
+
+    The state dict is expected to have:
+      - "card_grid": a 2D list (rows x columns) with card IDs or None.
+      - "face_up": a 2D list of booleans indicating if each card is face-up.
+      - "deck_size": an integer for the remaining cards in the deck.
+
+    For each cell in WINDOW_LAYOUT:
+      - If the cell is valid, two features are added:
+          * The card ID (or -1 if no card is assigned).
+          * The face-up flag as 1.0 for True, 0.0 for False.
+      - If the cell is not a valid slot, two zeros are appended.
+    An additional feature (deck_size) is appended at the end.
+
+    Args:
+        state (dict): The game state with keys "card_grid", "face_up", and "deck_size".
+
+    Returns:
+        np.ndarray: A flattened state vector.
+    """
+    flat = []
+    for r in range(len(WINDOW_LAYOUT)):
+        for c in range(len(WINDOW_LAYOUT[r])):
+            if WINDOW_LAYOUT[r][c]:
+                # Valid card slot: get card id and face-up flag.
+                card = state["card_grid"][r][c]
+                card_val = get_rank_index(card) if card is not None else -1
+                flat.append(card_val)
+    return np.array(flat, dtype=np.float32)
+
 
 if __name__ == "__main__":
     mode = input("Select mode: [H]uman UI, [C]onsole Human, or [G]lobal AI action? ").strip().upper()
@@ -492,12 +524,12 @@ if __name__ == "__main__":
                 print("No valid action selected, exiting loop.")
                 break
         else:
-            print("Available global actions (indices): 0 to", len(env.global_action_space) - 1)
             try:
-                action_index = int(input("Enter global action index: "))
-                action = env.global_action_space[action_index]
+                state = env._get_state()  # obtain the current state as a dict
+                flattened_state = flatten_state(state)
+                # AI-action here
             except ValueError:
-                print("Please enter a valid number.")
+                # Here must something happen --> Error throw
                 continue
         state, reward, done, debug = env.step(action)
         print("Action taken:", action)
