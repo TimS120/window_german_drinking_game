@@ -10,14 +10,17 @@ debugging when observer mode is enabled.
 
 It now includes:
 - A fixed global action space (global keys) that the model always chooses from.
-- A human input function (get_human_action) for interactive play.
+- A human input function (get_human_action) for interactive play via console.
+- An extended human turn option that uses the existing UI dialogs. In this
+  mode, when a human selects a move via the UI the action is captured and mapped
+  to a global action number.
 """
 
 import tkinter as tk
 import random
 from game import WindowGame
 from config import WINDOW_LAYOUT, HANDLE_POSITION
-from utils import adjacent_positions, get_rank_index
+from utils import adjacent_positions
 
 
 def build_global_action_space():
@@ -48,6 +51,7 @@ class SimulatedWindowGame(WindowGame):
     """
     A subclass of WindowGame that overrides interactive UI prompts
     to enable simulation.
+    In human mode, the existing UI dialogs are used to capture the move.
     """
 
     def __init__(self, root, players, observer=False):
@@ -62,8 +66,35 @@ class SimulatedWindowGame(WindowGame):
         self.observer = observer
         # Initialize the game (this builds the UI as well).
         super().__init__(root, players)
-        # Mark simulation mode to bypass interactive dialogs.
+        # Mark simulation mode to bypass non–UI dialogs (for simulation, not human UI).
         self.simulation_mode = True
+
+        # For human UI mode, create variables to capture the human move.
+        if observer:
+            self.human_action = None
+            self.human_action_var = tk.StringVar(value="")
+
+    def set_human_action(self, action):
+        """
+        Store the human-selected action and wake any waiting turn.
+        Args:
+            action (dict): The action dictionary.
+        """
+        self.human_action = action
+        self.human_action_var.set("done")
+
+    def human_turn(self):
+        """
+        Wait for a human move via the UI.
+        Returns:
+            dict: The action dictionary selected by the human.
+        """
+        # Reset the stored action.
+        self.human_action = None
+        self.human_action_var.set("")
+        # The human will click a card and select an option.
+        self.root.wait_variable(self.human_action_var)
+        return self.human_action
 
     def get_valid_options_for_card(self, r, c):
         """
@@ -139,15 +170,64 @@ class SimulatedWindowGame(WindowGame):
 
         return options
 
+    def ask_higher_same_lower(self, r, c, neighbor):
+        """
+        Display a UI prompt for a Higher/Same/Lower guess.
+        Instead of directly resolving, it captures the move as an action.
+        Args:
+            r (int): Row index of the card.
+            c (int): Column index of the card.
+            neighbor (tuple): The neighbor card position.
+        """
+        guess_win = tk.Toplevel(self.root)
+        guess_win.title("Guess Higher, Same, or Lower")
+        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
+        tk.Label(guess_win, text="Is the selected card Higher, Same, or Lower than the neighbor?").pack(padx=10, pady=10)
+
+        def make_choice(guess):
+            action = {"position": (r, c), "guess": guess, "orientation": None}
+            self.set_human_action(action)
+            guess_win.destroy()
+
+        tk.Button(guess_win, text="Higher", command=lambda: make_choice("higher")).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(guess_win, text="Same", command=lambda: make_choice("same")).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(guess_win, text="Lower", command=lambda: make_choice("lower")).pack(side=tk.RIGHT, padx=5, pady=5)
+
+    def ask_in_between(self, r, c, n1, n2):
+        """
+        Display a UI prompt for an In-Between or Outside guess.
+        Captures the move as an action.
+        Args:
+            r (int): Row index of the card.
+            c (int): Column index of the card.
+            n1 (tuple): First neighbor position.
+            n2 (tuple): Second neighbor position.
+        """
+        guess_win = tk.Toplevel(self.root)
+        guess_win.title("Guess In-Between or Outside")
+        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
+        tk.Label(guess_win, text="Is the card In-Between or Outside these two?").pack(padx=10, pady=10)
+
+        def make_choice(guess):
+            # Determine orientation based on neighbor positions.
+            orientation = "horizontal" if n1[0] == n2[0] else "vertical"
+            action = {"position": (r, c), "guess": guess, "orientation": orientation}
+            self.set_human_action(action)
+            guess_win.destroy()
+
+        tk.Button(guess_win, text="In-Between", command=lambda: make_choice("in-between")).pack(side=tk.LEFT, padx=10, pady=10)
+        tk.Button(guess_win, text="Outside", command=lambda: make_choice("outside")).pack(side=tk.RIGHT, padx=10, pady=10)
+
+    # In human mode, we use the UI dialogs above. Otherwise, in simulation mode, we use the non–interactive versions.
+    # (The interactive methods above override the base class's behavior.)
+
     def simulate_action(self, position, guess, orientation=None):
         """
         Simulate an action on the game using the provided parameters.
-        This bypasses interactive UI dialogs.
-
+        This method is used when the move is provided programmatically.
         Args:
             position (tuple): (r, c) position of the selected card.
-            guess (str): Guess type. One of "higher", "same", "lower",
-                         "in-between", or "outside".
+            guess (str): Guess type.
             orientation (str, optional): "horizontal" or "vertical" if needed.
 
         Returns:
@@ -217,13 +297,6 @@ class SimulatedWindowGame(WindowGame):
         """
         self.confirm_removals()
 
-    # Override interactive prompts to avoid blocking simulation.
-    def ask_higher_same_lower(self, r, c, neighbor):
-        pass
-
-    def ask_in_between(self, r, c, n1, n2):
-        pass
-
     def same_guess_confirmation(self, r, c):
         """
         Automatically confirm 'same' guess by updating drink counts.
@@ -246,7 +319,7 @@ class WindowGameEnv:
 
         Args:
             players (list): List of player names.
-            observer (bool): If True, the UI is used for debugging.
+            observer (bool): If True, the UI is used for debugging/human play.
         """
         self.root = tk.Tk()
         # The window is initially hidden; if observer is True, we show it.
@@ -300,6 +373,21 @@ class WindowGameEnv:
         global_action = self.global_action_space[action_index]
         return self.step(global_action)
 
+    def human_turn(self):
+        """
+        Wait for a human move via the UI.
+        Returns:
+            tuple: (global_action_index, action_dict) where global_action_index is the index in the global action space.
+        """
+        action = self.game.human_turn()
+        # Map the chosen action to its global action number.
+        for i, act in enumerate(self.global_action_space):
+            if (act["position"] == action["position"] and
+                act["guess"] == action["guess"] and
+                act.get("orientation") == action.get("orientation")):
+                return i, action
+        return None, action
+
     def _get_state(self):
         """
         Obtain the current state representation.
@@ -346,8 +434,8 @@ class WindowGameEnv:
 
 def get_human_action(env):
     """
-    Display valid actions from the global action space and return the human-selected action.
-
+    Display valid actions from the global action space in the console and return the human-selected action.
+    This is the older textual input option.
     Args:
         env (WindowGameEnv): The simulation environment.
 
@@ -374,8 +462,7 @@ def get_human_action(env):
 
 
 if __name__ == "__main__":
-    # Choose mode: human input or direct global action selection.
-    mode = input("Select mode: [H]uman or [G]lobal AI action? ").strip().upper()
+    mode = input("Select mode: [H]uman UI, [C]onsole Human, or [G]lobal AI action? ").strip().upper()
     env = WindowGameEnv(observer=True)
     initial_state = env.reset()
     print("Initial state:", initial_state)
@@ -383,7 +470,18 @@ if __name__ == "__main__":
     done = False
     while not done:
         if mode == "H":
+            # Use the UI-based human turn.
+            global_index, action = env.human_turn()
+            if global_index is None:
+                print("Could not map action to a global key.")
+                continue
+            print(f"Human selected global action index: {global_index}")
+        elif mode == "C":
+            # Use console-based human input.
             action = get_human_action(env)
+            if action is None:
+                print("No valid action selected, exiting loop.")
+                break
         else:
             print("Available global actions (indices): 0 to", len(env.global_action_space) - 1)
             try:
@@ -392,9 +490,6 @@ if __name__ == "__main__":
             except ValueError:
                 print("Please enter a valid number.")
                 continue
-        if action is None:
-            print("No valid action selected, exiting loop.")
-            break
         state, reward, done, debug = env.step(action)
         print("Action taken:", action)
         print("New state:", state)
