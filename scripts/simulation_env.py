@@ -235,15 +235,16 @@ class SimulatedWindowGame(WindowGame):
         """
         r, c = position
         if not WINDOW_LAYOUT[r][c]:
-            return {"reward": -0.5, "done": False, "debug": "Invalid position: not a card slot."}
+            return {"reward": -10, "done": False, "debug": "Invalid position: not a card slot."}
         if self.face_up[r][c]:
-            return {"reward": -0.5, "done": False, "debug": "Card already face-up."}
+            return {"reward": -10, "done": False, "debug": "Card already face-up."}
         if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
-            return {"reward": -0.5, "done": False, "debug": "Must select card adjacent to handle."}
+            return {"reward": -10, "done": False, "debug": "Must select card adjacent to handle."}
 
         options = self.get_valid_options_for_card(r, c)
         if not options:
-            return {"reward": -0.5, "done": False, "debug": "No valid guess options for this card."}
+            return {"reward": -2, "done": False, "debug": "No valid guess options for this card."}
+
         # Select option based on orientation if provided.
         selected_option = None
         if orientation:
@@ -254,8 +255,11 @@ class SimulatedWindowGame(WindowGame):
         else:
             selected_option = options[0]
 
+        if selected_option is None:
+            return {"reward": -2, "done": False, "debug": "No valid option for given orientation."}
+
         if guess not in selected_option["guess_options"]:
-            return {"reward": -0.5, "done": False, "debug": "Invalid guess for selected option."}
+            return {"reward": -2, "done": False, "debug": "Invalid guess for selected option."}
 
         # Save current face-up count for reward calculation.
         initial_face_up = self.count_face_up_cards()
@@ -267,7 +271,7 @@ class SimulatedWindowGame(WindowGame):
             guess_in = True if guess == "in-between" else False
             self.resolve_in_between(r, c, neighbor1, neighbor2, guess_in)
         else:
-            return {"reward": -5, "done": False, "debug": "Unknown option type."}
+            return {"reward": -2, "done": False, "debug": "Unknown option type."}
 
         # Check if the guess was wrong before auto-confirming removals.
         was_wrong = bool(self.pending_removals)
@@ -275,7 +279,7 @@ class SimulatedWindowGame(WindowGame):
 
         # If the handle was removed, increase penalty by 1.5 times.
         if was_wrong and HANDLE_POSITION in self.pending_removals:
-            penalty = penalty * 1.5
+            penalty = penalty
 
         if self.pending_removals:
             self.auto_confirm_removals()
@@ -284,14 +288,14 @@ class SimulatedWindowGame(WindowGame):
             reward = -penalty
             debug_info = "Wrong guess."
         else:
-            reward = 1
+            reward = 5
             debug_info = "Correct guess."
 
         done = self.check_game_end()
 
         # If the game is finished, assign a finishing reward 20 times a normal correct guess.
         if done and not was_wrong:
-            reward = 20
+            reward = 200
 
         if self.observer:
             self.update_ui()
@@ -499,11 +503,11 @@ def flatten_state(state):
                 card = state["card_grid"][r][c]
                 if(state["face_up"][r][c]):
                     if card is not None:
-                        card_val = get_rank_index(card)
+                        card_val = get_rank_index(card) +1  # Here the ranks are from 1 to 9, so that face down rank can be 0
                     else:
                         raise Exception("Card is none, shall not be none!")
                 else:
-                    card_val = -1
+                    card_val = 0  # Face down rank is 0
                 flat.append(card_val)
     return np.array(flat, dtype=np.float32)
 

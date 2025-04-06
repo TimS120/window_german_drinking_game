@@ -1,0 +1,149 @@
+# train_tensorboard.py
+import random
+import numpy as np
+from collections import deque
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter  # Import SummaryWriter
+
+# Import the environment and helper function to flatten the state
+from simulation_env import WindowGameEnv, flatten_state
+from model import DrinkingGameAgent
+
+# Hyperparameters
+NUM_EPISODES = 500           # Number of episodes to train
+MAX_STEPS = 1000             # Max steps per episode (adjust as needed)
+BATCH_SIZE = 32              # Batch size for training
+GAMMA = 0.99                 # Discount factor
+LEARNING_RATE = 1e-3         # Learning rate for optimizer
+TARGET_UPDATE_FREQ = 1000    # Update target network every N steps
+REPLAY_BUFFER_SIZE = 10000   # Maximum size of the replay buffer
+
+# Exploration parameters
+EPS_START = 1.0
+EPS_END = 0.1
+EPS_DECAY = 0.999  # Decay per episode
+
+# Set up device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Experience Replay Buffer
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
+    
+    def push(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))
+    
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = map(np.array, zip(*batch))
+        return state, action, reward, next_state, done
+    
+    def __len__(self):
+        return len(self.buffer)
+
+def select_action(state, q_network, epsilon):
+    """Epsilon-greedy action selection."""
+    if random.random() < epsilon:
+        return random.randrange(154)
+    else:
+        state_tensor = torch.tensor(state, dtype=torch.long, device=device).unsqueeze(0)
+        with torch.no_grad():
+            q_values = q_network(state_tensor)  # Shape: (1, 154)
+        return int(torch.argmax(q_values, dim=1).item())
+
+def main():
+    env = WindowGameEnv(observer=False)
+    
+    # Initialize Q-network and target network
+    q_network = DrinkingGameAgent().to(device)
+    target_network = DrinkingGameAgent().to(device)
+    target_network.load_state_dict(q_network.state_dict())
+    target_network.eval()
+    
+    optimizer = optim.Adam(q_network.parameters(), lr=LEARNING_RATE)
+    replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
+    
+    epsilon = EPS_START
+    total_steps = 0
+
+    # Set up TensorBoard SummaryWriter (logs will be saved in the "runs" directory)
+    writer = SummaryWriter(log_dir="runs/training_logs")
+
+    for episode in range(1, NUM_EPISODES + 1):
+        state_dict = env.reset()
+        state = flatten_state(state_dict)
+        episode_reward = 0
+        correct_count = 0
+        wrong_count = 0
+        invalid_count = 0
+
+        for step in range(MAX_STEPS):
+            total_steps += 1
+            action = select_action(state, q_network, epsilon)
+            next_state_dict, reward, done, debug = env.step_global(action)
+            next_state = flatten_state(next_state_dict)
+            episode_reward += reward
+
+            # Count debug messages for different metrics
+            if "Correct guess" in debug:
+                correct_count += 1
+            elif "Wrong guess" in debug:
+                wrong_count += 1
+            else:
+                invalid_count += 1
+
+            replay_buffer.push(state, action, reward, next_state, done)
+            state = next_state
+
+            if len(replay_buffer) >= BATCH_SIZE:
+                states, actions, rewards, next_states, dones = replay_buffer.sample(BATCH_SIZE)
+                states_tensor = torch.tensor(states, dtype=torch.long, device=device)
+                actions_tensor = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)
+                rewards_tensor = torch.tensor(rewards, dtype=torch.float, device=device).unsqueeze(1)
+                next_states_tensor = torch.tensor(next_states, dtype=torch.long, device=device)
+                dones_tensor = torch.tensor(dones, dtype=torch.float, device=device).unsqueeze(1)
+
+                q_values = q_network(states_tensor).gather(1, actions_tensor)
+                with torch.no_grad():
+                    next_q_values = target_network(next_states_tensor)
+                    max_next_q_values, _ = torch.max(next_q_values, dim=1, keepdim=True)
+                    target_q_values = rewards_tensor + GAMMA * max_next_q_values * (1 - dones_tensor)
+                
+                loss = nn.MSELoss()(q_values, target_q_values)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            
+            if total_steps % TARGET_UPDATE_FREQ == 0:
+                target_network.load_state_dict(q_network.state_dict())
+            
+            if done:
+                break
+
+        epsilon = max(EPS_END, epsilon * EPS_DECAY)
+
+        # Compute correct-to-wrong ratio safely
+        if wrong_count == 0:
+            ratio = correct_count
+        else:
+            ratio = correct_count / wrong_count
+
+        # Log metrics to TensorBoard for this episode
+        writer.add_scalar("Episode/Reward", episode_reward, episode)
+        writer.add_scalar("Episode/Correct_Guesses", correct_count, episode)
+        writer.add_scalar("Episode/Wrong_Guesses", wrong_count, episode)
+        writer.add_scalar("Episode/Invalid_Guesses", invalid_count, episode)
+        writer.add_scalar("Episode/Correct_to_Wrong_Ratio", ratio, episode)
+        writer.add_scalar("Episode/Epsilon", epsilon, episode)
+
+        print(f"Episode {episode}: Reward = {episode_reward:.2f}, Correct = {correct_count}, Wrong = {wrong_count}, Invalid = {invalid_count}, Ratio = {ratio:.2f}, Epsilon = {epsilon:.3f}")
+
+    writer.close()
+    torch.save(q_network.state_dict(), "drinking_game_dqn.pth")
+    print("Training complete and model saved.")
+
+if __name__ == "__main__":
+    main()
