@@ -106,7 +106,9 @@ class WindowGame:
         """
         self.current_player_idx = 0
         self.drink_count = {p: 0 for p in self.players}
-        self.player_correct_guesses = {p: 0 for p in self.players}
+        self.correct_guess_count = {p: 0 for p in self.players}
+        self.wrong_guess_count = {p: 0 for p in self.players}
+        self.correct_wrong_guess_ratio = {p: 0 for p in self.players}
         self.player_changed_cards = {p: 0 for p in self.players}
         self.player_turns = {p: 0 for p in self.players}
 
@@ -485,7 +487,7 @@ class WindowGame:
         current_player = self.current_player()
         if is_correct:
             self.face_up[r][c] = True
-            self.player_correct_guesses[current_player] += 1
+            self.correct_guess_count[current_player] += 1
             self.must_select_adjacent_to_handle = False
             self.turn_can_end = True
             self.update_ui()
@@ -503,6 +505,7 @@ class WindowGame:
             penalty = len(total_removed)
             self.pending_removals = total_removed
             self.pending_penalty = penalty
+            self.wrong_guess_count[current_player] += 1
             self.drink_count[current_player] += penalty
             self.info_label.config(text="Wrong guess! Cards marked for removal. Click 'Confirm Removal' to proceed.")
             for pos in self.pending_removals:
@@ -808,7 +811,7 @@ class WindowGame:
         for widget in self.frame_stats.winfo_children():
             widget.destroy()
 
-        headers = ["Player", "Drinks", "Correct Guesses", "Changed Cards", "Turns"]
+        headers = ["Player", "Drinks", "Correct Guesses", "Wrong guesses", "Correct to wrong ratio", "Changed Cards", "Turns"]
         screen_width = self.root.winfo_screenwidth()
         font_size = max(10, int(screen_width * 0.008))  # Scale font size
 
@@ -832,10 +835,15 @@ class WindowGame:
             else:
                 changed = self.player_changed_cards[player]
             total_changed += changed
+
+            self.correct_wrong_guess_ratio[player] = self.correct_guess_count[player] / self.wrong_guess_count[player] if self.wrong_guess_count[player] != 0 else self.correct_guess_count[player]
+
             values = [
                 player,
                 self.drink_count[player],
-                self.player_correct_guesses[player],
+                self.correct_guess_count[player],
+                self.wrong_guess_count[player],
+                f"{self.correct_wrong_guess_ratio[player]:.2f}",
                 self.player_changed_cards[player],
                 self.player_turns[player]
             ]
@@ -852,8 +860,10 @@ class WindowGame:
                 label.grid(row=row, column=col, sticky="nsew")
         sum_row = len(self.players) + 2
         total_drinks = sum(self.drink_count[p] for p in self.players)
-        total_correct = sum(self.player_correct_guesses[p] for p in self.players)
-        totals = ["Total", total_drinks, total_correct, f"{total_changed} of 17", ""]
+        total_correct = sum(self.correct_guess_count[p] for p in self.players)
+        total_wrong = sum(self.wrong_guess_count[p] for p in self.players)
+        average_ratio = sum(self.correct_wrong_guess_ratio[p] for p in self.players) / len(self.players)
+        totals = ["Total", total_drinks, total_correct, total_wrong, f"{average_ratio:.2f}", f"{total_changed} of 17", ""]
         for col, val in enumerate(totals):
             label = tk.Label(
                 self.frame_stats,
