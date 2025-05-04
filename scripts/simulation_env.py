@@ -21,7 +21,37 @@ from game import WindowGame
 from config import WINDOW_LAYOUT, HANDLE_POSITION
 from utils import adjacent_positions, get_rank_index
 import numpy as np
+import numpy as np
+import torch
 
+
+def decode_action_index(a: int):
+    """
+    Decode one of 210 logits into position + guess.
+    a in [0..209] maps to channel * 30 + (r*6 + c)
+    Channels: 0=higher,1=same,2=lower,
+              3=in-between H,4=outside H,
+              5=in-between V,6=outside V
+    """
+    if not 0 <= a < 210:
+        raise IndexError(f"Action index {a} out of range [0..209]")
+    channel = a // 30
+    cell    = a % 30
+    r, c    = divmod(cell, 6)
+    if channel == 0:
+        return {"position": (r, c), "guess": "higher",     "orientation": None}
+    if channel == 1:
+        return {"position": (r, c), "guess": "same",       "orientation": None}
+    if channel == 2:
+        return {"position": (r, c), "guess": "lower",      "orientation": None}
+    if channel == 3:
+        return {"position": (r, c), "guess": "in-between", "orientation": "horizontal"}
+    if channel == 4:
+        return {"position": (r, c), "guess": "outside",    "orientation": "horizontal"}
+    if channel == 5:
+        return {"position": (r, c), "guess": "in-between", "orientation": "vertical"}
+    # channel == 6
+    return {"position": (r, c), "guess": "outside",    "orientation": "vertical"}
 
 def build_global_action_space():
     """
@@ -373,18 +403,14 @@ class WindowGameEnv:
         debug_info = result["debug"]
         return state, reward, done, debug_info
 
-    def step_global(self, action_index):
+    def step_global(self, action_index: int):
         """
-        Apply an action using a global action key (by index) from the fixed action space.
-
-        Args:
-            action_index (int): Index in the global action space.
-
-        Returns:
-            tuple: (state, reward, done, debug_info)
+        Accepts an integer in [0..209], decodes it to an action dict,
+        then calls self.step(...) to simulate it.
         """
-        global_action = self.global_action_space[action_index]
-        return self.step(global_action)
+        # decode into the form {"position":(r,c),"guess":…,"orientation":…}
+        action = decode_action_index(action_index)
+        return self.step(action)
 
     def human_turn(self):
         """
@@ -408,12 +434,45 @@ class WindowGameEnv:
         Returns:
             dict: Contains the card grid, face-up status, current player, and deck size.
         """
+        # Basic board info
         state = {
-            "card_grid": self.game.card_grid,
-            "face_up": self.game.face_up,
+            "card_grid": self.game.card_grid,   # 5×6 list of IDs
+            "face_up": self.game.face_up,       # 5×6 list of bools
             "current_player": self.game.current_player(),
             "deck_size": len(self.game.deck)
         }
+        # Build valid‑move masks for each guess type
+        vm = {k: torch.zeros((5,6), dtype=torch.bool) for k in [
+            'higher','same','lower',
+            'in_between_h','outside_h',
+            'in_between_v','outside_v'
+        ]}
+        # For each slot, query valid options
+        for r in range(5):
+            for c in range(6):
+                if not WINDOW_LAYOUT[r][c] or state['face_up'][r][c]:
+                    continue
+                opts = self.game.get_valid_options_for_card(r,c)
+                for opt in opts:
+                    # Map opt['guess_options'] + opt['orientation'] → mask key
+                    for guess in opt['guess_options']:
+                        key = guess
+                        if guess in ['in-between','outside']:
+                            ori = opt['orientation'][0]  # 'h' or 'v'
+                            key = f"{guess.replace('-','_')}_{'h' if ori=='h' else 'v'}"
+                        vm[key][r,c] = True
+        state['valid_masks'] = vm
+        # Also convert raw cards to integer grid: -1 empty, -2 face-down, 0…8 face-up
+        cards = torch.full((5,6), -1, dtype=torch.int)
+        for r in range(5):
+            for c in range(6):
+                if state['card_grid'][r][c] is None:
+                    cards[r,c] = -1
+                elif not state['face_up'][r][c]:
+                    cards[r,c] = -2
+                else:
+                    cards[r,c] = get_rank_index(state['card_grid'][r][c])
+        state['cards'] = cards
         return state
 
     def get_valid_actions(self):
@@ -475,41 +534,35 @@ def get_human_action(env):
 
 def flatten_state(state):
     """
-    Flatten the game board state into a consistent vector representation for DQN input.
-
-    The state dict is expected to have:
-      - "card_grid": a 2D list (rows x columns) with card IDs or None.
-      - "face_up": a 2D list of booleans indicating if each card is face-up.
-      - "deck_size": an integer for the remaining cards in the deck.
-
-    For each cell in WINDOW_LAYOUT:
-      - If the cell is valid, two features are added:
-          * The card ID (or -1 if no card is assigned).
-          * The face-up flag as 1.0 for True, 0.0 for False.
-      - If the cell is not a valid slot, two zeros are appended.
-    An additional feature (deck_size) is appended at the end.
-
-    Args:
-        state (dict): The game state with keys "card_grid", "face_up", and "deck_size".
-
-    Returns:
-        np.ndarray: A flattened state vector.
+    state: {
+      'cards':      IntTensor[5,6]      (−1=empty, −2=face-down, 0…8=face-up),
+      'valid_masks': dict of BoolTensor[5,6] for keys
+                      ['higher','same','lower','in_between_h',
+                       'outside_h','in_between_v','outside_v']
+    }
+    returns: FloatTensor of shape (10, 5, 6)
+      channels 0–1: empty, face-down
+      channel 2:   normalized rank (0…1)
+      channels 3–9: the seven legal-move masks
     """
-    flat = []
-    for r in range(len(WINDOW_LAYOUT)):
-        for c in range(len(WINDOW_LAYOUT[r])):
-            if WINDOW_LAYOUT[r][c]:
-                # Valid card slot: get card id and face-up flag.
-                card = state["card_grid"][r][c]
-                if(state["face_up"][r][c]):
-                    if card is not None:
-                        card_val = get_rank_index(card) +1  # Here the ranks are from 1 to 9, so that face down rank can be 0
-                    else:
-                        raise Exception("Card is none, shall not be none!")
-                else:
-                    card_val = 0  # Face down rank is 0
-                flat.append(card_val)
-    return np.array(flat, dtype=np.float32)
+    cards = state['cards']
+    vm    = state['valid_masks']
+
+    empty    = (cards == -1).float()
+    facedown = (cards == -2).float()
+
+    rank_norm = torch.zeros_like(cards, dtype=torch.float32)
+    faceup    = cards.ge(0)
+    rank_norm[faceup] = cards[faceup].float() / 8.0
+
+    channels = [empty, facedown, rank_norm]
+    for k in ['higher','same','lower',
+              'in_between_h','outside_h',
+              'in_between_v','outside_v']:
+        channels.append(vm[k].float())
+
+    # result: (10,5,6)
+    return torch.stack(channels, dim=0)
 
 
 if __name__ == "__main__":

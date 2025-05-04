@@ -46,13 +46,12 @@ class ReplayBuffer:
 
 def select_action(state, q_network, epsilon):
     """Epsilon-greedy action selection."""
-    if random.random() < epsilon:
-        return random.randrange(154)
-    else:
-        state_tensor = torch.tensor(state, dtype=torch.long, device=device).unsqueeze(0)
-        with torch.no_grad():
-            q_values = q_network(state_tensor)  # Shape: (1, 154)
-        return int(torch.argmax(q_values, dim=1).item())
+    # state: np.ndarray (10,5,6)
+    st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    vm = st[:,3:10,:,:].to(torch.bool)
+    with torch.no_grad():
+        _, q_values = q_network(st, vm)
+    return int(torch.argmax(q_values, dim=1).item())
 
 def main():
     env = WindowGameEnv(observer=False)
@@ -100,19 +99,29 @@ def main():
 
             if len(replay_buffer) >= BATCH_SIZE:
                 states, actions, rewards, next_states, dones = replay_buffer.sample(BATCH_SIZE)
-                states_tensor = torch.tensor(states, dtype=torch.long, device=device)
-                actions_tensor = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)
-                rewards_tensor = torch.tensor(rewards, dtype=torch.float, device=device).unsqueeze(1)
-                next_states_tensor = torch.tensor(next_states, dtype=torch.long, device=device)
-                dones_tensor = torch.tensor(dones, dtype=torch.float, device=device).unsqueeze(1)
 
-                q_values = q_network(states_tensor).gather(1, actions_tensor)
+                # states: (B,10,5,6), actions: (B,), rewards: (B,), next_states: (B,10,5,6), dones: (B,)
+                st  = torch.tensor(states,      dtype=torch.float32, device=device)        # (B,10,5,6)
+                vm  = st[:, 3:10, :, :].to(torch.bool)                                     # (B,7,5,6)
+                at  = torch.tensor(actions,     dtype=torch.long,    device=device).unsqueeze(1)  # (B,1)
+                rw  = torch.tensor(rewards,     dtype=torch.float32,device=device).unsqueeze(1)  # (B,1)
+                nst = torch.tensor(next_states, dtype=torch.float32,device=device)        # (B,10,5,6)
+                dn  = torch.tensor(dones,       dtype=torch.float32,device=device).unsqueeze(1)  # (B,1)
+
+                # Q(s,a)
+                _, q_all   = q_network(st, vm)            # (B,210)
+                q_selected = q_all.gather(1, at)          # (B,1)
+
+                # Q-targets using the target network
                 with torch.no_grad():
-                    next_q_values = target_network(next_states_tensor)
-                    max_next_q_values, _ = torch.max(next_q_values, dim=1, keepdim=True)
-                    target_q_values = rewards_tensor + GAMMA * max_next_q_values * (1 - dones_tensor)
-                
-                loss = nn.MSELoss()(q_values, target_q_values)
+                    nvm       = nst[:, 3:10, :, :].to(torch.bool)
+                    _, q_next = target_network(nst, nvm)   # (B,210)
+                    max_q, _  = q_next.max(dim=1, keepdim=True)  # (B,1)
+                    q_target  = rw + GAMMA * max_q * (1 - dn)    # (B,1)
+
+                # MSE loss & backprop
+                loss = nn.MSELoss()(q_selected, q_target)
+
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()

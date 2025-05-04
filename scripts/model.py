@@ -3,43 +3,49 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class DrinkingGameAgent(nn.Module):
-    def __init__(self, num_tokens=10, embed_dim=8, lstm_hidden=32, fc_hidden=64, output_dim=154):
-        """
-        Parameters:
-          - num_tokens: number of possible token values (0 to 9 after remapping)
-          - embed_dim: size of the embedding vector for each token
-          - lstm_hidden: number of hidden units in the LSTM
-          - fc_hidden: number of hidden units in the dense layer
-          - output_dim: number of actions in the global action space (154)
-        """
-        super(DrinkingGameAgent, self).__init__()
-        # Embedding layer to convert integer card values into dense vectors
-        self.embedding = nn.Embedding(num_tokens, embed_dim)
-        # LSTM layer to capture sequence (order) information from the 22 card positions
-        self.lstm = nn.LSTM(input_size=embed_dim, hidden_size=lstm_hidden, batch_first=True)
-        # Fully connected layers
-        self.fc1 = nn.Linear(lstm_hidden, fc_hidden)
-        self.fc2 = nn.Linear(fc_hidden, output_dim)
+    def __init__(self, hidden_size=128, num_layers=2):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size=10,
+                            hidden_size=hidden_size,
+                            num_layers=num_layers,
+                            batch_first=True)
+        self.head = nn.Linear(hidden_size, 210)
 
-    def forward(self, x):
+    def forward(self, x, valid_mask):
         """
-        Forward pass.
-        Args:
-          - x: input tensor of shape (batch_size, 22) containing integers (0-9)
-        Returns:
-          - Logits for each action (shape: batch_size x 154)
+        x: FloatTensor of shape (batch, 10, 5, 6)
+        valid_mask: BoolTensor of shape (batch, 7, 5, 6)
+        returns: 
+          raw_logits: FloatTensor (batch, 210)
+          probs:       FloatTensor (batch, 210)
         """
-        x = self.embedding(x)  # Shape: (batch_size, 22, embed_dim)
-        lstm_out, (hn, cn) = self.lstm(x)  # hn shape: (1, batch_size, lstm_hidden)
-        # Use the final hidden state
-        hn = hn.squeeze(0)  # Shape: (batch_size, lstm_hidden)
-        x = F.relu(self.fc1(hn))
-        logits = self.fc2(x)
-        return logits
+        # ensure float32 before feeding into LSTM
+        x = x.float()
+        b = x.size(0)
+
+        # reshape to sequence: (batch, seq_len=30, features=10)
+        seq = x.view(b, 10, -1).permute(0, 2, 1)
+
+        # LSTM encode
+        _, (hn, _) = self.lstm(seq)
+        feats = hn[-1]
+
+        # project to 210 logits
+        raw = self.head(feats)
+
+        # mask out illegal moves
+        valid = valid_mask.view(b, -1)
+        masked = raw.masked_fill(~valid, -1e9)
+
+        # softmax to probabilities
+        probs = F.softmax(masked, dim=1)
+        return raw, probs
+
 
 if __name__ == "__main__":
-    # Quick test to verify model shape
-    model = DrinkingGameAgent()
-    dummy_input = torch.randint(0, 10, (1, 22))  # 1 sample, 22 card positions
-    logits = model(dummy_input)
-    print("Logits shape:", logits.shape)  # Should be (1, 154)
+    import torch
+    dummy_x    = torch.randn(2, 10, 5, 6)
+    dummy_mask = torch.ones(2, 7, 5, 6, dtype=torch.bool)
+    model      = DrinkingGameAgent()
+    raw, probs = model(dummy_x, dummy_mask)
+    print(raw.shape, probs.shape)
