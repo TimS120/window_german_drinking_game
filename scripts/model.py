@@ -15,9 +15,10 @@ class DrinkingGameAgent(nn.Module):
         """
         x: FloatTensor of shape (batch, 10, 5, 6)
         valid_mask: BoolTensor of shape (batch, 7, 5, 6)
+
         returns: 
           raw_logits: FloatTensor (batch, 210)
-          probs:       FloatTensor (batch, 210)
+          probs:      FloatTensor (batch, 210)
         """
         # ensure float32 before feeding into LSTM
         x = x.float()
@@ -43,9 +44,7 @@ class DrinkingGameAgent(nn.Module):
 
 
 if __name__ == "__main__":
-    import torch
-    dummy_x    = torch.randn(2, 10, 5, 6)
+    dummy_x = torch.randn(2, 10, 5, 6)
     dummy_mask = torch.ones(2, 7, 5, 6, dtype=torch.bool)
-    model      = DrinkingGameAgent()
+    model = DrinkingGameAgent()
     raw, probs = model(dummy_x, dummy_mask)
-    print(raw.shape, probs.shape)

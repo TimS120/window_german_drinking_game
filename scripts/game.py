@@ -8,6 +8,7 @@ import time
 import math
 import tkinter as tk
 from PIL import Image, ImageTk
+
 from config import WINDOW_LAYOUT, CORNER_POSITIONS, HANDLE_POSITION
 from utils import (
     create_deck,

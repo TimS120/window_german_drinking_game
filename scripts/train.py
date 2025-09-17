@@ -1,13 +1,11 @@
-# train_tensorboard.py
 import random
 import numpy as np
 from collections import deque
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter  # Import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
-# Import the environment and helper function to flatten the state
 from simulation_env import WindowGameEnv, flatten_state
 from model import DrinkingGameAgent
 
@@ -28,48 +26,46 @@ EPS_DECAY = 0.999  # Decay per episode
 # Set up device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Experience Replay Buffer
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
-    
+
     def push(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
-    
+
     def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done = map(np.array, zip(*batch))
         return state, action, reward, next_state, done
-    
+
     def __len__(self):
         return len(self.buffer)
 
 def select_action(state, q_network, epsilon):
     """Epsilon-greedy action selection."""
     # state: np.ndarray (10,5,6)
-    st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-    vm = st[:,3:10,:,:].to(torch.bool)
+    st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)  # states
+    vm = st[:,3:10,:,:].to(torch.bool)  # valid moves
     with torch.no_grad():
-        _, q_values = q_network(st, vm)
+        _, q_values = q_network(st, vm)  # feed states and valid moves into the network
     return int(torch.argmax(q_values, dim=1).item())
 
 def main():
     env = WindowGameEnv(observer=False)
-    
+
     # Initialize Q-network and target network
     q_network = DrinkingGameAgent().to(device)
     target_network = DrinkingGameAgent().to(device)
     target_network.load_state_dict(q_network.state_dict())
     target_network.eval()
-    
+
     optimizer = optim.Adam(q_network.parameters(), lr=LEARNING_RATE)
     replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
-    
+
     epsilon = EPS_START
     total_steps = 0
 
-    # Set up TensorBoard SummaryWriter (logs will be saved in the "runs" directory)
-    writer = SummaryWriter(log_dir="runs/training_logs")
+    writer = SummaryWriter(log_dir="runs")
 
     for episode in range(1, NUM_EPISODES + 1):
         state_dict = env.reset()
@@ -101,23 +97,23 @@ def main():
                 states, actions, rewards, next_states, dones = replay_buffer.sample(BATCH_SIZE)
 
                 # states: (B,10,5,6), actions: (B,), rewards: (B,), next_states: (B,10,5,6), dones: (B,)
-                st  = torch.tensor(states,      dtype=torch.float32, device=device)        # (B,10,5,6)
-                vm  = st[:, 3:10, :, :].to(torch.bool)                                     # (B,7,5,6)
-                at  = torch.tensor(actions,     dtype=torch.long,    device=device).unsqueeze(1)  # (B,1)
-                rw  = torch.tensor(rewards,     dtype=torch.float32,device=device).unsqueeze(1)  # (B,1)
-                nst = torch.tensor(next_states, dtype=torch.float32,device=device)        # (B,10,5,6)
-                dn  = torch.tensor(dones,       dtype=torch.float32,device=device).unsqueeze(1)  # (B,1)
+                st = torch.tensor(states, dtype=torch.float32, device=device)  # (B,10,5,6)
+                vm = st[:, 3:10, :, :].to(torch.bool)  # (B,7,5,6)
+                at = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)  # (B,1)
+                rw = torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(1)  # (B,1)
+                nst = torch.tensor(next_states, dtype=torch.float32, device=device)  # (B,10,5,6)
+                dn = torch.tensor(dones, dtype=torch.float32, device=device).unsqueeze(1)  # (B,1)
 
                 # Q(s,a)
-                _, q_all   = q_network(st, vm)            # (B,210)
-                q_selected = q_all.gather(1, at)          # (B,1)
+                _, q_all = q_network(st, vm)  # (B,210)
+                q_selected = q_all.gather(1, at)  # (B,1)
 
                 # Q-targets using the target network
                 with torch.no_grad():
-                    nvm       = nst[:, 3:10, :, :].to(torch.bool)
-                    _, q_next = target_network(nst, nvm)   # (B,210)
-                    max_q, _  = q_next.max(dim=1, keepdim=True)  # (B,1)
-                    q_target  = rw + GAMMA * max_q * (1 - dn)    # (B,1)
+                    nvm = nst[:, 3:10, :, :].to(torch.bool)
+                    _, q_next = target_network(nst, nvm)  # (B,210)
+                    max_q, _ = q_next.max(dim=1, keepdim=True)  # (B,1)
+                    q_target = rw + GAMMA * max_q * (1 - dn)  # (B,1)
 
                 # MSE loss & backprop
                 loss = nn.MSELoss()(q_selected, q_target)
@@ -125,33 +121,31 @@ def main():
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            
+
             if total_steps % TARGET_UPDATE_FREQ == 0:
                 target_network.load_state_dict(q_network.state_dict())
-            
+
             if done:
                 break
 
         epsilon = max(EPS_END, epsilon * EPS_DECAY)
 
-        # Compute correct-to-wrong ratio safely
         if wrong_count == 0:
             ratio = correct_count
         else:
             ratio = correct_count / wrong_count
 
         # Log metrics to TensorBoard for this episode
-        writer.add_scalar("Episode/Reward", episode_reward, episode)
-        writer.add_scalar("Episode/Correct_Guesses", correct_count, episode)
-        writer.add_scalar("Episode/Wrong_Guesses", wrong_count, episode)
-        writer.add_scalar("Episode/Invalid_Guesses", invalid_count, episode)
-        writer.add_scalar("Episode/Correct_to_Wrong_Ratio", ratio, episode)
-        writer.add_scalar("Episode/Epsilon", epsilon, episode)
+        writer.add_scalar("Episode/Reward",episode_reward,episode)
+        writer.add_scalar("Episode/Correct_Guesses",correct_count,episode)
+        writer.add_scalar("Episode/Wrong_Guesses",wrong_count,episode)
+        writer.add_scalar("Episode/Invalid_Guesses",invalid_count,episode)
+        writer.add_scalar("Episode/Correct_to_Wrong_Ratio",ratio,episode)
 
         print(f"Episode {episode}: Reward = {episode_reward:.2f}, Correct = {correct_count}, Wrong = {wrong_count}, Invalid = {invalid_count}, Ratio = {ratio:.2f}, Epsilon = {epsilon:.3f}")
 
     writer.close()
-    torch.save(q_network.state_dict(), "drinking_game_dqn.pth")
+    torch.save(q_network.state_dict(), "models/drinking_game_dqn.pth")
     print("Training complete and model saved.")
 
 if __name__ == "__main__":

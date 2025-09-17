@@ -1,6 +1,4 @@
 """
-simulation_env.py
-
 Simulation environment for the Window Drinking Game.
 
 This module provides a Gym-like interface to the game mechanics.
@@ -17,12 +15,11 @@ It now includes:
 """
 
 import tkinter as tk
+import torch
+
 from game import WindowGame
 from config import WINDOW_LAYOUT, HANDLE_POSITION
 from utils import adjacent_positions, get_rank_index
-import numpy as np
-import numpy as np
-import torch
 
 
 def decode_action_index(a: int):
@@ -36,22 +33,22 @@ def decode_action_index(a: int):
     if not 0 <= a < 210:
         raise IndexError(f"Action index {a} out of range [0..209]")
     channel = a // 30
-    cell    = a % 30
-    r, c    = divmod(cell, 6)
+    cell = a % 30
+    r, c = divmod(cell, 6)
     if channel == 0:
-        return {"position": (r, c), "guess": "higher",     "orientation": None}
+        return {"position": (r, c), "guess": "higher", "orientation": None}
     if channel == 1:
-        return {"position": (r, c), "guess": "same",       "orientation": None}
+        return {"position": (r, c), "guess": "same", "orientation": None}
     if channel == 2:
-        return {"position": (r, c), "guess": "lower",      "orientation": None}
+        return {"position": (r, c), "guess": "lower", "orientation": None}
     if channel == 3:
         return {"position": (r, c), "guess": "in-between", "orientation": "horizontal"}
     if channel == 4:
-        return {"position": (r, c), "guess": "outside",    "orientation": "horizontal"}
+        return {"position": (r, c), "guess": "outside", "orientation": "horizontal"}
     if channel == 5:
         return {"position": (r, c), "guess": "in-between", "orientation": "vertical"}
     # channel == 6
-    return {"position": (r, c), "guess": "outside",    "orientation": "vertical"}
+    return {"position": (r, c), "guess": "outside", "orientation": "vertical"}
 
 def build_global_action_space():
     """
@@ -94,9 +91,7 @@ class SimulatedWindowGame(WindowGame):
             observer (bool): If True, the UI is updated for observation.
         """
         self.observer = observer
-        # Initialize the game (this builds the UI as well).
         super().__init__(root, players)
-        # Mark simulation mode to bypass non–UI dialogs (for simulation, not human UI).
         self.simulation_mode = True
 
         # For human UI mode, create variables to capture the human move.
@@ -248,9 +243,6 @@ class SimulatedWindowGame(WindowGame):
         tk.Button(guess_win, text="In-Between", command=lambda: make_choice("in-between")).pack(side=tk.LEFT, padx=10, pady=10)
         tk.Button(guess_win, text="Outside", command=lambda: make_choice("outside")).pack(side=tk.RIGHT, padx=10, pady=10)
 
-    # In human mode, we use the UI dialogs above. Otherwise, in simulation mode, we use the non–interactive versions.
-    # (The interactive methods above override the base class's behavior.)
-
     def simulate_action(self, position, guess, orientation=None):
         """
         Simulate an action on the game using the provided parameters.
@@ -315,7 +307,7 @@ class SimulatedWindowGame(WindowGame):
             self.auto_confirm_removals()
 
         if was_wrong:
-            reward = -penalty
+            reward = -penalty  # penalty: Number of removed cards.
             debug_info = "Wrong guess."
         else:
             reward = 5
@@ -534,25 +526,26 @@ def get_human_action(env):
 
 def flatten_state(state):
     """
+    One-hot-encoding of the environment as input for the model.
     state: {
-      'cards':      IntTensor[5,6]      (−1=empty, −2=face-down, 0…8=face-up),
+      'cards':      IntTensor[5,6]      (-1=empty, -2=face-down, 0…8=face-up),
       'valid_masks': dict of BoolTensor[5,6] for keys
                       ['higher','same','lower','in_between_h',
                        'outside_h','in_between_v','outside_v']
     }
     returns: FloatTensor of shape (10, 5, 6)
-      channels 0–1: empty, face-down
+      channels 0-1: empty, face-down
       channel 2:   normalized rank (0…1)
-      channels 3–9: the seven legal-move masks
+      channels 3-9: the seven legal-move masks
     """
     cards = state['cards']
-    vm    = state['valid_masks']
+    vm = state['valid_masks']
 
-    empty    = (cards == -1).float()
+    empty = (cards == -1).float()
     facedown = (cards == -2).float()
 
     rank_norm = torch.zeros_like(cards, dtype=torch.float32)
-    faceup    = cards.ge(0)
+    faceup = cards.ge(0)
     rank_norm[faceup] = cards[faceup].float() / 8.0
 
     channels = [empty, facedown, rank_norm]
@@ -561,7 +554,6 @@ def flatten_state(state):
               'in_between_v','outside_v']:
         channels.append(vm[k].float())
 
-    # result: (10,5,6)
     return torch.stack(channels, dim=0)
 
 
@@ -595,8 +587,8 @@ if __name__ == "__main__":
                 # Here must something happen --> Error throw
                 continue
         state, reward, done, debug = env.step(action)
-        print("Action taken:", action)
-        print("New state:", state)
-        print("Reward:", reward, "Done:", done, "Debug:", debug)
+        #print("Action taken:", action)
+        #print("New state:", state)
+        #print("Reward:", reward, "Done:", done, "Debug:", debug)
 
     env.root.mainloop()

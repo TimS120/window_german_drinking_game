@@ -1,9 +1,10 @@
 """
-Entry point for the Window Drinking Game application.
+Entry point for the Window Drinking Game app.
 """
 
 import tkinter as tk
 from config import DEVELOPMENT_MODE
+
 from game import WindowGame
 from utils import get_player_names
 

@@ -3,6 +3,7 @@ Utility functions for the Window Drinking Game.
 """
 
 import tkinter as tk
+
 from config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
 
 

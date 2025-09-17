@@ -1,6 +1,3 @@
-Flattened states (e.g.):
-[ 7. -1. -1. -1.  7. -1. -1. -1. -1. -1. -1. -1. -1.  5. -1. -1. -1. 0. -1. -1. -1.  4.]
-
 Global Action Space:
 0: Position: (0, 0), Guess: higher, Orientation: None
 1: Position: (0, 0), Guess: same, Orientation: None

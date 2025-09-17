@@ -1,15 +1,14 @@
 import torch
-from simulation_env import WindowGameEnv, flatten_state  # Assuming simulation_env.py is in your project
+
+from simulation_env import WindowGameEnv, flatten_state
 from model import DrinkingGameAgent
 
 class RLAgent:
     def __init__(self, device=torch.device("cpu")):
         self.device = device
-        # Instantiate the model
-        self.model = DrinkingGameAgent().to(self.device)
-        # In practice, load pre-trained weights here:
-        # self.model.load_state_dict(torch.load('path_to_trained_weights.pth'))
-        self.model.eval()  # Set model to evaluation mode
+        self.model = DrinkingGameAgent().to(self.device)  # initiate the model
+        # self.model.load_state_dict(torch.load('path_to_weights.pth'))  # load model, if trained
+        self.model.eval()
 
     def predict_action(self, env):
         """
@@ -20,21 +19,15 @@ class RLAgent:
           - action_index: an integer index (0-153) corresponding to the chosen action
           - probs: the output probability distribution (as a numpy array)
         """
-        # Obtain the current state dictionary from the environment
-        state = env._get_state()
-        # Flatten the state using the provided helper
-        flat_state = flatten_state(state)  # Expected shape: (22,)
-        # Convert the numpy array to a torch tensor (cast to long since our embedding expects integers)
+        state = env._get_state()  # Get current state dictionary from the environment
+        flat_state = flatten_state(state)  # Flatten the state ( Expected shape: (22,10) )
         state_tensor = torch.tensor(flat_state, dtype=torch.long, device=self.device).unsqueeze(0)
-        # Forward pass through the model
         logits = self.model(state_tensor)  # Shape: (1, 154)
         probs = torch.softmax(logits, dim=1)
-        # Choose an action; here we use argmax (alternatively, sample from the distribution)
-        action_index = torch.argmax(probs, dim=1).item()
+        action_index = torch.argmax(probs, dim=1).item()  # Action choosing: here we use argmax
         return action_index, probs.detach().cpu().numpy()
 
 if __name__ == "__main__":
-    # Quick example usage
     env = WindowGameEnv(observer=False)
     agent = RLAgent()
     state = env.reset()
