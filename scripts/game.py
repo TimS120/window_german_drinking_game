@@ -38,6 +38,7 @@ class WindowGame:
         self.root = root
         self.root.title("Window Drinking Game")
         self.confirm_window = None
+        self.ui_locked = False
 
         self.init_images()
         self.init_stats()
@@ -255,7 +256,7 @@ class WindowGame:
             r (int): Row index.
             c (int): Column index.
         """
-        if self.confirm_button is not None or self.face_up[r][c]:
+        if self.ui_locked or self.confirm_button is not None or self.face_up[r][c]:
             return
         if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
             return
@@ -302,6 +303,9 @@ class WindowGame:
         if not options:
             return
 
+        if not self.lock_user_interaction():
+            return
+
         if len(options) == 1:
             opt = options[0]
             if opt[0] == "in-between":
@@ -312,17 +316,40 @@ class WindowGame:
 
         choose_win = tk.Toplevel(self.root)
         choose_win.title("Choose Guess Option")
+        self.make_modal(choose_win)
+        closed_without_choice = {"done": False}
+
+        def close_choose_window():
+            if closed_without_choice["done"]:
+                return
+            closed_without_choice["done"] = True
+            choose_win.destroy()
+            self.unlock_user_interaction()
+
+        choose_win.protocol("WM_DELETE_WINDOW", close_choose_window)
         tk.Label(choose_win, text="Select a guessing option:").pack(padx=5, pady=5)
         for opt in options:
             if opt[0] == "in-between":
                 btn_text = f"In-between ({opt[1]} boundaries)"
                 def make_callback(o=opt):
-                    return lambda: [self.ask_in_between(r, c, o[2][0], o[2][1]), choose_win.destroy()]
+                    def callback():
+                        if closed_without_choice["done"]:
+                            return
+                        closed_without_choice["done"] = True
+                        choose_win.destroy()
+                        self.ask_in_between(r, c, o[2][0], o[2][1])
+                    return callback
                 tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
             elif opt[0] == "higher-lower":
                 btn_text = f"Higher/Lower (neighbor at {opt[1]})"
                 def make_callback(o=opt):
-                    return lambda: [self.ask_higher_same_lower(r, c, o[2]), choose_win.destroy()]
+                    def callback():
+                        if closed_without_choice["done"]:
+                            return
+                        closed_without_choice["done"] = True
+                        choose_win.destroy()
+                        self.ask_higher_same_lower(r, c, o[2])
+                    return callback
                 tk.Button(choose_win, text=btn_text, command=make_callback()).pack(padx=5, pady=2)
 
     def ask_higher_same_lower(self, r, c, neighbor):
@@ -336,22 +363,40 @@ class WindowGame:
         """
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess Higher, Same, or Lower")
-        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
+        self.make_modal(guess_win)
+        resolved = {"done": False}
+
+        def close_without_guess():
+            if resolved["done"]:
+                return
+            resolved["done"] = True
+            guess_win.destroy()
+            self.unlock_user_interaction()
+
+        guess_win.protocol("WM_DELETE_WINDOW", close_without_guess)
         tk.Label(guess_win, text="Is the selected card Higher, Same, or Lower than the neighbor?").pack()
+
+        def make_choice(choice):
+            if resolved["done"]:
+                return
+            resolved["done"] = True
+            guess_win.destroy()
+            self.resolve_higher_same_lower(r, c, neighbor, choice)
+
         tk.Button(
             guess_win,
             text="Higher",
-            command=lambda: [self.resolve_higher_same_lower(r, c, neighbor, "higher"), guess_win.destroy()]
+            command=lambda: make_choice("higher")
         ).pack(side=tk.LEFT, padx=5)
         tk.Button(
             guess_win,
             text="Same",
-            command=lambda: [self.resolve_higher_same_lower(r, c, neighbor, "same"), guess_win.destroy()]
+            command=lambda: make_choice("same")
         ).pack(side=tk.LEFT, padx=5)
         tk.Button(
             guess_win,
             text="Lower",
-            command=lambda: [self.resolve_higher_same_lower(r, c, neighbor, "lower"), guess_win.destroy()]
+            command=lambda: make_choice("lower")
         ).pack(side=tk.RIGHT, padx=5)
 
     def resolve_higher_same_lower(self, r, c, neighbor, guess):
@@ -388,6 +433,7 @@ class WindowGame:
         """
         popup = tk.Toplevel(self.root)
         popup.title("Confirm Swallow Drinking")
+        self.make_modal(popup)
         current_player = self.current_player()
         msg = (
             f"Correct 'Same' guess!\n\n"
@@ -401,6 +447,7 @@ class WindowGame:
                     self.drink_count[player] += 1
             popup.destroy()
             self.finish_guess(r, c, True)
+        popup.protocol("WM_DELETE_WINDOW", lambda: [popup.destroy(), self.unlock_user_interaction()])
         tk.Button(popup, text="Confirm", command=confirm, padx=10, pady=10).pack()
 
     def ask_in_between(self, r, c, n1, n2):
@@ -415,17 +462,35 @@ class WindowGame:
         """
         guess_win = tk.Toplevel(self.root)
         guess_win.title("Guess In-Between or Outside")
-        guess_win.protocol("WM_DELETE_WINDOW", guess_win.destroy)
+        self.make_modal(guess_win)
+        resolved = {"done": False}
+
+        def close_without_guess():
+            if resolved["done"]:
+                return
+            resolved["done"] = True
+            guess_win.destroy()
+            self.unlock_user_interaction()
+
+        guess_win.protocol("WM_DELETE_WINDOW", close_without_guess)
         tk.Label(guess_win, text="Is the card In-Between or Outside these two?").pack()
+
+        def make_choice(is_in_between):
+            if resolved["done"]:
+                return
+            resolved["done"] = True
+            guess_win.destroy()
+            self.resolve_in_between(r, c, n1, n2, is_in_between)
+
         tk.Button(
             guess_win,
             text="In-Between",
-            command=lambda: [self.resolve_in_between(r, c, n1, n2, True), guess_win.destroy()]
+            command=lambda: make_choice(True)
         ).pack(side=tk.LEFT, padx=10)
         tk.Button(
             guess_win,
             text="Outside",
-            command=lambda: [self.resolve_in_between(r, c, n1, n2, False), guess_win.destroy()]
+            command=lambda: make_choice(False)
         ).pack(side=tk.RIGHT, padx=10)
 
     def resolve_in_between(self, r, c, n1, n2, guess_in):
@@ -494,8 +559,10 @@ class WindowGame:
             self.update_ui()
             self.stop_turn_button.config(state=tk.NORMAL)
             if self.check_game_end():
+                self.unlock_user_interaction()
                 return
             self.info_label.config(text=f"{current_player}'s turn continues. You may end your turn using the button.")
+            self.unlock_user_interaction()
         else:
             self.face_up[r][c] = True
             self.update_ui()
@@ -516,6 +583,7 @@ class WindowGame:
             self.disable_card_buttons()
             self.confirm_window = tk.Toplevel(self.root)
             self.confirm_window.title("Confirm Removal")
+            self.make_modal(self.confirm_window)
             tk.Label(
                 self.confirm_window,
                 text=f"Wrong guess! {current_player} must drink {penalty} drink(s). Confirm removal of marked cards."
@@ -526,6 +594,7 @@ class WindowGame:
                 command=self.confirm_removals
             )
             self.confirm_button.pack(padx=10, pady=10)
+            self.confirm_window.protocol("WM_DELETE_WINDOW", lambda: None)
             self.turn_can_end = False
             self.update_ui()
 
@@ -559,15 +628,46 @@ class WindowGame:
         self.pending_removals = set()
         self.update_ui()
         self.info_label.config(text=f"{self.current_player()} goes again.")
+        self.unlock_user_interaction()
 
     def disable_card_buttons(self):
         """
-        Ensure all card buttons are enabled.
+        Disable all card buttons.
         """
         for r in range(len(self.buttons)):
             for c in range(len(self.buttons[r])):
                 if self.buttons[r][c] is not None:
-                    self.buttons[r][c].config(state=tk.NORMAL)
+                    self.buttons[r][c].config(state=tk.DISABLED)
+
+    def lock_user_interaction(self):
+        """
+        Lock card interactions while a decision popup is active.
+        """
+        if self.ui_locked:
+            return False
+        self.ui_locked = True
+        self.disable_card_buttons()
+        self.stop_turn_button.config(state=tk.DISABLED)
+        return True
+
+    def unlock_user_interaction(self):
+        """
+        Unlock card interactions after popup flow is finished or canceled.
+        """
+        if not self.ui_locked:
+            return
+        self.ui_locked = False
+        self.update_ui()
+        if self.turn_can_end and self.confirm_button is None:
+            self.stop_turn_button.config(state=tk.NORMAL)
+
+    def make_modal(self, window):
+        """
+        Configure a popup as modal so background widgets cannot be clicked.
+        """
+        window.transient(self.root)
+        window.grab_set()
+        window.focus_force()
 
     def redeal_spots(self):
         """
@@ -908,7 +1008,8 @@ class WindowGame:
                     else:
                         widget.config(image=self.back_photo, text="")
 
-                    widget.config(state=tk.NORMAL, command=lambda rr=r, cc=c: self.on_card_click(rr, cc))
+                    state = tk.DISABLED if self.ui_locked else tk.NORMAL
+                    widget.config(state=state, command=lambda rr=r, cc=c: self.on_card_click(rr, cc))
                 else:
                     widget.config(text=" ", image="", state=tk.DISABLED)
 
