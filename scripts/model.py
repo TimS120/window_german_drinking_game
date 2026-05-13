@@ -9,7 +9,7 @@ class DrinkingGameAgent(nn.Module):
                             hidden_size=hidden_size,
                             num_layers=num_layers,
                             batch_first=True)
-        self.head = nn.Linear(hidden_size, 210)
+        self.head = nn.Linear(hidden_size, 154)
 
     def forward(self, x, valid_mask):
         """
@@ -17,8 +17,8 @@ class DrinkingGameAgent(nn.Module):
         valid_mask: BoolTensor of shape (batch, 7, 5, 6)
 
         returns: 
-          raw_logits: FloatTensor (batch, 210)
-          probs:      FloatTensor (batch, 210)
+          raw_logits: FloatTensor (batch, 154)
+          probs:      FloatTensor (batch, 154)
         """
         # ensure float32 before feeding into LSTM
         x = x.float()
@@ -31,7 +31,7 @@ class DrinkingGameAgent(nn.Module):
         _, (hn, _) = self.lstm(seq)
         feats = hn[-1]
 
-        # project to 210 logits
+        # project to 154 logits
         raw = self.head(feats)
 
         # mask out illegal moves

@@ -1,152 +1,175 @@
-import random
-import numpy as np
-from collections import deque
-import torch
+﻿"""Train MaskablePPO on WindowGameEnv using split training/simulation config files."""
+
+import json
+import os
+from datetime import datetime
+
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
+from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from simulation_env import WindowGameEnv, flatten_state
-from model import DrinkingGameAgent
+from simulation_env import WindowGameEnv
 
-# Hyperparameters
-NUM_EPISODES = 500           # Number of episodes to train
-MAX_STEPS = 1000             # Max steps per episode (adjust as needed)
-BATCH_SIZE = 32              # Batch size for training
-GAMMA = 0.99                 # Discount factor
-LEARNING_RATE = 1e-3         # Learning rate for optimizer
-TARGET_UPDATE_FREQ = 1000    # Update target network every N steps
-REPLAY_BUFFER_SIZE = 10000   # Maximum size of the replay buffer
 
-# Exploration parameters
-EPS_START = 1.0
-EPS_END = 0.1
-EPS_DECAY = 0.999  # Decay per episode
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DEFAULT_TRAINING_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "training_config.json")
+DEFAULT_SIMULATION_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "simulation_config.json")
 
-# Set up device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
+def _load_json(path: str) -> dict:
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
 
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
 
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = map(np.array, zip(*batch))
-        return state, action, reward, next_state, done
+def _activation_fn(name: str):
+    mapping = {
+        "ReLU": nn.ReLU,
+        "Tanh": nn.Tanh,
+        "ELU": nn.ELU,
+        "LeakyReLU": nn.LeakyReLU,
+    }
+    if name not in mapping:
+        raise ValueError(f"Unsupported activation_fn '{name}'. Supported: {sorted(mapping)}")
+    return mapping[name]
 
-    def __len__(self):
-        return len(self.buffer)
 
-def select_action(state, q_network, epsilon):
-    """Epsilon-greedy action selection."""
-    # state: np.ndarray (10,5,6)
-    st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)  # states
-    vm = st[:,3:10,:,:].to(torch.bool)  # valid moves
-    with torch.no_grad():
-        _, q_values = q_network(st, vm)  # feed states and valid moves into the network
-    return int(torch.argmax(q_values, dim=1).item())
+def _env_factory(sim_cfg: dict, reward_cfg: dict):
+    def _make_env():
+        return WindowGameEnv(
+            players=sim_cfg["players"],
+            observer=sim_cfg["observer"],
+            max_steps=sim_cfg["max_steps"],
+            reward_config=reward_cfg,
+        )
 
-def main():
-    env = WindowGameEnv(observer=False)
+    return _make_env
 
-    # Initialize Q-network and target network
-    q_network = DrinkingGameAgent().to(device)
-    target_network = DrinkingGameAgent().to(device)
-    target_network.load_state_dict(q_network.state_dict())
-    target_network.eval()
 
-    optimizer = optim.Adam(q_network.parameters(), lr=LEARNING_RATE)
-    replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
+def _make_run_dir(base_dir: str) -> str:
+    run_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = os.path.join(base_dir, run_name)
+    os.makedirs(run_dir, exist_ok=False)
+    return run_dir
 
-    epsilon = EPS_START
-    total_steps = 0
 
-    writer = SummaryWriter(log_dir="runs")
+def main(
+    training_config_path: str = DEFAULT_TRAINING_CONFIG_PATH,
+    simulation_config_path: str = DEFAULT_SIMULATION_CONFIG_PATH,
+):
+    train_cfg = _load_json(training_config_path)
+    sim_cfg = _load_json(simulation_config_path)
 
-    for episode in range(1, NUM_EPISODES + 1):
-        state_dict = env.reset()
-        state = flatten_state(state_dict)
-        episode_reward = 0
-        correct_count = 0
-        wrong_count = 0
-        invalid_count = 0
+    algo_cfg = train_cfg["algorithm"]
+    reward_cfg = train_cfg["reward"]
+    eval_cfg = train_cfg["evaluation"]
+    ckpt_cfg = train_cfg["checkpoint"]
 
-        for step in range(MAX_STEPS):
-            total_steps += 1
-            action = select_action(state, q_network, epsilon)
-            next_state_dict, reward, done, debug = env.step_global(action)
-            next_state = flatten_state(next_state_dict)
-            episode_reward += reward
+    if algo_cfg["name"] != "MaskablePPO":
+        raise ValueError("Only 'MaskablePPO' is currently supported in this training script.")
 
-            # Count debug messages for different metrics
-            if "Correct guess" in debug:
-                correct_count += 1
-            elif "Wrong guess" in debug:
-                wrong_count += 1
-            else:
-                invalid_count += 1
+    output_base_dir = os.path.join(REPO_ROOT, train_cfg["output"]["base_dir"])
+    run_dir = _make_run_dir(output_base_dir)
+    checkpoints_dir = os.path.join(run_dir, "checkpoints")
+    tensorboard_dir = os.path.join(run_dir, "tensorboard")
+    best_model_dir = os.path.join(run_dir, "best_model")
 
-            replay_buffer.push(state, action, reward, next_state, done)
-            state = next_state
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    os.makedirs(tensorboard_dir, exist_ok=True)
+    os.makedirs(best_model_dir, exist_ok=True)
 
-            if len(replay_buffer) >= BATCH_SIZE:
-                states, actions, rewards, next_states, dones = replay_buffer.sample(BATCH_SIZE)
+    with open(os.path.join(run_dir, "training_config.json"), "w", encoding="utf-8") as f:
+        f.write(json.dumps(train_cfg, indent=2))
+    with open(os.path.join(run_dir, "simulation_config.json"), "w", encoding="utf-8") as f:
+        f.write(json.dumps(sim_cfg, indent=2))
 
-                # states: (B,10,5,6), actions: (B,), rewards: (B,), next_states: (B,10,5,6), dones: (B,)
-                st = torch.tensor(states, dtype=torch.float32, device=device)  # (B,10,5,6)
-                vm = st[:, 3:10, :, :].to(torch.bool)  # (B,7,5,6)
-                at = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)  # (B,1)
-                rw = torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(1)  # (B,1)
-                nst = torch.tensor(next_states, dtype=torch.float32, device=device)  # (B,10,5,6)
-                dn = torch.tensor(dones, dtype=torch.float32, device=device).unsqueeze(1)  # (B,1)
+    vec_env_cls = SubprocVecEnv if sim_cfg.get("vec_env", "subproc") == "subproc" else DummyVecEnv
 
-                # Q(s,a)
-                _, q_all = q_network(st, vm)  # (B,210)
-                q_selected = q_all.gather(1, at)  # (B,1)
+    train_env = make_vec_env(
+        _env_factory(sim_cfg, reward_cfg),
+        n_envs=sim_cfg["n_envs"],
+        seed=train_cfg["seed"],
+        vec_env_cls=vec_env_cls,
+    )
 
-                # Q-targets using the target network
-                with torch.no_grad():
-                    nvm = nst[:, 3:10, :, :].to(torch.bool)
-                    _, q_next = target_network(nst, nvm)  # (B,210)
-                    max_q, _ = q_next.max(dim=1, keepdim=True)  # (B,1)
-                    q_target = rw + GAMMA * max_q * (1 - dn)  # (B,1)
+    eval_env = make_vec_env(
+        _env_factory(sim_cfg, reward_cfg),
+        n_envs=1,
+        seed=train_cfg["seed"] + 1,
+        vec_env_cls=DummyVecEnv,
+    )
 
-                # MSE loss & backprop
-                loss = nn.MSELoss()(q_selected, q_target)
+    hidden_layers = algo_cfg["hidden_layers"]
+    policy_kwargs = {
+        "activation_fn": _activation_fn(algo_cfg.get("activation_fn", "ReLU")),
+        "net_arch": {
+            "pi": hidden_layers,
+            "vf": hidden_layers,
+        },
+    }
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+    model = MaskablePPO(
+        policy=algo_cfg["policy"],
+        env=train_env,
+        learning_rate=algo_cfg["learning_rate"],
+        n_steps=algo_cfg["n_steps"],
+        batch_size=algo_cfg["batch_size"],
+        n_epochs=algo_cfg["n_epochs"],
+        gamma=algo_cfg["gamma"],
+        gae_lambda=algo_cfg["gae_lambda"],
+        clip_range=algo_cfg["clip_range"],
+        ent_coef=algo_cfg["ent_coef"],
+        vf_coef=algo_cfg["vf_coef"],
+        max_grad_norm=algo_cfg["max_grad_norm"],
+        target_kl=algo_cfg.get("target_kl"),
+        tensorboard_log=tensorboard_dir,
+        policy_kwargs=policy_kwargs,
+        seed=train_cfg["seed"],
+        verbose=1,
+        device=algo_cfg.get("device", "auto"),
+    )
 
-            if total_steps % TARGET_UPDATE_FREQ == 0:
-                target_network.load_state_dict(q_network.state_dict())
+    callbacks = [
+        CheckpointCallback(
+            save_freq=max(1, ckpt_cfg["save_freq"] // sim_cfg["n_envs"]),
+            save_path=checkpoints_dir,
+            name_prefix="checkpoint",
+        )
+    ]
 
-            if done:
-                break
+    if eval_cfg.get("enabled", True):
+        callbacks.append(
+            MaskableEvalCallback(
+                eval_env,
+                best_model_save_path=best_model_dir,
+                log_path=run_dir,
+                eval_freq=max(1, eval_cfg["eval_freq"] // sim_cfg["n_envs"]),
+                n_eval_episodes=eval_cfg["n_eval_episodes"],
+                deterministic=eval_cfg["deterministic"],
+                warn=False,
+            )
+        )
 
-        epsilon = max(EPS_END, epsilon * EPS_DECAY)
+    model.learn(
+        total_timesteps=algo_cfg["total_timesteps"],
+        callback=CallbackList(callbacks),
+        tb_log_name="training",
+        use_masking=True,
+        progress_bar=True,
+    )
 
-        if wrong_count == 0:
-            ratio = correct_count
-        else:
-            ratio = correct_count / wrong_count
+    latest_model_path = os.path.join(run_dir, "latest_model.zip")
+    model.save(latest_model_path)
 
-        # Log metrics to TensorBoard for this episode
-        writer.add_scalar("Episode/Reward",episode_reward,episode)
-        writer.add_scalar("Episode/Correct_Guesses",correct_count,episode)
-        writer.add_scalar("Episode/Wrong_Guesses",wrong_count,episode)
-        writer.add_scalar("Episode/Invalid_Guesses",invalid_count,episode)
-        writer.add_scalar("Episode/Correct_to_Wrong_Ratio",ratio,episode)
+    print(f"Training complete. Output directory: {run_dir}")
+    print(f"Latest model: {latest_model_path}")
+    print(f"Best model directory: {best_model_dir}")
 
-        print(f"Episode {episode}: Reward = {episode_reward:.2f}, Correct = {correct_count}, Wrong = {wrong_count}, Invalid = {invalid_count}, Ratio = {ratio:.2f}, Epsilon = {epsilon:.3f}")
+    train_env.close()
+    eval_env.close()
 
-    writer.close()
-    torch.save(q_network.state_dict(), "models/drinking_game_dqn.pth")
-    print("Training complete and model saved.")
 
 if __name__ == "__main__":
     main()

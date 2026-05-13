@@ -63,12 +63,14 @@ This project's purpose is the:
 - main.py: Deprecated version of the game (player vs. player)
 <br />
 <br />
-- agent.py: The agent that uses a trained model to act as the bot opponent
-- config.py: Definitions and configuration parameters for the game
+- agent.py: Inference agent using a trained MaskablePPO model
+- config.py: Definitions and configuration parameters for the game board/cards
 - game.py: The core game
-- model.py: The model of the agent
-- train.py: The trainings script for the model
+- train.py: Config-driven training script using Gymnasium + MaskablePPO
 - utils.py: Helper functions for the whole game
+- configs/training_config.json: Training-specific configuration
+- configs/simulation_config.json: Simulation/game configuration for training
+- resources/additional/lookup_action_number_to_action.txt: Optional lookup reference (not runtime)
 
 
 ## Agent/ Training

@@ -1,0 +1,7 @@
+﻿{
+  "players": ["Alice", "Bob", "Charlie"],
+  "observer": false,
+  "max_steps": 1000,
+  "n_envs": 8,
+  "vec_env": "subproc"
+}

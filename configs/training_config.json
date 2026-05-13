@@ -1,0 +1,43 @@
+﻿{
+  "seed": 42,
+  "algorithm": {
+    "name": "MaskablePPO",
+    "policy": "MlpPolicy",
+    "total_timesteps": 300000,
+    "learning_rate": 0.0003,
+    "n_steps": 2048,
+    "batch_size": 256,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "ent_coef": 0.0,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "target_kl": null,
+    "device": "auto",
+    "activation_fn": "ReLU",
+    "hidden_layers": [128, 128]
+  },
+  "reward": {
+    "correct_guess": 1.0,
+    "wrong_guess": -1.0,
+    "invalid_action": -1.0,
+    "win_bonus": 0.0
+  },
+  "evaluation": {
+    "enabled": true,
+    "eval_freq": 10000,
+    "n_eval_episodes": 20,
+    "deterministic": true
+  },
+  "checkpoint": {
+    "save_freq": 25000
+  },
+  "output": {
+    "base_dir": "outputs"
+  },
+  "inference": {
+    "deterministic": true
+  }
+}
