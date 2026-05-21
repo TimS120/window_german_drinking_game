@@ -39,6 +39,8 @@ class WindowGame:
         self.root.title("Window Drinking Game")
         self.confirm_window = None
         self.ui_locked = False
+        self.card_border_width = 3
+        self.card_border_inactive_color = self.root.cget("bg")
 
         self.init_images()
         self.init_stats()
@@ -182,6 +184,7 @@ class WindowGame:
 
         self.frame_game = tk.Frame(self.frame_center)
         self.frame_game.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.BOTH, expand=True)
+        self.card_border_inactive_color = self.frame_game.cget("bg")
 
         self.frame_stats = tk.Frame(self.frame_center)
         self.frame_stats.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH, expand=True)
@@ -219,7 +222,13 @@ class WindowGame:
             frame_row = []
             for c in range(len(WINDOW_LAYOUT[r])):
                 if WINDOW_LAYOUT[r][c]:
-                    container = tk.Frame(self.frame_game, highlightthickness=0, bd=0)
+                    container = tk.Frame(
+                        self.frame_game,
+                        highlightthickness=self.card_border_width,
+                        highlightbackground=self.card_border_inactive_color,
+                        highlightcolor=self.card_border_inactive_color,
+                        bd=0
+                    )
                     container.grid(row=r, column=c, padx=5, pady=5)
                     b = tk.Button(
                         container,
@@ -579,7 +588,7 @@ class WindowGame:
             for pos in self.pending_removals:
                 rr, cc = pos
                 if self.button_frames[rr][cc]:
-                    self.button_frames[rr][cc].config(highlightthickness=3, highlightbackground="red")
+                    self.button_frames[rr][cc].config(highlightbackground="red", highlightcolor="red")
             self.disable_card_buttons()
             self.confirm_window = tk.Toplevel(self.root)
             self.confirm_window.title("Confirm Removal")
@@ -606,7 +615,10 @@ class WindowGame:
         for pos in self.pending_removals:
             rr, cc = pos
             if self.button_frames[rr][cc]:
-                self.button_frames[rr][cc].config(highlightthickness=0)
+                self.button_frames[rr][cc].config(
+                    highlightbackground=self.card_border_inactive_color,
+                    highlightcolor=self.card_border_inactive_color
+                )
         for pos in self.pending_removals:
             rr, cc = pos
             cid = self.card_grid[rr][cc]
@@ -1015,18 +1027,24 @@ class WindowGame:
 
                 # Restore the highlight frame around selectable cards
                 if (r, c) in self.pending_removals:
-                    container.config(highlightthickness=3, highlightbackground="red")
+                    container.config(highlightbackground="red", highlightcolor="red")
                 elif self.face_up[r][c]:
-                    container.config(highlightthickness=0)
+                    container.config(
+                        highlightbackground=self.card_border_inactive_color,
+                        highlightcolor=self.card_border_inactive_color
+                    )
                 else:
                     # Ensure only adjacent selectable cards are highlighted
                     is_selectable = (r, c) in adjacent_positions(HANDLE_POSITION) if self.must_select_adjacent_to_handle else any(
                         self.face_up[nr][nc] for nr, nc in adjacent_positions((r, c))
                     )
                     if is_selectable:
-                        container.config(highlightthickness=3, highlightbackground="grey")  # Highlight selectable cards
+                        container.config(highlightbackground="grey", highlightcolor="grey")  # Highlight selectable cards
                     else:
-                        container.config(highlightthickness=0)  # Remove highlight if not selectable
+                        container.config(
+                            highlightbackground=self.card_border_inactive_color,
+                            highlightcolor=self.card_border_inactive_color
+                        )  # Hide highlight while keeping geometry
 
         # Ensure the statistics table updates
         self.update_stats_table()
