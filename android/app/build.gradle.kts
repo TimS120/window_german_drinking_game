@@ -4,6 +4,21 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val repoRoot = rootProject.projectDir.parentFile
+val generatedSharedResDir = layout.buildDirectory.dir("generated/res/sharedCards")
+
+val prepareSharedCardDrawables by tasks.registering(Copy::class) {
+    from(File(repoRoot, "resources/front")) {
+        include("*.png")
+        eachFile { name = name.lowercase() }
+    }
+    from(File(repoRoot, "resources/back")) {
+        include("back.png")
+        rename("back.png", "card_back.png")
+    }
+    into(generatedSharedResDir.map { it.dir("drawable") })
+}
+
 android {
     namespace = "window_german_drinking_game.com"
     compileSdk {
@@ -39,6 +54,16 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets {
+        getByName("main") {
+            res.srcDir(generatedSharedResDir)
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(prepareSharedCardDrawables)
 }
 
 dependencies {
