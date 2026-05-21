@@ -1,10 +1,9 @@
-"""
-Utility functions for the Window Drinking Game.
-"""
+"""Utility functions for the Window Drinking Game."""
 
-import tkinter as tk
-
-from config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
+try:
+    from config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
+except ImportError:
+    from .config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
 
 
 def get_player_names(root):
@@ -126,3 +125,4 @@ def card_id_to_front_filename(card_id):
     rank = RANKS[card_id // 4]
     suit = SUITS[card_id % 4]
     return f"{SUIT_MAP[suit]}_{RANK_MAP[rank]}.png"
+    import tkinter as tk

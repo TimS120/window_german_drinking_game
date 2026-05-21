@@ -1,12 +1,6 @@
-﻿"""
-Simulation environment for the Window Drinking Game.
-
-This module provides a Gymnasium-compatible environment and utilities for
-training and inference with action masking.
-"""
+"""Gymnasium environment backed by the platform-independent core engine."""
 
 import random
-import tkinter as tk
 from typing import Any
 
 import gymnasium as gym
@@ -14,9 +8,14 @@ import numpy as np
 import torch
 from gymnasium import spaces
 
-from game import WindowGame
-from config import WINDOW_LAYOUT, HANDLE_POSITION
-from utils import adjacent_positions, get_rank_index
+try:
+    from core_game import CoreWindowGame
+    from config import WINDOW_LAYOUT
+    from utils import get_rank_index
+except ImportError:
+    from .core_game import CoreWindowGame
+    from .config import WINDOW_LAYOUT
+    from .utils import get_rank_index
 
 
 def build_global_action_space() -> list[dict[str, Any]]:
@@ -52,168 +51,6 @@ def action_to_mask_key(action: dict[str, Any]) -> str:
     return guess
 
 
-class SimulatedWindowGame(WindowGame):
-    """A WindowGame subclass that captures moves for simulation."""
-
-    def __init__(self, root, players, observer=False):
-        self.observer = observer
-        super().__init__(root, players)
-        self.simulation_mode = True
-        if observer:
-            self.human_action = None
-            self.human_action_var = tk.StringVar(value="")
-
-    def set_human_action(self, action):
-        self.human_action = action
-        self.human_action_var.set("done")
-
-    def human_turn(self):
-        self.human_action = None
-        self.human_action_var.set("")
-        self.root.wait_variable(self.human_action_var)
-        return self.human_action
-
-    def get_valid_options_for_card(self, r, c):
-        options = []
-        neighbors = []
-        for nr, nc in adjacent_positions((r, c)):
-            if self.face_up[nr][nc]:
-                if nr == r - 1 and nc == c:
-                    direction = "north"
-                elif nr == r + 1 and nc == c:
-                    direction = "south"
-                elif nr == r and nc == c - 1:
-                    direction = "west"
-                elif nr == r and nc == c + 1:
-                    direction = "east"
-                else:
-                    direction = ""
-                neighbors.append(((nr, nc), direction))
-
-        horizontal = [n for n, d in neighbors if d in ("east", "west")]
-        vertical = [n for n, d in neighbors if d in ("north", "south")]
-
-        if len(horizontal) >= 2:
-            left = min(horizontal)
-            right = max(horizontal)
-            options.append(
-                {
-                    "type": "in-between",
-                    "guess_options": ["in-between", "outside"],
-                    "neighbors": (left, right),
-                    "orientation": "horizontal",
-                }
-            )
-        elif len(horizontal) == 1:
-            options.append(
-                {
-                    "type": "higher-lower",
-                    "guess_options": ["higher", "same", "lower"],
-                    "neighbors": horizontal[0],
-                    "orientation": "horizontal",
-                }
-            )
-
-        if len(vertical) >= 2:
-            top = min(vertical)
-            bottom = max(vertical)
-            options.append(
-                {
-                    "type": "in-between",
-                    "guess_options": ["in-between", "outside"],
-                    "neighbors": (top, bottom),
-                    "orientation": "vertical",
-                }
-            )
-        elif len(vertical) == 1:
-            options.append(
-                {
-                    "type": "higher-lower",
-                    "guess_options": ["higher", "same", "lower"],
-                    "neighbors": vertical[0],
-                    "orientation": "vertical",
-                }
-            )
-
-        in_between_opts = [opt for opt in options if opt["type"] == "in-between"]
-        if in_between_opts:
-            options = in_between_opts
-
-        return options
-
-    def simulate_action(self, position, guess, orientation=None):
-        r, c = position
-        if not WINDOW_LAYOUT[r][c]:
-            return {"reward": -10, "done": False, "debug": "Invalid position: not a card slot."}
-        if self.face_up[r][c]:
-            return {"reward": -10, "done": False, "debug": "Card already face-up."}
-        if self.must_select_adjacent_to_handle and (r, c) not in adjacent_positions(HANDLE_POSITION):
-            return {"reward": -10, "done": False, "debug": "Must select card adjacent to handle."}
-
-        options = self.get_valid_options_for_card(r, c)
-        if not options:
-            return {"reward": -2, "done": False, "debug": "No valid guess options for this card."}
-
-        selected_option = None
-        if orientation:
-            for opt in options:
-                if opt.get("orientation") == orientation:
-                    selected_option = opt
-                    break
-        else:
-            selected_option = options[0]
-
-        if selected_option is None:
-            return {"reward": -2, "done": False, "debug": "No valid option for given orientation."}
-
-        if guess not in selected_option["guess_options"]:
-            return {"reward": -2, "done": False, "debug": "Invalid guess for selected option."}
-
-        if selected_option["type"] == "higher-lower":
-            neighbor = selected_option["neighbors"]
-            self.resolve_higher_same_lower(r, c, neighbor, guess)
-        elif selected_option["type"] == "in-between":
-            neighbor1, neighbor2 = selected_option["neighbors"]
-            guess_in = guess == "in-between"
-            self.resolve_in_between(r, c, neighbor1, neighbor2, guess_in)
-        else:
-            return {"reward": -2, "done": False, "debug": "Unknown option type."}
-
-        was_wrong = bool(self.pending_removals)
-        penalty = self.pending_penalty if was_wrong and hasattr(self, "pending_penalty") else 0
-
-        if self.pending_removals:
-            self.auto_confirm_removals()
-
-        if was_wrong:
-            reward = -penalty
-            debug_info = "Wrong guess."
-        else:
-            reward = 5
-            debug_info = "Correct guess."
-
-        done = self.check_game_end()
-        if done and not was_wrong:
-            reward = 200
-
-        if self.observer:
-            self.update_ui()
-            self.root.update_idletasks()
-            self.root.update()
-
-        return {"reward": reward, "done": done, "debug": debug_info}
-
-    def auto_confirm_removals(self):
-        self.confirm_removals()
-
-    def same_guess_confirmation(self, r, c):
-        current_player = self.current_player()
-        for player in self.players:
-            if player != current_player:
-                self.drink_count[player] += 1
-        self.finish_guess(r, c, True)
-
-
 class WindowGameEnv(gym.Env):
     """Gymnasium-compatible environment with invalid action masking."""
 
@@ -231,12 +68,7 @@ class WindowGameEnv(gym.Env):
             "win_bonus": 0.0,
         }
 
-        self.root = tk.Tk()
-        self.root.withdraw()
-        if observer:
-            self.root.deiconify()
-
-        self.game = SimulatedWindowGame(self.root, players, observer=observer)
+        self.game = CoreWindowGame(players=players)
         self.global_action_space = GLOBAL_ACTION_SPACE
         self._step_count = 0
 
@@ -309,17 +141,6 @@ class WindowGameEnv(gym.Env):
             mask[idx] = bool(vm[key][r, c])
         return mask
 
-    def human_turn(self):
-        action = self.game.human_turn()
-        for i, act in enumerate(self.global_action_space):
-            if (
-                act["position"] == action["position"]
-                and act["guess"] == action["guess"]
-                and act.get("orientation") == action.get("orientation")
-            ):
-                return i, action
-        return None, action
-
     def _get_state(self):
         state = {
             "card_grid": self.game.card_grid,
@@ -347,10 +168,10 @@ class WindowGameEnv(gym.Env):
                     continue
                 opts = self.game.get_valid_options_for_card(r, c)
                 for opt in opts:
-                    for guess in opt["guess_options"]:
+                    for guess in opt.guess_options:
                         key = guess
                         if guess in ["in-between", "outside"]:
-                            ori = opt["orientation"][0]
+                            ori = opt.orientation[0]
                             key = f"{guess.replace('-', '_')}_{'h' if ori == 'h' else 'v'}"
                         vm[key][r, c] = True
 
@@ -372,23 +193,19 @@ class WindowGameEnv(gym.Env):
 
     def get_valid_actions(self):
         valid_actions = []
+        state = self._get_state()
         for idx, action in enumerate(self.global_action_space):
             key = action_to_mask_key(action)
             r, c = action["position"]
-            if self._get_state()["valid_masks"][key][r, c]:
+            if state["valid_masks"][key][r, c]:
                 valid_actions.append((idx, action))
         return valid_actions
 
     def render(self):
-        if self.observer:
-            self.game.update_ui()
-            self.root.update_idletasks()
-            self.root.update()
+        return None
 
     def close(self):
-        if hasattr(self, "root") and self.root is not None:
-            self.root.destroy()
-            self.root = None
+        return None
 
 
 def get_human_action(env):
@@ -430,21 +247,14 @@ def flatten_state(state):
 
 
 if __name__ == "__main__":
-    mode = input("Select mode: [H]uman UI, [C]onsole Human, or [G]lobal AI action? ").strip().upper()
-    env = WindowGameEnv(observer=True)
+    mode = input("Select mode: [C]onsole Human or [G]lobal AI action? ").strip().upper()
+    env = WindowGameEnv(observer=False)
     obs, _ = env.reset()
     print("Initial observation shape:", obs.shape)
 
     done = False
     while not done:
-        if mode == "H":
-            global_index, action = env.human_turn()
-            if global_index is None:
-                print("Could not map action to a global key.")
-                continue
-            step_action = global_index
-            print(f"Human selected global action index: {global_index}")
-        elif mode == "C":
+        if mode == "C":
             action = get_human_action(env)
             if action is None:
                 print("No valid action selected, exiting loop.")

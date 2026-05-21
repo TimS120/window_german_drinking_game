@@ -1,7 +1,33 @@
+# Python
 __pycache__/
-
 *.pyc
 *.pyo
 *.pyd
 .venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+
+# Training/runtime artifacts
 outputs/
+scripts/models/runs/
+scripts/models/runs2/
+scripts/models/**/*.tfevents.*
+
+# Optional: ignore local model checkpoints/binaries
+# scripts/models/*.pth
+# scripts/models/*.zip
+
+# Android / Gradle
+android/.gradle/
+android/**/build/
+android/local.properties
+*.apk
+*.aab
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

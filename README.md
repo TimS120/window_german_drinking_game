@@ -59,18 +59,27 @@ This project's purpose is the:
 # Development Documentation
 
 ## Architecture
-- simulation_env.py: Entry point for the whole game via playing player vs. player or player vs. bot
-- main.py: Deprecated version of the game (player vs. player)
-<br />
-<br />
+- core_game.py: Platform-independent game engine (shared logic)
+- game.py: Desktop Tkinter UI (human gameplay)
+- main.py: Desktop entry point (Tkinter app)
+- mobile_bridge.py: JSON-friendly bridge for mobile clients
+- simulation_env.py: Gymnasium wrapper around core_game.py for RL training/inference
 - agent.py: Inference agent using a trained MaskablePPO model
-- config.py: Definitions and configuration parameters for the game board/cards
-- game.py: The core game
 - train.py: Config-driven training script using Gymnasium + MaskablePPO
+- config.py: Definitions and configuration parameters for the game board/cards
 - utils.py: Helper functions for the whole game
 - configs/training_config.json: Training-specific configuration
 - configs/simulation_config.json: Simulation/game configuration for training
 - resources/additional/lookup_action_number_to_action.txt: Optional lookup reference (not runtime)
+
+### Android Integration Path
+1. Keep all game rules in `scripts/core_game.py` only.
+2. Use `scripts/mobile_bridge.py` as the Android-facing API layer.
+3. In Android, choose one of these integration approaches:
+   - Embed Python with Chaquopy and call `MobileGameBridge` from Kotlin.
+   - Run a small local Python service exposing bridge methods over HTTP/WebSocket and consume it from Compose.
+4. Build the Android UI in Kotlin/Compose using state from `get_state()` and send user actions through `act(...)`.
+5. Do not duplicate game rules in Kotlin; keep Kotlin as presentation + input only.
 
 
 ## Agent/ Training
@@ -89,3 +98,13 @@ This project's purpose is the:
 3. The next development steps could include using previous board states as input (for this purpose the lstm-architecture was selected).
 
 4. A further refinement of the reward function should also be considered.
+
+## Setup Profiles
+- Desktop game only:
+  `pip install -r requirements/desktop.txt`
+- Training / RL stack:
+  `pip install -r requirements/train.txt`
+- Mobile bridge backend only:
+  `pip install -r requirements/mobile_bridge.txt`
+
+The root `requirements.txt` points to the training profile for backward compatibility.
