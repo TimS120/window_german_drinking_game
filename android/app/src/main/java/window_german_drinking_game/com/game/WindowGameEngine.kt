@@ -82,11 +82,12 @@ class WindowGameEngine(playersInput: List<String>) {
         private set
 
     init {
-        initStats()
         resetGame()
     }
 
     fun resetGame() {
+        initStats()
+        currentPlayerIdx = 0
         deck = (0 until ranks.size * suits.size).toMutableList()
         deck.shuffle(Random.Default)
         cardGrid = MutableList(layout.size) { MutableList<Int?>(layout[0].size) { null } }
@@ -345,6 +346,7 @@ class WindowGameEngine(playersInput: List<String>) {
         val totalRemoved = connected.toMutableSet().apply { add(position) }
         val penalty = totalRemoved.size
 
+        faceUp[position.row][position.col] = true
         pendingRemovals = totalRemoved
         pendingPenalty = penalty
         wrongGuessCount[current] = (wrongGuessCount[current] ?: 0) + 1

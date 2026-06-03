@@ -6,8 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,9 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
@@ -37,17 +39,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import window_german_drinking_game.com.game.GameSnapshot
 import window_german_drinking_game.com.game.GuessOption
 import window_german_drinking_game.com.game.GuessType
@@ -81,6 +91,7 @@ private fun AppRoot() {
 
     var sameConfirmTarget by remember { mutableStateOf<Position?>(null) }
     var removalConfirmVisible by remember { mutableStateOf(false) }
+    var resetConfirmVisible by remember { mutableStateOf(false) }
     var endDialogVisible by remember { mutableStateOf(false) }
 
     fun refresh() {
@@ -103,189 +114,315 @@ private fun AppRoot() {
 
     val engine = gameEngine!!
     val snap = snapshot!!
+    var screenScale by remember { mutableStateOf(1f) }
+    var screenOffsetX by remember { mutableStateOf(0f) }
+    var screenOffsetY by remember { mutableStateOf(0f) }
+    val flingScope = rememberCoroutineScope()
+    var flingJob by remember { mutableStateOf<Job?>(null) }
+
+    fun startInertialPan(startX: Float, startY: Float) {
+        if (abs(startX) + abs(startY) < 0.5f) return
+        flingJob?.cancel()
+        flingJob = flingScope.launch {
+            var velocityX = startX
+            var velocityY = startY
+            while (screenScale > 1f && abs(velocityX) + abs(velocityY) > 0.5f) {
+                screenOffsetX += velocityX
+                screenOffsetY += velocityY
+                velocityX *= 0.88f
+                velocityY *= 0.88f
+                delay(16)
+            }
+        }
+    }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        var wasDragging = false
+                        var lastPanX = 0f
+                        var lastPanY = 0f
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressedPointers = event.changes.count { it.pressed }
+                            if (pressedPointers >= 2) {
+                                flingJob?.cancel()
+                                val newScale = (screenScale * event.calculateZoom()).coerceIn(1f, 3f)
+                                val pan = event.calculatePan()
+                                screenScale = newScale
+                                if (newScale <= 1.01f) {
+                                    screenScale = 1f
+                                    screenOffsetX = 0f
+                                    screenOffsetY = 0f
+                                } else {
+                                    screenOffsetX += pan.x
+                                    screenOffsetY += pan.y
+                                }
+                                wasDragging = false
+                                event.changes.forEach { it.consume() }
+                            } else if (pressedPointers == 1 && screenScale > 1f) {
+                                val pan = event.calculatePan()
+                                if (abs(pan.x) + abs(pan.y) > 1.5f) {
+                                    flingJob?.cancel()
+                                    screenOffsetX += pan.x
+                                    screenOffsetY += pan.y
+                                    lastPanX = pan.x
+                                    lastPanY = pan.y
+                                    wasDragging = true
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } else if (pressedPointers == 0 && wasDragging) {
+                                startInertialPan(lastPanX, lastPanY)
+                                wasDragging = false
+                                lastPanX = 0f
+                                lastPanY = 0f
+                            }
+                        }
+                    }
+                }
         ) {
-            Text(
-                text = "Window Drinking Game",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "Current Player: ${snap.currentPlayer}", fontWeight = FontWeight.SemiBold)
-            Text(text = "Deck: ${snap.deckSize} cards")
-            Text(text = infoMessage)
-            if (snap.mustSelectAdjacentToHandle) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp)
+                    .graphicsLayer {
+                        scaleX = screenScale
+                        scaleY = screenScale
+                        translationX = screenOffsetX
+                        translationY = screenOffsetY
+                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                    }
+            ) {
                 Text(
-                    text = "Handle rule active: select a card adjacent to the handle.",
-                    color = MaterialTheme.colorScheme.primary,
+                    text = "Window Drinking Game",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "Current Player: ${snap.currentPlayer}", fontWeight = FontWeight.SemiBold)
+                Text(text = "Deck: ${snap.deckSize} cards")
+                Text(text = infoMessage)
+                if (snap.mustSelectAdjacentToHandle) {
+                    Text(
+                        text = "Handle rule active: select a card adjacent to the handle.",
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                BoardView(
+                    snapshot = snap,
+                    cardLabel = { id -> engine.cardLabel(id) },
+                    onCardClick = { position ->
+                        val options = engine.getValidOptionsForCard(position)
+                        if (options.isEmpty()) {
+                            infoMessage = "Invalid selection"
+                            return@BoardView
+                        }
+                        if (options.size == 1) {
+                            guessDialogTarget = position
+                            guessDialogOption = options.first()
+                        } else {
+                            optionDialogTarget = position
+                            optionDialogOptions = options
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            engine.endTurn()
+                            refresh()
+                            infoMessage = "${engine.currentPlayer()}'s turn"
+                        },
+                        enabled = snap.turnCanEnd && snap.pendingRemovals.isEmpty(),
+                    ) {
+                        Text("End Turn")
+                    }
+                    Button(
+                        onClick = { resetConfirmVisible = true }
+                    ) {
+                        Text("Reset Game")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                StatsTable(snapshot = snap)
+            }
+
+            if (optionDialogTarget != null) {
+                GuessOptionDialog(
+                    options = optionDialogOptions,
+                    onDismiss = {
+                        optionDialogTarget = null
+                        optionDialogOptions = emptyList()
+                    },
+                    onSelect = { option ->
+                        guessDialogTarget = optionDialogTarget
+                        guessDialogOption = option
+                        optionDialogTarget = null
+                        optionDialogOptions = emptyList()
+                    }
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            BoardView(
-                snapshot = snap,
-                cardLabel = { id -> engine.cardLabel(id) },
-                onCardClick = { position ->
-                    val options = engine.getValidOptionsForCard(position)
-                    if (options.isEmpty()) {
-                        infoMessage = "Invalid selection"
-                        return@BoardView
-                    }
-                    if (options.size == 1) {
-                        guessDialogTarget = position
-                        guessDialogOption = options.first()
-                    } else {
-                        optionDialogTarget = position
-                        optionDialogOptions = options
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        engine.endTurn()
-                        refresh()
-                        infoMessage = "${engine.currentPlayer()}'s turn"
+            if (guessDialogTarget != null && guessDialogOption != null) {
+                GuessDialog(
+                    option = guessDialogOption!!,
+                    onDismiss = {
+                        guessDialogTarget = null
+                        guessDialogOption = null
                     },
-                    enabled = snap.turnCanEnd && snap.pendingRemovals.isEmpty(),
-                ) {
-                    Text("End Turn")
-                }
-                Button(
-                    onClick = {
-                        engine.resetGame()
-                        refresh()
-                        infoMessage = "New game started"
-                    }
-                ) {
-                    Text("Reset Game")
-                }
-            }
+                    onGuess = { guess ->
+                        val position = guessDialogTarget!!
+                        val option = guessDialogOption!!
+                        val result = engine.applyGuess(position, option, guess)
+                        guessDialogTarget = null
+                        guessDialogOption = null
 
-            Spacer(modifier = Modifier.height(12.dp))
-            StatsTable(snapshot = snap)
-        }
-    }
-
-    if (optionDialogTarget != null) {
-        GuessOptionDialog(
-            options = optionDialogOptions,
-            onDismiss = {
-                optionDialogTarget = null
-                optionDialogOptions = emptyList()
-            },
-            onSelect = { option ->
-                guessDialogTarget = optionDialogTarget
-                guessDialogOption = option
-                optionDialogTarget = null
-                optionDialogOptions = emptyList()
-            }
-        )
-    }
-
-    if (guessDialogTarget != null && guessDialogOption != null) {
-        GuessDialog(
-            option = guessDialogOption!!,
-            onDismiss = {
-                guessDialogTarget = null
-                guessDialogOption = null
-            },
-            onGuess = { guess ->
-                val position = guessDialogTarget!!
-                val option = guessDialogOption!!
-                val result = engine.applyGuess(position, option, guess)
-                guessDialogTarget = null
-                guessDialogOption = null
-
-                if (result.invalidReason != null) {
-                    infoMessage = result.invalidReason
-                    refresh()
-                    return@GuessDialog
-                }
-
-                if (result.requiresSameConfirmation) {
-                    sameConfirmTarget = position
-                    infoMessage = "Correct SAME guess. Confirm other players drank."
-                } else if (result.requiresRemovalConfirmation) {
-                    removalConfirmVisible = true
-                    infoMessage = "Wrong guess. Confirm removal of marked cards."
-                } else {
-                    infoMessage = if (result.correct) "Correct guess." else "Wrong guess."
-                }
-
-                refresh()
-            }
-        )
-    }
-
-    if (sameConfirmTarget != null) {
-        Dialog(onDismissRequest = {}) {
-            Card {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Confirm Swallow")
-                    Text("All players except ${snap.currentPlayer} must take one swallow.")
-                    Button(onClick = {
-                        engine.confirmSameGuess(sameConfirmTarget!!)
-                        sameConfirmTarget = null
-                        infoMessage = "Correct SAME guess confirmed."
-                        refresh()
-                    }) {
-                        Text("Confirm")
-                    }
-                }
-            }
-        }
-    }
-
-    if (removalConfirmVisible) {
-        Dialog(onDismissRequest = {}) {
-            Card {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Confirm Removal")
-                    Text("Wrong guess: ${snap.currentPlayer} drinks ${engine.pendingPenalty}. Remove marked cards and redeal.")
-                    Button(onClick = {
-                        engine.confirmRemovals()
-                        removalConfirmVisible = false
-                        infoMessage = "Removal confirmed. ${engine.currentPlayer()} continues."
-                        refresh()
-                    }) {
-                        Text("Confirm")
-                    }
-                }
-            }
-        }
-    }
-
-    if (endDialogVisible) {
-        Dialog(onDismissRequest = {}) {
-            Card {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Game Over", fontWeight = FontWeight.Bold)
-                    Text("All cards are face-up.")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            engine.resetGame()
-                            endDialogVisible = false
-                            infoMessage = "New game started"
+                        if (result.invalidReason != null) {
+                            infoMessage = result.invalidReason
                             refresh()
-                        }) {
-                            Text("Play Again")
+                            return@GuessDialog
                         }
-                        TextButton(onClick = { endDialogVisible = false }) {
-                            Text("Close")
+
+                        if (result.requiresSameConfirmation) {
+                            sameConfirmTarget = position
+                            infoMessage = "Correct SAME guess. Confirm other players drank."
+                        } else if (result.requiresRemovalConfirmation) {
+                            removalConfirmVisible = true
+                            infoMessage = "Wrong guess. Confirm removal of marked cards."
+                        } else {
+                            infoMessage = if (result.correct) "Correct guess." else "Wrong guess."
+                        }
+
+                        refresh()
+                    }
+                )
+            }
+
+            if (sameConfirmTarget != null) {
+                MovableDialog {
+                    Card {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Confirm Swallow")
+                            Text("All players except ${snap.currentPlayer} must take one swallow.")
+                            Button(onClick = {
+                                engine.confirmSameGuess(sameConfirmTarget!!)
+                                sameConfirmTarget = null
+                                infoMessage = "Correct SAME guess confirmed."
+                                refresh()
+                            }) {
+                                Text("Confirm")
+                            }
                         }
                     }
                 }
             }
+
+            if (removalConfirmVisible) {
+                MovableDialog {
+                    Card {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Confirm Removal")
+                            Text("Wrong guess: ${snap.currentPlayer} drinks ${engine.pendingPenalty}. Remove marked cards and redeal.")
+                            Button(onClick = {
+                                engine.confirmRemovals()
+                                removalConfirmVisible = false
+                                infoMessage = "Removal confirmed. ${engine.currentPlayer()} continues."
+                                refresh()
+                            }) {
+                                Text("Confirm")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (resetConfirmVisible) {
+                MovableDialog {
+                    Card {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Reset Game?", fontWeight = FontWeight.Bold)
+                            Text("Start a new game and reset all stats?")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    engine.resetGame()
+                                    resetConfirmVisible = false
+                                    refresh()
+                                    infoMessage = "New game started"
+                                }) {
+                                    Text("Reset")
+                                }
+                                TextButton(onClick = { resetConfirmVisible = false }) {
+                                    Text("Cancel")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (endDialogVisible) {
+                MovableDialog {
+                    Card {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Game Over", fontWeight = FontWeight.Bold)
+                            Text("All cards are face-up.")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    engine.resetGame()
+                                    endDialogVisible = false
+                                    infoMessage = "New game started"
+                                    refresh()
+                                }) {
+                                    Text("Play Again")
+                                }
+                                TextButton(onClick = { endDialogVisible = false }) {
+                                    Text("Close")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MovableDialog(
+    content: @Composable () -> Unit,
+) {
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .graphicsLayer {
+                    scaleX = 0.75f
+                    scaleY = 0.75f
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { _, dragAmount ->
+                        offsetX += dragAmount.x
+                        offsetY += dragAmount.y
+                    }
+                }
+        ) {
+            content()
         }
     }
 }
@@ -339,56 +476,65 @@ private fun BoardView(
         listOf(true, true, true, true, true, false),
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (r in layout.indices) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (c in layout[r].indices) {
-                    if (!layout[r][c]) {
-                        Spacer(modifier = Modifier.size(width = 52.dp, height = 72.dp))
-                        continue
-                    }
-                    val position = Position(r, c)
-                    val cardId = snapshot.cardGrid[r][c]
-                    val isFaceUp = snapshot.faceUp[r][c]
-                    val isPendingRemoval = position in snapshot.pendingRemovals
-                    val isSelectable = position in snapshot.validSelectable
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val spacing = 6.dp
+        val cardWidth = (maxWidth - spacing * 5) / 6
+        val cardHeight = cardWidth * 1.38f
 
-                    val borderColor = when {
-                        isPendingRemoval -> Color.Red
-                        isSelectable && !isFaceUp -> Color.Gray
-                        else -> Color.Transparent
-                    }
+        Column(
+            verticalArrangement = Arrangement.spacedBy(spacing),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            for (r in layout.indices) {
+                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                    for (c in layout[r].indices) {
+                        if (!layout[r][c]) {
+                            Spacer(modifier = Modifier.size(width = cardWidth, height = cardHeight))
+                            continue
+                        }
+                        val position = Position(r, c)
+                        val cardId = snapshot.cardGrid[r][c]
+                        val isFaceUp = snapshot.faceUp[r][c]
+                        val isPendingRemoval = position in snapshot.pendingRemovals
+                        val isSelectable = position in snapshot.validSelectable
 
-                    Card(
-                        modifier = Modifier
-                            .size(width = 52.dp, height = 72.dp)
-                            .border(2.dp, borderColor, RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isFaceUp && cardId != null) { onCardClick(position) },
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        val imageRes = when {
-                            cardId == null -> null
-                            isFaceUp -> cardDrawableRes(cardId)
-                            else -> R.drawable.card_back
+                        val borderColor = when {
+                            isPendingRemoval -> Color.Red
+                            isSelectable && !isFaceUp -> Color.Gray
+                            else -> Color.Transparent
                         }
 
-                        if (imageRes != null) {
-                            Image(
-                                painter = painterResource(id = imageRes),
-                                contentDescription = if (isFaceUp && cardId != null) cardLabel(cardId) else "Card",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer { rotationZ = 90f },
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color(0xFF2E7D32)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("?", color = Color.White)
+                        Card(
+                            modifier = Modifier
+                                .size(width = cardWidth, height = cardHeight)
+                                .border(2.dp, borderColor, RoundedCornerShape(8.dp))
+                                .clickable(enabled = !isFaceUp && cardId != null) { onCardClick(position) },
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            val imageRes = when {
+                                cardId == null -> null
+                                isFaceUp -> cardDrawableRes(cardId)
+                                else -> R.drawable.card_back
+                            }
+
+                            if (imageRes != null) {
+                                Image(
+                                    painter = painterResource(id = imageRes),
+                                    contentDescription = if (isFaceUp && cardId != null) cardLabel(cardId) else "Card",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer { rotationZ = 90f },
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF2E7D32)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("?", color = Color.White)
+                                }
                             }
                         }
                     }
@@ -451,7 +597,7 @@ private fun GuessOptionDialog(
     onDismiss: () -> Unit,
     onSelect: (GuessOption) -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    MovableDialog {
         Card {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Choose Guess Option", fontWeight = FontWeight.Bold)
@@ -479,7 +625,7 @@ private fun GuessDialog(
     onDismiss: () -> Unit,
     onGuess: (GuessType) -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    MovableDialog {
         Card {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val title = if (option.type == "in-between") {

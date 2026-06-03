@@ -200,6 +200,11 @@ class WindowGame:
         )
         self.stop_turn_button.pack(side=tk.RIGHT, padx=5)
 
+        self.reset_game_button = tk.Button(
+            self.frame_bottom, text="Reset Game", command=self.confirm_reset_game
+        )
+        self.reset_game_button.pack(side=tk.RIGHT, padx=5)
+
         # Make all frames expandable
         self.frame_center.columnconfigure(0, weight=3)
         self.frame_center.columnconfigure(1, weight=1)
@@ -885,7 +890,21 @@ class WindowGame:
         self.stop_turn_button.config(state=tk.DISABLED)
         self.turn_can_end = False
         self.turn_start_face_up = self.count_face_up_cards()
+        self.player_turns[self.current_player()] += 1
         self.update_ui()
+
+    def confirm_reset_game(self):
+        """
+        Ask the user before resetting the whole game and all statistics.
+        """
+        from tkinter import messagebox
+
+        if messagebox.askyesno(
+            "Reset Game?",
+            "Start a new game and reset all statistics?"
+        ):
+            self.reset_game()
+            self.info_label.config(text="New game started.")
 
     def current_player(self):
         """
