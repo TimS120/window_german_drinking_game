@@ -108,3 +108,20 @@ This project's purpose is the:
   `pip install -r requirements/mobile_bridge.txt`
 
 The root `requirements.txt` points to the training profile for backward compatibility.
+
+## Android Online Multiplayer
+- The Android app supports offline play, creating an online room, and joining an online room.
+- Online rooms use Firebase Anonymous Auth plus Firebase Realtime Database; players do not need Firebase or Google accounts.
+- The host enters the full player list, creates a room code, and each phone joins with that code and its own player name.
+- Only the phone whose local player name matches the current player can make moves; other phones observe the synced state.
+
+### Firebase Setup
+1. Create a Firebase project.
+2. Add an Android app with package name `window_german_drinking_game.com`.
+3. Enable Authentication -> Anonymous sign-in.
+4. Create a Realtime Database.
+5. Download `google-services.json` and place it at `android/app/google-services.json`.
+6. Deploy `firebase-database.rules.json` to the Realtime Database rules.
+7. Build/run the Android app from the `android` directory.
+
+The Gradle Google Services plugin is applied only when `android/app/google-services.json` exists, so local builds without Firebase credentials still compile but online rooms will show a configuration error at runtime.

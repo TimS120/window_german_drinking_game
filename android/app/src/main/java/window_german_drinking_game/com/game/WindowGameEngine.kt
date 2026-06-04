@@ -27,6 +27,35 @@ data class PlayerStats(
     val turns: Int,
 )
 
+data class SerializablePosition(
+    val row: Int = 0,
+    val col: Int = 0,
+)
+
+data class SerializablePlayerStats(
+    val drinks: Int = 0,
+    val correct: Int = 0,
+    val wrong: Int = 0,
+    val changedCards: Int = 0,
+    val turns: Int = 0,
+)
+
+data class SerializableGameState(
+    val players: List<String> = emptyList(),
+    val currentPlayerIdx: Int = 0,
+    val turnStartFaceUp: Int = 0,
+    val deck: List<Int> = emptyList(),
+    val cardGrid: List<List<Int>> = emptyList(),
+    val faceUp: List<List<Boolean>> = emptyList(),
+    val pendingRemovals: List<SerializablePosition> = emptyList(),
+    val pendingPenalty: Int = 0,
+    val mustSelectAdjacentToHandle: Boolean = true,
+    val turnCanEnd: Boolean = false,
+    val stats: Map<String, SerializablePlayerStats> = emptyMap(),
+    val version: Long = 0,
+    val updatedAt: Long = 0,
+)
+
 data class GameSnapshot(
     val cardGrid: List<List<Int?>>,
     val faceUp: List<List<Boolean>>,
@@ -108,6 +137,57 @@ class WindowGameEngine(playersInput: List<String>) {
         turnCanEnd = false
         turnStartFaceUp = countFaceUpCards()
         incrementTurn(currentPlayer())
+    }
+
+    fun exportState(version: Long = 0, updatedAt: Long = System.currentTimeMillis()): SerializableGameState {
+        val stats = players.associateWith { player ->
+            SerializablePlayerStats(
+                drinks = drinkCount[player] ?: 0,
+                correct = correctGuessCount[player] ?: 0,
+                wrong = wrongGuessCount[player] ?: 0,
+                changedCards = changedCards[player] ?: 0,
+                turns = turns[player] ?: 0,
+            )
+        }
+        return SerializableGameState(
+            players = players,
+            currentPlayerIdx = currentPlayerIdx,
+            turnStartFaceUp = turnStartFaceUp,
+            deck = deck.toList(),
+            cardGrid = cardGrid.map { row -> row.map { it ?: -1 } },
+            faceUp = faceUp.map { it.toList() },
+            pendingRemovals = pendingRemovals.map { SerializablePosition(it.row, it.col) },
+            pendingPenalty = pendingPenalty,
+            mustSelectAdjacentToHandle = mustSelectAdjacentToHandle,
+            turnCanEnd = turnCanEnd,
+            stats = stats,
+            version = version,
+            updatedAt = updatedAt,
+        )
+    }
+
+    fun restoreState(state: SerializableGameState) {
+        if (state.players != players) return
+        currentPlayerIdx = state.currentPlayerIdx.coerceIn(players.indices)
+        turnStartFaceUp = state.turnStartFaceUp
+        deck = state.deck.toMutableList()
+        cardGrid = state.cardGrid.map { row ->
+            row.map { if (it >= 0) it else null }.toMutableList()
+        }.toMutableList()
+        faceUp = state.faceUp.map { it.toMutableList() }.toMutableList()
+        pendingRemovals = state.pendingRemovals.map { Position(it.row, it.col) }.toSet()
+        pendingPenalty = state.pendingPenalty
+        mustSelectAdjacentToHandle = state.mustSelectAdjacentToHandle
+        turnCanEnd = state.turnCanEnd
+
+        initStats()
+        state.stats.forEach { (player, playerStats) ->
+            drinkCount[player] = playerStats.drinks
+            correctGuessCount[player] = playerStats.correct
+            wrongGuessCount[player] = playerStats.wrong
+            changedCards[player] = playerStats.changedCards
+            turns[player] = playerStats.turns
+        }
     }
 
     private fun initStats() {

@@ -36,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -59,6 +61,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import window_german_drinking_game.com.game.GameSnapshot
+import window_german_drinking_game.com.game.FirebaseRoomRepository
 import window_german_drinking_game.com.game.GuessOption
 import window_german_drinking_game.com.game.GuessType
 import window_german_drinking_game.com.game.Position
@@ -79,9 +82,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
+    val context = LocalContext.current
+    val roomRepository = remember { FirebaseRoomRepository(context) }
     var gameEngine by remember { mutableStateOf<WindowGameEngine?>(null) }
     var snapshot by remember { mutableStateOf<GameSnapshot?>(null) }
     var infoMessage by remember { mutableStateOf("Enter player names to start") }
+    var isConnecting by remember { mutableStateOf(false) }
+    var roomCode by remember { mutableStateOf<String?>(null) }
+    var localPlayerName by remember { mutableStateOf<String?>(null) }
+    var remoteVersion by remember { mutableStateOf(0L) }
 
     var optionDialogTarget by remember { mutableStateOf<Position?>(null) }
     var optionDialogOptions by remember { mutableStateOf<List<GuessOption>>(emptyList()) }
@@ -94,26 +103,137 @@ private fun AppRoot() {
     var resetConfirmVisible by remember { mutableStateOf(false) }
     var endDialogVisible by remember { mutableStateOf(false) }
 
-    fun refresh() {
+    fun pushState() {
+        val engine = gameEngine ?: return
+        val code = roomCode ?: return
+        val nextVersion = remoteVersion + 1
+        remoteVersion = nextVersion
+        roomRepository.writeState(
+            roomCode = code,
+            state = engine.exportState(version = nextVersion),
+            onError = { error -> infoMessage = error },
+        )
+    }
+
+    fun refresh(pushOnlineState: Boolean = false) {
         snapshot = gameEngine?.snapshot()
         if (snapshot?.gameEnded == true) {
             endDialogVisible = true
+        }
+        if (pushOnlineState) {
+            pushState()
+        }
+    }
+
+    DisposableEffect(roomCode) {
+        val code = roomCode
+        if (code == null) {
+            onDispose { }
+        } else {
+            val stopObserving = roomRepository.observeRoom(
+                roomCode = code,
+                onState = { state ->
+                    if (state.version < remoteVersion) return@observeRoom
+                    remoteVersion = state.version
+                    if (gameEngine == null || gameEngine?.players != state.players) {
+                        gameEngine = WindowGameEngine(state.players)
+                    }
+                    gameEngine?.restoreState(state)
+                    snapshot = gameEngine?.snapshot()
+                    infoMessage = "Room $code connected. ${state.players.getOrNull(state.currentPlayerIdx)}'s turn"
+                },
+                onError = { error -> infoMessage = error },
+            )
+            onDispose { stopObserving() }
         }
     }
 
     if (gameEngine == null || snapshot == null) {
         PlayerSetupScreen(
-            onStart = { players ->
+            onStartOffline = { players ->
+                isConnecting = false
+                roomCode = null
+                localPlayerName = null
+                remoteVersion = 0
                 gameEngine = WindowGameEngine(players)
                 snapshot = gameEngine!!.snapshot()
                 infoMessage = "${snapshot!!.currentPlayer}'s turn"
-            }
+            },
+            onCreateRoom = { players, localName ->
+                isConnecting = true
+                infoMessage = "Signing in to Firebase..."
+                roomRepository.signInAnonymously(
+                    onSuccess = {
+                        infoMessage = "Creating room..."
+                        val engine = WindowGameEngine(players)
+                        roomRepository.createRoom(
+                            initialState = engine.exportState(version = 1),
+                            onSuccess = { createdCode ->
+                                gameEngine = engine
+                                snapshot = engine.snapshot()
+                                roomCode = createdCode
+                                localPlayerName = localName
+                                remoteVersion = 1
+                                isConnecting = false
+                                infoMessage = "Room $createdCode created. ${engine.currentPlayer()}'s turn"
+                            },
+                            onError = { error ->
+                                isConnecting = false
+                                infoMessage = error
+                            },
+                        )
+                    },
+                    onError = { error ->
+                        isConnecting = false
+                        infoMessage = error
+                    },
+                )
+            },
+            onJoinRoom = { code, localName ->
+                isConnecting = true
+                infoMessage = "Signing in to Firebase..."
+                roomRepository.signInAnonymously(
+                    onSuccess = {
+                        infoMessage = "Loading room ${code.trim().uppercase()}..."
+                        roomRepository.loadRoomOnce(
+                            roomCode = code,
+                            onSuccess = { state ->
+                                val engine = WindowGameEngine(state.players)
+                                engine.restoreState(state)
+                                gameEngine = engine
+                                snapshot = engine.snapshot()
+                                roomCode = code.trim().uppercase()
+                                localPlayerName = localName
+                                remoteVersion = state.version
+                                isConnecting = false
+                                infoMessage = "Joined room ${code.trim().uppercase()}. ${engine.currentPlayer()}'s turn"
+                            },
+                            onMissing = {
+                                isConnecting = false
+                                infoMessage = "Room not found."
+                            },
+                            onError = { error ->
+                                isConnecting = false
+                                infoMessage = error
+                            },
+                        )
+                    },
+                    onError = { error ->
+                        isConnecting = false
+                        infoMessage = error
+                    },
+                )
+            },
+            infoMessage = infoMessage,
+            isConnecting = isConnecting,
         )
         return
     }
 
     val engine = gameEngine!!
     val snap = snapshot!!
+    val isOnline = roomCode != null
+    val isMyTurn = !isOnline || snap.currentPlayer == localPlayerName
     var screenScale by remember { mutableStateOf(1f) }
     var screenOffsetX by remember { mutableStateOf(0f) }
     var screenOffsetY by remember { mutableStateOf(0f) }
@@ -205,6 +325,9 @@ private fun AppRoot() {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(text = "Current Player: ${snap.currentPlayer}", fontWeight = FontWeight.SemiBold)
+                if (roomCode != null) {
+                    Text(text = "Room: $roomCode | You: ${localPlayerName ?: "spectator"}")
+                }
                 Text(text = "Deck: ${snap.deckSize} cards")
                 Text(text = infoMessage)
                 if (snap.mustSelectAdjacentToHandle) {
@@ -219,6 +342,10 @@ private fun AppRoot() {
                     snapshot = snap,
                     cardLabel = { id -> engine.cardLabel(id) },
                     onCardClick = { position ->
+                        if (!isMyTurn) {
+                            infoMessage = "Waiting for ${snap.currentPlayer}."
+                            return@BoardView
+                        }
                         val options = engine.getValidOptionsForCard(position)
                         if (options.isEmpty()) {
                             infoMessage = "Invalid selection"
@@ -239,10 +366,10 @@ private fun AppRoot() {
                     Button(
                         onClick = {
                             engine.endTurn()
-                            refresh()
+                            refresh(pushOnlineState = true)
                             infoMessage = "${engine.currentPlayer()}'s turn"
                         },
-                        enabled = snap.turnCanEnd && snap.pendingRemovals.isEmpty(),
+                        enabled = isMyTurn && snap.turnCanEnd && snap.pendingRemovals.isEmpty(),
                     ) {
                         Text("End Turn")
                     }
@@ -303,7 +430,7 @@ private fun AppRoot() {
                             infoMessage = if (result.correct) "Correct guess." else "Wrong guess."
                         }
 
-                        refresh()
+                        refresh(pushOnlineState = !result.requiresSameConfirmation)
                     }
                 )
             }
@@ -318,7 +445,7 @@ private fun AppRoot() {
                                 engine.confirmSameGuess(sameConfirmTarget!!)
                                 sameConfirmTarget = null
                                 infoMessage = "Correct SAME guess confirmed."
-                                refresh()
+                                refresh(pushOnlineState = true)
                             }) {
                                 Text("Confirm")
                             }
@@ -337,7 +464,7 @@ private fun AppRoot() {
                                 engine.confirmRemovals()
                                 removalConfirmVisible = false
                                 infoMessage = "Removal confirmed. ${engine.currentPlayer()} continues."
-                                refresh()
+                                refresh(pushOnlineState = true)
                             }) {
                                 Text("Confirm")
                             }
@@ -356,7 +483,7 @@ private fun AppRoot() {
                                 Button(onClick = {
                                     engine.resetGame()
                                     resetConfirmVisible = false
-                                    refresh()
+                                    refresh(pushOnlineState = true)
                                     infoMessage = "New game started"
                                 }) {
                                     Text("Reset")
@@ -381,7 +508,7 @@ private fun AppRoot() {
                                     engine.resetGame()
                                     endDialogVisible = false
                                     infoMessage = "New game started"
-                                    refresh()
+                                    refresh(pushOnlineState = true)
                                 }) {
                                     Text("Play Again")
                                 }
@@ -428,19 +555,38 @@ private fun MovableDialog(
 }
 
 @Composable
-private fun PlayerSetupScreen(onStart: (List<String>) -> Unit) {
+private fun PlayerSetupScreen(
+    onStartOffline: (List<String>) -> Unit,
+    onCreateRoom: (List<String>, String) -> Unit,
+    onJoinRoom: (String, String) -> Unit,
+    infoMessage: String,
+    isConnecting: Boolean,
+) {
     var namesInput by remember { mutableStateOf("Alice, Bob, Charlie") }
+    var localPlayerInput by remember { mutableStateOf("Alice") }
+    var roomCodeInput by remember { mutableStateOf("") }
+
+    fun parsedPlayers(): List<String> {
+        return namesInput
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .ifEmpty { listOf("Player1") }
+    }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("Window Drinking Game", style = MaterialTheme.typography.headlineMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(infoMessage)
             Spacer(modifier = Modifier.height(12.dp))
             OutlinedTextField(
                 value = namesInput,
@@ -448,15 +594,50 @@ private fun PlayerSetupScreen(onStart: (List<String>) -> Unit) {
                 label = { Text("Player names (comma-separated)") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = localPlayerInput,
+                onValueChange = { localPlayerInput = it },
+                label = { Text("Your player name") },
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(modifier = Modifier.height(12.dp))
             Button(onClick = {
-                val players = namesInput
-                    .split(",")
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                onStart(players)
-            }) {
-                Text("Start Game")
+                onStartOffline(parsedPlayers())
+            }, enabled = !isConnecting) {
+                Text("Start Offline Game")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val players = parsedPlayers()
+                    val localName = localPlayerInput.trim().ifBlank { players.first() }
+                    onCreateRoom(players, localName)
+                },
+                enabled = !isConnecting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isConnecting) "Connecting..." else "Create Online Room")
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = roomCodeInput,
+                onValueChange = { roomCodeInput = it.uppercase() },
+                label = { Text("Room code") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val localName = localPlayerInput.trim().ifBlank { "Player1" }
+                    onJoinRoom(roomCodeInput.trim(), localName)
+                },
+                enabled = roomCodeInput.isNotBlank() && !isConnecting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isConnecting) "Connecting..." else "Join Online Room")
             }
         }
     }
