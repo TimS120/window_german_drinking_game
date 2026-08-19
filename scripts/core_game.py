@@ -231,10 +231,15 @@ class CoreWindowGame:
         if is_correct:
             self.face_up[r][c] = True
             self.correct_guess_count[current_player] += 1
+            self.must_select_adjacent_to_handle = False
             self.turn_can_end = True
             self.pending_removals = set()
             self.pending_penalty = 0
         else:
+            # A human player sees the guessed card before it is removed. Keep the
+            # core state consistent with that public transition until removal is
+            # confirmed.
+            self.face_up[r][c] = True
             connected = self.collect_connected_open_cards((r, c))
             total_removed = set(connected)
             total_removed.add((r, c))
@@ -257,7 +262,7 @@ class CoreWindowGame:
         self.pending_removals = set()
         self.pending_penalty = 0
         self.rng.shuffle(self.deck)
-        self.redeal_spots()
+        return self.redeal_spots()
 
     def check_game_end(self):
         for r in range(len(WINDOW_LAYOUT)):
@@ -302,17 +307,55 @@ class CoreWindowGame:
         else:
             return {"reward": -2, "done": False, "debug": "Unknown option type."}
 
+        revealed_rank = get_rank_index(self.card_grid[r][c])
         was_wrong = bool(self.pending_removals)
         penalty = self.pending_penalty if was_wrong else 0
+        removed_cards = []
         if was_wrong:
-            self.confirm_removals()
+            for rr, cc in sorted(self.pending_removals):
+                card_id = self.card_grid[rr][cc]
+                if card_id is not None:
+                    removed_cards.append(
+                        {"position": [rr, cc], "rank": get_rank_index(card_id)}
+                    )
+
+        if was_wrong:
+            redealt_positions = self.confirm_removals()
             reward = -penalty
             debug_info = "Wrong guess."
         else:
+            redealt_positions = []
             reward = 5
             debug_info = "Correct guess."
 
         done = self.check_game_end()
         if done and not was_wrong:
             reward = 200
-        return {"reward": reward, "done": done, "debug": debug_info}
+        visible_redeals = []
+        for rr, cc in redealt_positions:
+            if self.face_up[rr][cc]:
+                visible_redeals.append(
+                    {
+                        "position": [rr, cc],
+                        "rank": get_rank_index(self.card_grid[rr][cc]),
+                    }
+                )
+
+        event = {
+            "position": [r, c],
+            "guess": guess,
+            "orientation": selected_option.orientation,
+            "revealed_rank": revealed_rank,
+            "correct": not was_wrong,
+            "penalty": penalty,
+            "removed_cards": removed_cards,
+            "redealt_positions": [list(pos) for pos in redealt_positions],
+            "visible_redeals": visible_redeals,
+            "must_select_adjacent_to_handle": self.must_select_adjacent_to_handle,
+        }
+        return {
+            "reward": reward,
+            "done": done,
+            "debug": debug_info,
+            "event": event,
+        }

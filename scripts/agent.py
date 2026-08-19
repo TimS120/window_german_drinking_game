@@ -1,63 +1,111 @@
-﻿"""Inference agent for the trained MaskablePPO Window model."""
+"""Stateful inference agent for a recurrent, action-masked RLlib PPO module."""
+
+from __future__ import annotations
 
 import os
 
-from sb3_contrib import MaskablePPO
+import numpy as np
+import torch
+from ray.rllib.core.columns import Columns
+from ray.rllib.core.rl_module.rl_module import RLModule
 
-from simulation_env import WindowGameEnv, decode_action_index
+try:
+    from simulation_env import WindowGameEnv, decode_action_index
+except ImportError:
+    from .simulation_env import WindowGameEnv, decode_action_index
 
 
 class RLAgent:
-    def __init__(self, model_path=None):
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        default_model = os.path.join(os.path.dirname(__file__), "models", "maskable_ppo_window.zip")
+    """Inference wrapper that retains LSTM state for one complete game."""
 
+    def __init__(self, model_path=None, deterministic=True):
+        self.model_path = self._resolve_model_path(model_path)
+        self.module = RLModule.from_checkpoint(self.model_path)
+        if not self.module.is_stateful():
+            raise ValueError(f"Module at {self.model_path} is not recurrent.")
+        self.module.eval()
+        self.device = next(self.module.parameters()).device
+        self.deterministic = deterministic
+        self._state = None
+        self.reset_game()
+
+    @staticmethod
+    def _resolve_model_path(model_path):
         if model_path:
-            resolved_model = model_path
-        elif os.path.exists(default_model):
-            resolved_model = default_model
-        else:
-            outputs_dir = os.path.join(repo_root, "outputs")
-            run_dirs = (
-                sorted(
-                    [
-                        os.path.join(outputs_dir, name)
-                        for name in os.listdir(outputs_dir)
-                        if os.path.isdir(os.path.join(outputs_dir, name))
-                    ]
-                )
-                if os.path.exists(outputs_dir)
-                else []
-            )
-            if not run_dirs:
-                raise FileNotFoundError("No model found. Provide model_path or run training first.")
-            latest_run = run_dirs[-1]
-            resolved_model = os.path.join(latest_run, "latest_model.zip")
-            if not os.path.exists(resolved_model):
-                raise FileNotFoundError(f"Expected model at {resolved_model}, but it does not exist.")
+            resolved = os.path.abspath(model_path)
+            if not os.path.isdir(resolved):
+                raise FileNotFoundError(f"RLlib module checkpoint not found: {resolved}")
+            return resolved
 
-        self.model_path = resolved_model
-        self.model = MaskablePPO.load(self.model_path, device="auto")
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        outputs_dir = os.path.join(repo_root, "outputs")
+        if not os.path.isdir(outputs_dir):
+            raise FileNotFoundError("No outputs directory found. Run training first.")
+
+        run_dirs = sorted(
+            os.path.join(outputs_dir, name)
+            for name in os.listdir(outputs_dir)
+            if os.path.isdir(os.path.join(outputs_dir, name))
+        )
+        for run_dir in reversed(run_dirs):
+            candidate = os.path.join(run_dir, "module_final")
+            if os.path.isdir(candidate):
+                return candidate
+        raise FileNotFoundError("No module_final checkpoint found. Run recurrent training first.")
+
+    def reset_game(self):
+        """Reset memory at the start of a new game, never between turns."""
+        initial_state = self.module.get_initial_state()
+        self._state = {
+            key: value.detach().clone().unsqueeze(0).to(self.device)
+            for key, value in initial_state.items()
+        }
+
+    def _observation_batch(self, observation):
+        return {
+            key: torch.from_numpy(np.asarray(value, dtype=np.float32))[
+                None, None, :
+            ].to(self.device)
+            for key, value in observation.items()
+        }
 
     def predict_action(self, env: WindowGameEnv):
-        obs = env._build_observation(env._get_state())
-        action_masks = env.action_masks()
-        action, _ = self.model.predict(obs, action_masks=action_masks, deterministic=True)
-        action_index = int(action)
-        action_dict = decode_action_index(action_index)
-        return action_index, action_dict
+        observation = env.get_observation()
+        batch = {
+            Columns.OBS: self._observation_batch(observation),
+            Columns.STATE_IN: self._state,
+        }
+        with torch.inference_mode():
+            outputs = self.module.forward_inference(batch)
+
+        logits = outputs[Columns.ACTION_DIST_INPUTS][0, -1]
+        if self.deterministic:
+            action_index = int(torch.argmax(logits).item())
+        else:
+            action_index = int(
+                torch.distributions.Categorical(logits=logits).sample().item()
+            )
+        self._state = {
+            key: value.detach()
+            for key, value in outputs[Columns.STATE_OUT].items()
+        }
+        return action_index, decode_action_index(action_index)
 
 
 if __name__ == "__main__":
     env = WindowGameEnv(observer=False)
     agent = RLAgent()
 
-    obs, _ = env.reset()
+    observation, _ = env.reset()
+    agent.reset_game()
     done = False
     while not done:
         action_index, action_dict = agent.predict_action(env)
-        _, reward, terminated, truncated, info = env.step(action_index)
+        observation, reward, terminated, truncated, info = env.step(action_index)
         done = terminated or truncated
-        print(f"Action={action_index} {action_dict} Reward={reward} Debug={info.get('debug', '')}")
+        print(
+            f"Action={action_index} {action_dict} Reward={reward} "
+            f"Debug={info.get('debug', '')}"
+        )
 
     env.close()

@@ -2,6 +2,7 @@
   "players": ["Alice", "Bob", "Charlie"],
   "observer": false,
   "max_steps": 1000,
-  "n_envs": 8,
-  "vec_env": "subproc"
+  "num_env_runners": 4,
+  "num_envs_per_env_runner": 1,
+  "ray_num_cpus": null
 }

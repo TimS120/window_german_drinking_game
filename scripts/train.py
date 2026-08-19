@@ -1,51 +1,43 @@
-﻿"""Train MaskablePPO on WindowGameEnv using split training/simulation config files."""
+"""Train recurrent PPO with hard action masking on WindowGameEnv."""
+
+from __future__ import annotations
 
 import json
+import math
 import os
+import sys
+import time
 from datetime import datetime
 
-import torch.nn as nn
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
-from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-
-from simulation_env import WindowGameEnv
-
-
+# Use package-qualified module names before Ray serializes environment/module
+# classes for worker processes. This also supports `python scripts/train.py`.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+python_path_entries = os.environ.get("PYTHONPATH", "").split(os.pathsep)
+if REPO_ROOT not in python_path_entries:
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        [REPO_ROOT, *[entry for entry in python_path_entries if entry]]
+    )
+
+import ray
+from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
+from ray.rllib.core.rl_module.rl_module import RLModuleSpec
+from ray.rllib.utils.metrics import NUM_ENV_STEPS_SAMPLED_LIFETIME
+
+from scripts.recurrent_masked_module import RecurrentActionMaskingTorchRLModule
+from scripts.simulation_env import WindowGameEnv
+from scripts.training_progress import LocalProgressWriter, WindowGameMetricsCallback
+
+
 DEFAULT_TRAINING_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "training_config.json")
 DEFAULT_SIMULATION_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "simulation_config.json")
 
 
 def _load_json(path: str) -> dict:
-    with open(path, "r", encoding="utf-8-sig") as f:
-        return json.load(f)
-
-
-def _activation_fn(name: str):
-    mapping = {
-        "ReLU": nn.ReLU,
-        "Tanh": nn.Tanh,
-        "ELU": nn.ELU,
-        "LeakyReLU": nn.LeakyReLU,
-    }
-    if name not in mapping:
-        raise ValueError(f"Unsupported activation_fn '{name}'. Supported: {sorted(mapping)}")
-    return mapping[name]
-
-
-def _env_factory(sim_cfg: dict, reward_cfg: dict):
-    def _make_env():
-        return WindowGameEnv(
-            players=sim_cfg["players"],
-            observer=sim_cfg["observer"],
-            max_steps=sim_cfg["max_steps"],
-            reward_config=reward_cfg,
-        )
-
-    return _make_env
+    with open(path, "r", encoding="utf-8-sig") as config_file:
+        return json.load(config_file)
 
 
 def _make_run_dir(base_dir: str) -> str:
@@ -55,120 +47,254 @@ def _make_run_dir(base_dir: str) -> str:
     return run_dir
 
 
+def build_ppo_config(train_cfg: dict, sim_cfg: dict) -> PPOConfig:
+    """Construct the RLlib config without starting Ray or training."""
+    algo_cfg = train_cfg["algorithm"]
+    if algo_cfg["name"] != "RecurrentMaskedPPO":
+        raise ValueError("Only 'RecurrentMaskedPPO' is supported.")
+    if algo_cfg["minibatch_size"] < algo_cfg["max_seq_len"]:
+        raise ValueError("minibatch_size must be at least max_seq_len for recurrent PPO.")
+
+    env_config = {
+        "players": sim_cfg["players"],
+        "observer": sim_cfg.get("observer", False),
+        "max_steps": sim_cfg["max_steps"],
+        "reward_config": train_cfg["reward"],
+    }
+    model_config = DefaultModelConfig(
+        fcnet_hiddens=algo_cfg["encoder_hidden_layers"],
+        fcnet_activation=algo_cfg.get("activation_fn", "relu").lower(),
+        head_fcnet_hiddens=algo_cfg["head_hidden_layers"],
+        head_fcnet_activation=algo_cfg.get("activation_fn", "relu").lower(),
+        use_lstm=True,
+        max_seq_len=algo_cfg["max_seq_len"],
+        lstm_cell_size=algo_cfg["lstm_cell_size"],
+        lstm_use_prev_action=False,
+        lstm_use_prev_reward=False,
+        vf_share_layers=True,
+    )
+
+    config = (
+        PPOConfig()
+        .framework("torch")
+        .environment(WindowGameEnv, env_config=env_config)
+        .env_runners(
+            num_env_runners=sim_cfg.get("num_env_runners", 0),
+            num_envs_per_env_runner=sim_cfg.get("num_envs_per_env_runner", 1),
+            rollout_fragment_length=algo_cfg["rollout_fragment_length"],
+            batch_mode="truncate_episodes",
+        )
+        .learners(
+            num_learners=0,
+            num_gpus_per_learner=algo_cfg.get("num_gpus", 0),
+        )
+        .training(
+            lr=algo_cfg["learning_rate"],
+            gamma=algo_cfg["gamma"],
+            lambda_=algo_cfg["gae_lambda"],
+            clip_param=algo_cfg["clip_range"],
+            entropy_coeff=algo_cfg["ent_coeff"],
+            vf_loss_coeff=algo_cfg["vf_coeff"],
+            grad_clip=algo_cfg["max_grad_norm"],
+            use_kl_loss=False,
+            kl_coeff=algo_cfg.get("kl_coeff", 0.0),
+            train_batch_size_per_learner=algo_cfg["train_batch_size"],
+            minibatch_size=algo_cfg["minibatch_size"],
+            num_epochs=algo_cfg["num_epochs"],
+        )
+        .rl_module(
+            rl_module_spec=RLModuleSpec(
+                module_class=RecurrentActionMaskingTorchRLModule,
+                model_config=model_config,
+            )
+        )
+        .callbacks(WindowGameMetricsCallback)
+        .debugging(seed=train_cfg["seed"])
+    )
+
+    eval_cfg = train_cfg["evaluation"]
+    if eval_cfg.get("enabled", True):
+        evaluation_interval = max(
+            1,
+            math.ceil(eval_cfg["eval_freq"] / float(algo_cfg["train_batch_size"])),
+        )
+        config = config.evaluation(
+            evaluation_interval=evaluation_interval,
+            evaluation_duration=eval_cfg["n_eval_episodes"],
+            evaluation_duration_unit="episodes",
+            evaluation_num_env_runners=eval_cfg.get("num_env_runners", 0),
+            evaluation_config={"explore": not eval_cfg["deterministic"]},
+        )
+
+    return config
+
+
+def _find_metric(data, key):
+    if isinstance(data, dict):
+        if key in data:
+            return data[key]
+        for value in data.values():
+            found = _find_metric(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _format_metric(value):
+    """Format absent and non-finite RLlib metrics without printing `nan`."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    return f"{number:.4f}" if math.isfinite(number) else "N/A"
+
+
 def main(
     training_config_path: str = DEFAULT_TRAINING_CONFIG_PATH,
     simulation_config_path: str = DEFAULT_SIMULATION_CONFIG_PATH,
 ):
     train_cfg = _load_json(training_config_path)
     sim_cfg = _load_json(simulation_config_path)
-
     algo_cfg = train_cfg["algorithm"]
-    reward_cfg = train_cfg["reward"]
-    eval_cfg = train_cfg["evaluation"]
-    ckpt_cfg = train_cfg["checkpoint"]
-
-    if algo_cfg["name"] != "MaskablePPO":
-        raise ValueError("Only 'MaskablePPO' is currently supported in this training script.")
+    checkpoint_cfg = train_cfg["checkpoint"]
+    progress_cfg = train_cfg.get("progress", {})
 
     output_base_dir = os.path.join(REPO_ROOT, train_cfg["output"]["base_dir"])
+    os.makedirs(output_base_dir, exist_ok=True)
     run_dir = _make_run_dir(output_base_dir)
     checkpoints_dir = os.path.join(run_dir, "checkpoints")
-    tensorboard_dir = os.path.join(run_dir, "tensorboard")
-    best_model_dir = os.path.join(run_dir, "best_model")
-
+    best_modules_dir = os.path.join(run_dir, "best_modules")
     os.makedirs(checkpoints_dir, exist_ok=True)
-    os.makedirs(tensorboard_dir, exist_ok=True)
-    os.makedirs(best_model_dir, exist_ok=True)
+    os.makedirs(best_modules_dir, exist_ok=True)
 
-    with open(os.path.join(run_dir, "training_config.json"), "w", encoding="utf-8") as f:
-        f.write(json.dumps(train_cfg, indent=2))
-    with open(os.path.join(run_dir, "simulation_config.json"), "w", encoding="utf-8") as f:
-        f.write(json.dumps(sim_cfg, indent=2))
+    for filename, contents in (
+        ("training_config.json", train_cfg),
+        ("simulation_config.json", sim_cfg),
+    ):
+        with open(os.path.join(run_dir, filename), "w", encoding="utf-8") as output:
+            json.dump(contents, output, indent=2)
 
-    vec_env_cls = SubprocVecEnv if sim_cfg.get("vec_env", "subproc") == "subproc" else DummyVecEnv
-
-    train_env = make_vec_env(
-        _env_factory(sim_cfg, reward_cfg),
-        n_envs=sim_cfg["n_envs"],
-        seed=train_cfg["seed"],
-        vec_env_cls=vec_env_cls,
+    ray.init(
+        include_dashboard=False,
+        ignore_reinit_error=True,
+        num_cpus=sim_cfg.get("ray_num_cpus"),
     )
-
-    eval_env = make_vec_env(
-        _env_factory(sim_cfg, reward_cfg),
-        n_envs=1,
-        seed=train_cfg["seed"] + 1,
-        vec_env_cls=DummyVecEnv,
-    )
-
-    hidden_layers = algo_cfg["hidden_layers"]
-    policy_kwargs = {
-        "activation_fn": _activation_fn(algo_cfg.get("activation_fn", "ReLU")),
-        "net_arch": {
-            "pi": hidden_layers,
-            "vf": hidden_layers,
-        },
-    }
-
-    model = MaskablePPO(
-        policy=algo_cfg["policy"],
-        env=train_env,
-        learning_rate=algo_cfg["learning_rate"],
-        n_steps=algo_cfg["n_steps"],
-        batch_size=algo_cfg["batch_size"],
-        n_epochs=algo_cfg["n_epochs"],
-        gamma=algo_cfg["gamma"],
-        gae_lambda=algo_cfg["gae_lambda"],
-        clip_range=algo_cfg["clip_range"],
-        ent_coef=algo_cfg["ent_coef"],
-        vf_coef=algo_cfg["vf_coef"],
-        max_grad_norm=algo_cfg["max_grad_norm"],
-        target_kl=algo_cfg.get("target_kl"),
-        tensorboard_log=tensorboard_dir,
-        policy_kwargs=policy_kwargs,
-        seed=train_cfg["seed"],
-        verbose=1,
-        device=algo_cfg.get("device", "auto"),
-    )
-
-    callbacks = [
-        CheckpointCallback(
-            save_freq=max(1, ckpt_cfg["save_freq"] // sim_cfg["n_envs"]),
-            save_path=checkpoints_dir,
-            name_prefix="checkpoint",
-        )
-    ]
-
+    algorithm = None
+    progress_writer = None
+    sampled_steps = 0
+    next_checkpoint = checkpoint_cfg["save_freq"]
+    best_evaluation_return = -math.inf
+    total_timesteps = algo_cfg["total_timesteps"]
+    eval_cfg = train_cfg["evaluation"]
+    evaluation_interval = None
     if eval_cfg.get("enabled", True):
-        callbacks.append(
-            MaskableEvalCallback(
-                eval_env,
-                best_model_save_path=best_model_dir,
-                log_path=run_dir,
-                eval_freq=max(1, eval_cfg["eval_freq"] // sim_cfg["n_envs"]),
-                n_eval_episodes=eval_cfg["n_eval_episodes"],
-                deterministic=eval_cfg["deterministic"],
-                warn=False,
-            )
+        evaluation_interval = max(
+            1,
+            math.ceil(eval_cfg["eval_freq"] / float(algo_cfg["train_batch_size"])),
+        )
+    if total_timesteps < algo_cfg["train_batch_size"]:
+        print(
+            "Note: total_timesteps is smaller than train_batch_size; RLlib will "
+            f"still collect one full batch of {algo_cfg['train_batch_size']} steps."
         )
 
-    model.learn(
-        total_timesteps=algo_cfg["total_timesteps"],
-        callback=CallbackList(callbacks),
-        tb_log_name="training",
-        use_masking=True,
-        progress_bar=True,
-    )
+    try:
+        algorithm = build_ppo_config(train_cfg, sim_cfg).build_algo()
+        if progress_cfg.get("enabled", True):
+            progress_writer = LocalProgressWriter(
+                run_dir,
+                smoothing_window=progress_cfg.get("smoothing_window", 10),
+                plot_every_iterations=progress_cfg.get("plot_every_iterations", 1),
+            )
+            print(f"Progress CSV: {progress_writer.csv_path}")
+            print(f"Progress plot: {progress_writer.plot_path}")
 
-    latest_model_path = os.path.join(run_dir, "latest_model.zip")
-    model.save(latest_model_path)
+        started_at = time.perf_counter()
+        iteration = 0
+        while sampled_steps < total_timesteps:
+            iteration += 1
+            result = algorithm.train()
+            sampled_steps = int(
+                result.get(
+                    NUM_ENV_STEPS_SAMPLED_LIFETIME,
+                    sampled_steps + algo_cfg["train_batch_size"],
+                )
+            )
+            evaluation_is_fresh = bool(
+                evaluation_interval is not None
+                and iteration % evaluation_interval == 0
+            )
+            progress_row = None
+            if progress_writer is not None:
+                progress_row = progress_writer.record(
+                    result=result,
+                    iteration=iteration,
+                    timesteps=sampled_steps,
+                    elapsed_seconds=time.perf_counter() - started_at,
+                    evaluation_is_fresh=evaluation_is_fresh,
+                )
+            train_return = (
+                progress_row["train_return"]
+                if progress_row is not None
+                else _find_metric(result.get("env_runners", {}), "episode_return_mean")
+            )
+            print(
+                f"Iteration {iteration} | steps {sampled_steps}/{total_timesteps} | "
+                f"return {_format_metric(train_return)} | "
+                f"recent accuracy "
+                f"{_format_metric(progress_row['train_step_accuracy'] if progress_row else None)} | "
+                f"recent face-up "
+                f"{_format_metric(progress_row['train_step_face_up_fraction'] if progress_row else None)}"
+            )
 
-    print(f"Training complete. Output directory: {run_dir}")
-    print(f"Latest model: {latest_model_path}")
-    print(f"Best model directory: {best_model_dir}")
+            evaluation = result.get("evaluation") if evaluation_is_fresh else None
+            if evaluation:
+                evaluation_return = _find_metric(evaluation, "episode_return_mean")
+                if evaluation_return is not None and evaluation_return > best_evaluation_return:
+                    best_evaluation_return = float(evaluation_return)
+                    best_path = os.path.join(
+                        best_modules_dir, f"module_{sampled_steps:09d}"
+                    )
+                    algorithm.get_module().save_to_path(best_path)
 
-    train_env.close()
-    eval_env.close()
+            if sampled_steps >= next_checkpoint:
+                checkpoint_path = os.path.join(
+                    checkpoints_dir, f"checkpoint_{sampled_steps:09d}"
+                )
+                algorithm.save_to_path(checkpoint_path)
+                while next_checkpoint <= sampled_steps:
+                    next_checkpoint += checkpoint_cfg["save_freq"]
+
+        final_checkpoint = algorithm.save_to_path(
+            os.path.join(run_dir, "checkpoint_final")
+        )
+        final_module = algorithm.get_module().save_to_path(
+            os.path.join(run_dir, "module_final")
+        )
+        print(f"Training complete. Output directory: {run_dir}")
+        print(f"Resume checkpoint: {final_checkpoint}")
+        print(f"Inference module: {final_module}")
+    except KeyboardInterrupt:
+        print("Training interrupted; saving the latest available state...")
+        if algorithm is not None:
+            interrupted_checkpoint = algorithm.save_to_path(
+                os.path.join(
+                    checkpoints_dir,
+                    f"checkpoint_interrupted_{sampled_steps:09d}",
+                )
+            )
+            interrupted_module = algorithm.get_module().save_to_path(
+                os.path.join(
+                    run_dir,
+                    f"module_interrupted_{sampled_steps:09d}",
+                )
+            )
+            print(f"Resume checkpoint: {interrupted_checkpoint}")
+            print(f"Inference module: {interrupted_module}")
+    finally:
+        if algorithm is not None:
+            algorithm.stop()
+        ray.shutdown()
 
 
 if __name__ == "__main__":

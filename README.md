@@ -64,8 +64,9 @@ This project's purpose is the:
 - main.py: Desktop entry point (Tkinter app)
 - mobile_bridge.py: JSON-friendly bridge for mobile clients
 - simulation_env.py: Gymnasium wrapper around core_game.py for RL training/inference
-- agent.py: Inference agent using a trained MaskablePPO model
-- train.py: Config-driven training script using Gymnasium + MaskablePPO
+- agent.py: Stateful inference agent for a trained recurrent RLlib module
+- train.py: Config-driven recurrent PPO training using Gymnasium + RLlib
+- recurrent_masked_module.py: Thin adapter that applies legal-action masks to RLlib PPO logits
 - config.py: Definitions and configuration parameters for the game board/cards
 - utils.py: Helper functions for the whole game
 - configs/training_config.json: Training-specific configuration
@@ -95,9 +96,52 @@ This project's purpose is the:
 </div>
 <br />
 
-3. The next development steps could include using previous board states as input (for this purpose the lstm-architecture was selected).
+3. The game is treated as a POMDP. The policy receives the visible board and raw
+   public events (revealed rank, result, removed positions/cards and redealt
+   positions), exactly the information a player can observe. It does not receive
+   inferred probabilities or hidden card identities.
 
-4. A further refinement of the reward function should also be considered.
+4. PPO uses an RLlib-managed LSTM whose state persists for the complete game.
+   Invalid actions are removed with a hard mask before sampling. The mask contains
+   game-rule legality only and no statistical estimate about face-down cards.
+
+5. Wrong-guess rewards scale with the public drinking/removal penalty. This makes
+   the training objective distinguish small mistakes from removal of large open
+   components.
+
+Train with `python scripts/train.py`. Each completed run writes a resumable RLlib
+checkpoint and a lightweight `module_final` inference checkpoint below `outputs/`.
+The inference agent resets its memory only at the beginning of a new game.
+
+### Local Training Progress
+
+Training does not require TensorBoard. Every run creates these local files:
+
+- `outputs/<run>/progress/metrics.csv`: all recorded values for later analysis.
+- `outputs/<run>/progress/training_progress.png`: a dashboard refreshed after
+  each configured number of PPO iterations.
+
+The most useful game metrics are episode return, recent per-action accuracy,
+completion and truncation rates, the current/final/maximum face-up fractions, and
+the mean card/drink penalty per wrong guess. Step-level values continue updating
+while a long episode is in progress. Episode-level values are intentionally blank
+when no episode ended in that iteration, and evaluation values appear only on
+iterations where evaluation actually ran. PPO loss, value loss, entropy and
+explained variance are included as diagnostics, but loss alone does not measure
+whether the agent plays the game well.
+
+Plot frequency and rolling-average length are configured under `progress` in
+`configs/training_config.json`. One PPO iteration always collects a complete
+`train_batch_size`; setting `total_timesteps` below that value therefore still
+produces one full batch and only one point in the plot.
+
+The default recurrent horizon is 256 actions and `gamma` is 0.995 so older public
+card transitions can influence learning over a longer interval. Evaluation is
+deliberately less frequent and shorter than final benchmarking. For a reportable
+comparison, run a larger separate evaluation over fixed seeds after training.
+
+Pressing Ctrl+C saves both `checkpoint_interrupted_<steps>` (full training state)
+and `module_interrupted_<steps>` (inference weights) before Ray shuts down.
 
 ## Setup Profiles
 - Desktop game only:
