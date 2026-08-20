@@ -35,6 +35,7 @@ class CoreWindowGame:
         self.face_up: list[list[bool]] = []
         self.pending_removals: set[tuple[int, int]] = set()
         self.pending_penalty = 0
+        self.pending_action = None
         self.must_select_adjacent_to_handle = True
         self.turn_can_end = False
         self.init_stats()
@@ -115,6 +116,7 @@ class CoreWindowGame:
         self.deal_initial_cards()
         self.pending_removals = set()
         self.pending_penalty = 0
+        self.pending_action = None
         self.must_select_adjacent_to_handle = True
         self.turn_can_end = False
         self.turn_start_face_up = self.count_face_up_cards()
@@ -271,7 +273,14 @@ class CoreWindowGame:
                     return False
         return True
 
-    def simulate_action(self, position, guess, orientation=None):
+    def begin_action(self, position, guess, orientation=None):
+        """Apply a chosen guess, leaving wrong-card removals pending for the UI."""
+        if self.pending_action is not None:
+            return {
+                "reward": -10,
+                "done": False,
+                "debug": "A removal confirmation is still pending.",
+            }
         r, c = position
         if not WINDOW_LAYOUT[r][c]:
             return {"reward": -10, "done": False, "debug": "Invalid position: not a card slot."}
@@ -319,28 +328,6 @@ class CoreWindowGame:
                         {"position": [rr, cc], "rank": get_rank_index(card_id)}
                     )
 
-        if was_wrong:
-            redealt_positions = self.confirm_removals()
-            reward = -penalty
-            debug_info = "Wrong guess."
-        else:
-            redealt_positions = []
-            reward = 5
-            debug_info = "Correct guess."
-
-        done = self.check_game_end()
-        if done and not was_wrong:
-            reward = 200
-        visible_redeals = []
-        for rr, cc in redealt_positions:
-            if self.face_up[rr][cc]:
-                visible_redeals.append(
-                    {
-                        "position": [rr, cc],
-                        "rank": get_rank_index(self.card_grid[rr][cc]),
-                    }
-                )
-
         event = {
             "position": [r, c],
             "guess": guess,
@@ -349,13 +336,61 @@ class CoreWindowGame:
             "correct": not was_wrong,
             "penalty": penalty,
             "removed_cards": removed_cards,
-            "redealt_positions": [list(pos) for pos in redealt_positions],
-            "visible_redeals": visible_redeals,
+            "redealt_positions": [],
+            "visible_redeals": [],
             "must_select_adjacent_to_handle": self.must_select_adjacent_to_handle,
         }
+        if was_wrong:
+            self.pending_action = event
+            return {
+                "reward": -penalty,
+                "done": False,
+                "debug": "Wrong guess.",
+                "event": event,
+                "awaiting_confirmation": True,
+            }
+
+        done = self.check_game_end()
+        reward = 200 if done else 5
         return {
             "reward": reward,
             "done": done,
-            "debug": debug_info,
+            "debug": "Correct guess.",
             "event": event,
+            "awaiting_confirmation": False,
         }
+
+    def confirm_action_removals(self):
+        """Finalize a staged wrong move and return its complete public event."""
+        if self.pending_action is None:
+            raise RuntimeError("No wrong action is awaiting removal confirmation.")
+
+        event = self.pending_action
+        redealt_positions = self.confirm_removals()
+        event["redealt_positions"] = [list(pos) for pos in redealt_positions]
+        event["visible_redeals"] = [
+            {
+                "position": [rr, cc],
+                "rank": get_rank_index(self.card_grid[rr][cc]),
+            }
+            for rr, cc in redealt_positions
+            if self.face_up[rr][cc]
+        ]
+        event["must_select_adjacent_to_handle"] = (
+            self.must_select_adjacent_to_handle
+        )
+        self.pending_action = None
+        return {
+            "reward": -event["penalty"],
+            "done": False,
+            "debug": "Wrong guess.",
+            "event": event,
+            "awaiting_confirmation": False,
+        }
+
+    def simulate_action(self, position, guess, orientation=None):
+        """Apply one complete action, including automatic wrong-card redealing."""
+        result = self.begin_action(position, guess, orientation)
+        if result.get("awaiting_confirmation"):
+            return self.confirm_action_removals()
+        return result

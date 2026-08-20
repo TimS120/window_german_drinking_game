@@ -65,6 +65,7 @@ This project's purpose is the:
 - mobile_bridge.py: JSON-friendly bridge for mobile clients
 - simulation_env.py: Gymnasium wrapper around core_game.py for RL training/inference
 - agent.py: Stateful inference agent for a trained recurrent RLlib module
+- advisor.py: Non-executing desktop advisor that caches suggestions and retains public history
 - train.py: Config-driven recurrent PPO training using Gymnasium + RLlib
 - recurrent_masked_module.py: Thin adapter that applies legal-action masks to RLlib PPO logits
 - config.py: Definitions and configuration parameters for the game board/cards
@@ -112,6 +113,29 @@ This project's purpose is the:
 Train with `python scripts/train.py`. Each completed run writes a resumable RLlib
 checkpoint and a lightweight `module_final` inference checkpoint below `outputs/`.
 The inference agent resets its memory only at the beginning of a new game.
+
+### Desktop Move Suggestions
+
+The Tkinter application is a controller/view over `CoreWindowGame`; it does not
+maintain a second copy of the rules or card state. If enabled, the advisor receives
+every completed move that the user actually chose. Merely showing or rejecting a
+suggestion changes neither the game nor the recurrent state. Repeated clicks show
+the cached suggestion for the same board state.
+
+Configure the advisor in `configs/simulation_config.json`:
+
+```json
+"advisor": {
+  "enabled": true,
+  "model_path": "outputs/2026-08-19_18-11-24/module_final",
+  "deterministic": true
+}
+```
+
+Paths may be absolute or relative to the repository root. Set `model_path` to
+`null` to use the newest run containing `module_final`, or set `enabled` to false
+to run the desktop game without RL dependencies. Suggestions require the training
+dependency profile. The button displays and highlights a move but never executes it.
 
 ### Local Training Progress
 

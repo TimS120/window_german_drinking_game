@@ -64,6 +64,58 @@ def action_to_mask_key(action: dict[str, Any]) -> str:
     return guess
 
 
+def build_public_state(game):
+    """Build the visible state shared by training and real-game advice."""
+    cards = np.full((BOARD_ROWS, BOARD_COLS), -1, dtype=np.int8)
+    for r in range(BOARD_ROWS):
+        for c in range(BOARD_COLS):
+            if game.card_grid[r][c] is None:
+                cards[r, c] = -1
+            elif not game.face_up[r][c]:
+                cards[r, c] = -2
+            else:
+                cards[r, c] = get_rank_index(game.card_grid[r][c])
+    return {
+        "cards": cards,
+        "face_up": game.face_up,
+        "current_player": game.current_player(),
+        "deck_size": len(game.deck),
+    }
+
+
+def build_action_mask(game):
+    """Build the hard legality mask from public board geometry and game rules."""
+    mask = np.zeros(NUM_ACTIONS, dtype=bool)
+    for idx, action in enumerate(GLOBAL_ACTION_SPACE):
+        r, c = action["position"]
+        if not WINDOW_LAYOUT[r][c] or game.face_up[r][c]:
+            continue
+        if (
+            game.must_select_adjacent_to_handle
+            and (r, c) not in adjacent_positions(HANDLE_POSITION)
+        ):
+            continue
+        key = action_to_mask_key(action)
+        for option in game.get_valid_options_for_card(r, c):
+            for guess in option.guess_options:
+                option_key = guess
+                if guess in ["in-between", "outside"]:
+                    suffix = "h" if option.orientation == "horizontal" else "v"
+                    option_key = f"{guess.replace('-', '_')}_{suffix}"
+                if option_key == key:
+                    mask[idx] = True
+    return mask
+
+
+def build_public_observation(game, event=None):
+    """Encode only human-visible state plus legal actions for advisor inference."""
+    state = build_public_state(game)
+    return {
+        "observations": encode_public_observation(state, event, game),
+        "action_mask": build_action_mask(game).astype(np.float32),
+    }
+
+
 class WindowGameEnv(gym.Env):
     """POMDP environment exposing only information available to a player.
 
@@ -218,14 +270,7 @@ class WindowGameEnv(gym.Env):
 
     def action_masks(self):
         """Return bool mask with True for currently valid actions."""
-        state = self._get_state()
-        vm = state["valid_masks"]
-        mask = np.zeros(NUM_ACTIONS, dtype=bool)
-        for idx, action in enumerate(self.global_action_space):
-            key = action_to_mask_key(action)
-            r, c = action["position"]
-            mask[idx] = bool(vm[key][r, c])
-        return mask
+        return build_action_mask(self.game)
 
     def _get_state(self):
         state = {
@@ -280,14 +325,7 @@ class WindowGameEnv(gym.Env):
         return state
 
     def _build_observation(self, state):
-        return {
-            "observations": encode_public_observation(
-                state=state,
-                event=self._last_event,
-                game=self.game,
-            ),
-            "action_mask": self.action_masks().astype(np.float32),
-        }
+        return build_public_observation(self.game, self._last_event)
 
     def get_observation(self):
         """Return the current public observation without changing the game."""

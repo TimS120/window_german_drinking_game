@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import os
+import sys
 
 import numpy as np
+import ray
 import torch
 from ray.rllib.core.columns import Columns
 from ray.rllib.core.rl_module.rl_module import RLModule
@@ -21,8 +24,32 @@ class RLAgent:
     def __init__(self, model_path=None, deterministic=True):
         self.model_path = self._resolve_model_path(model_path)
         self.module = RLModule.from_checkpoint(self.model_path)
-        if not self.module.is_stateful():
-            raise ValueError(f"Module at {self.model_path} is not recurrent.")
+        initial_state = self.module.get_initial_state()
+        if not isinstance(initial_state, Mapping) or not initial_state:
+            state_keys = (
+                sorted(initial_state.keys())
+                if isinstance(initial_state, Mapping)
+                else "unavailable"
+            )
+            raise ValueError(
+                "The checkpoint did not return recurrent state tensors in this "
+                "runtime. This usually indicates an incompatible Python/Ray "
+                "environment, not a feed-forward checkpoint: "
+                f"path={self.model_path}, class={type(self.module).__name__}, "
+                f"reported_is_stateful={self.module.is_stateful()}, "
+                f"state_type={type(initial_state).__name__}, "
+                f"state_keys={state_keys}, python={sys.executable}, "
+                f"ray={ray.__version__}."
+            )
+        missing_keys = {"h", "c"} - set(initial_state)
+        if missing_keys:
+            raise ValueError(
+                "The loaded recurrent module is missing LSTM state keys "
+                f"{sorted(missing_keys)}: path={self.model_path}, "
+                f"class={type(self.module).__name__}, "
+                f"available_keys={sorted(initial_state)}."
+            )
+        self._initial_state = initial_state
         self.module.eval()
         self.device = next(self.module.parameters()).device
         self.deterministic = deterministic
@@ -55,10 +82,9 @@ class RLAgent:
 
     def reset_game(self):
         """Reset memory at the start of a new game, never between turns."""
-        initial_state = self.module.get_initial_state()
         self._state = {
             key: value.detach().clone().unsqueeze(0).to(self.device)
-            for key, value in initial_state.items()
+            for key, value in self._initial_state.items()
         }
 
     def _observation_batch(self, observation):
@@ -69,8 +95,8 @@ class RLAgent:
             for key, value in observation.items()
         }
 
-    def predict_action(self, env: WindowGameEnv):
-        observation = env.get_observation()
+    def predict_observation(self, observation):
+        """Advance memory once for a public observation and choose an action."""
         batch = {
             Columns.OBS: self._observation_batch(observation),
             Columns.STATE_IN: self._state,
@@ -90,6 +116,9 @@ class RLAgent:
             for key, value in outputs[Columns.STATE_OUT].items()
         }
         return action_index, decode_action_index(action_index)
+
+    def predict_action(self, env: WindowGameEnv):
+        return self.predict_observation(env.get_observation())
 
 
 if __name__ == "__main__":

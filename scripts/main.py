@@ -2,11 +2,47 @@
 Entry point for the Window Drinking Game app.
 """
 
-import tkinter as tk
-from config import DEVELOPMENT_MODE
+import json
+import os
+import sys
 
-from game import WindowGame
-from utils import get_player_names
+
+def _restart_with_project_venv():
+    """Use the repository's pinned runtime regardless of the IDE interpreter."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    venv_python = os.path.join(repo_root, ".venv", "Scripts", "python.exe")
+    current_python = os.path.normcase(os.path.realpath(sys.executable))
+    expected_python = os.path.normcase(os.path.realpath(venv_python))
+
+    if current_python == expected_python:
+        return
+    if not os.path.isfile(venv_python):
+        raise RuntimeError(
+            "The project virtual environment is missing. Expected Python at "
+            f"{venv_python}."
+        )
+
+    os.execv(
+        venv_python,
+        [venv_python, os.path.abspath(__file__), *sys.argv[1:]],
+    )
+
+
+# This must happen before importing the UI, which imports PyTorch and RLlib.
+if __name__ == "__main__":
+    _restart_with_project_venv()
+
+
+import tkinter as tk
+
+if __package__:
+    from .config import DEVELOPMENT_MODE
+    from .game import WindowGame
+    from .utils import get_player_names
+else:
+    from config import DEVELOPMENT_MODE
+    from game import WindowGame
+    from utils import get_player_names
 
 
 def main():
@@ -31,7 +67,18 @@ def main():
         if not players:
             players = ["Player1"]
         root.deiconify()
-    game = WindowGame(root, players)
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    simulation_config_path = os.path.join(
+        repo_root, "configs", "simulation_config.json"
+    )
+    with open(simulation_config_path, encoding="utf-8-sig") as config_file:
+        simulation_config = json.load(config_file)
+
+    game = WindowGame(
+        root,
+        players,
+        advisor_config=simulation_config.get("advisor", {}),
+    )
     root.mainloop()
 
 
