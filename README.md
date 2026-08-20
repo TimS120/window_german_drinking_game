@@ -140,6 +140,14 @@ card transitions can influence learning over a longer interval. Evaluation is
 deliberately less frequent and shorter than final benchmarking. For a reportable
 comparison, run a larger separate evaluation over fixed seeds after training.
 
+Learning rate and entropy use timestep schedules: both remain high during the
+rapid early-learning phase and then decay so PPO can refine a policy instead of
+continuing to move it aggressively after performance plateaus. Periodic model
+selection uses 20 evaluation games every roughly 25,000 steps. The best module is
+ranked by completion rate first and episode return second; this is less sensitive
+to lucky short five-game evaluations and reflects the actual goal of finishing
+the window.
+
 Pressing Ctrl+C saves both `checkpoint_interrupted_<steps>` (full training state)
 and `module_interrupted_<steps>` (inference weights) before Ray shuts down.
 

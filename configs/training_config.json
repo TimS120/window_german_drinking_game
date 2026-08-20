@@ -4,6 +4,12 @@
     "name": "RecurrentMaskedPPO",
     "total_timesteps": 500000,
     "learning_rate": 0.0003,
+    "learning_rate_schedule": [
+      [0, 0.0003],
+      [100000, 0.0003],
+      [350000, 0.0001],
+      [500000, 0.00003]
+    ],
     "train_batch_size": 2048,
     "minibatch_size": 512,
     "rollout_fragment_length": 128,
@@ -12,7 +18,14 @@
     "gae_lambda": 0.95,
     "clip_range": 0.2,
     "ent_coeff": 0.01,
+    "entropy_coeff_schedule": [
+      [0, 0.01],
+      [100000, 0.01],
+      [350000, 0.003],
+      [500000, 0.001]
+    ],
     "vf_coeff": 0.5,
+    "vf_clip_range": 100.0,
     "max_grad_norm": 0.5,
     "kl_coeff": 0.0,
     "num_gpus": 0,
@@ -30,8 +43,8 @@
   },
   "evaluation": {
     "enabled": true,
-    "eval_freq": 5000,
-    "n_eval_episodes": 5,
+    "eval_freq": 25000,
+    "n_eval_episodes": 20,
     "deterministic": true,
     "num_env_runners": 0
   },

@@ -74,6 +74,23 @@ def build_ppo_config(train_cfg: dict, sim_cfg: dict) -> PPOConfig:
         vf_share_layers=True,
     )
 
+    training_options = {
+        "lr": algo_cfg.get("learning_rate_schedule", algo_cfg["learning_rate"]),
+        "gamma": algo_cfg["gamma"],
+        "lambda_": algo_cfg["gae_lambda"],
+        "clip_param": algo_cfg["clip_range"],
+        "entropy_coeff": algo_cfg.get(
+            "entropy_coeff_schedule", algo_cfg["ent_coeff"]
+        ),
+        "vf_loss_coeff": algo_cfg["vf_coeff"],
+        "vf_clip_param": algo_cfg.get("vf_clip_range", 10.0),
+        "grad_clip": algo_cfg["max_grad_norm"],
+        "use_kl_loss": False,
+        "kl_coeff": algo_cfg.get("kl_coeff", 0.0),
+        "train_batch_size_per_learner": algo_cfg["train_batch_size"],
+        "minibatch_size": algo_cfg["minibatch_size"],
+        "num_epochs": algo_cfg["num_epochs"],
+    }
     config = (
         PPOConfig()
         .framework("torch")
@@ -88,20 +105,7 @@ def build_ppo_config(train_cfg: dict, sim_cfg: dict) -> PPOConfig:
             num_learners=0,
             num_gpus_per_learner=algo_cfg.get("num_gpus", 0),
         )
-        .training(
-            lr=algo_cfg["learning_rate"],
-            gamma=algo_cfg["gamma"],
-            lambda_=algo_cfg["gae_lambda"],
-            clip_param=algo_cfg["clip_range"],
-            entropy_coeff=algo_cfg["ent_coeff"],
-            vf_loss_coeff=algo_cfg["vf_coeff"],
-            grad_clip=algo_cfg["max_grad_norm"],
-            use_kl_loss=False,
-            kl_coeff=algo_cfg.get("kl_coeff", 0.0),
-            train_batch_size_per_learner=algo_cfg["train_batch_size"],
-            minibatch_size=algo_cfg["minibatch_size"],
-            num_epochs=algo_cfg["num_epochs"],
-        )
+        .training(**training_options)
         .rl_module(
             rl_module_spec=RLModuleSpec(
                 module_class=RecurrentActionMaskingTorchRLModule,
@@ -149,6 +153,25 @@ def _format_metric(value):
     return f"{number:.4f}" if math.isfinite(number) else "N/A"
 
 
+def _evaluation_score(evaluation):
+    """Rank policies by game completion, using return as a tie-breaker."""
+    completion = _find_metric(evaluation, "game/completion_rate")
+    episode_return = _find_metric(evaluation, "episode_return_mean")
+    try:
+        completion = float(completion)
+    except (TypeError, ValueError):
+        completion = -math.inf
+    try:
+        episode_return = float(episode_return)
+    except (TypeError, ValueError):
+        episode_return = -math.inf
+    if not math.isfinite(completion):
+        completion = -math.inf
+    if not math.isfinite(episode_return):
+        episode_return = -math.inf
+    return completion, episode_return
+
+
 def main(
     training_config_path: str = DEFAULT_TRAINING_CONFIG_PATH,
     simulation_config_path: str = DEFAULT_SIMULATION_CONFIG_PATH,
@@ -183,7 +206,7 @@ def main(
     progress_writer = None
     sampled_steps = 0
     next_checkpoint = checkpoint_cfg["save_freq"]
-    best_evaluation_return = -math.inf
+    best_evaluation_score = (-math.inf, -math.inf)
     total_timesteps = algo_cfg["total_timesteps"]
     eval_cfg = train_cfg["evaluation"]
     evaluation_interval = None
@@ -249,9 +272,9 @@ def main(
 
             evaluation = result.get("evaluation") if evaluation_is_fresh else None
             if evaluation:
-                evaluation_return = _find_metric(evaluation, "episode_return_mean")
-                if evaluation_return is not None and evaluation_return > best_evaluation_return:
-                    best_evaluation_return = float(evaluation_return)
+                evaluation_score = _evaluation_score(evaluation)
+                if evaluation_score > best_evaluation_score:
+                    best_evaluation_score = evaluation_score
                     best_path = os.path.join(
                         best_modules_dir, f"module_{sampled_steps:09d}"
                     )
