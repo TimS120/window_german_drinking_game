@@ -21,6 +21,7 @@ scripts/models/**/*.tfevents.*
 # Android / Gradle
 android/.gradle/
 android/**/build/
+.gradle-user-home/
 android/local.properties
 *.apk
 *.aab

@@ -1,9 +1,9 @@
 """Utility functions for the Window Drinking Game."""
 
 try:
-    from config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
+    from config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION
 except ImportError:
-    from .config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION, SUIT_MAP, RANK_MAP
+    from .config import RANKS, SUITS, NUM_CARDS, WINDOW_LAYOUT, HANDLE_POSITION
 
 
 def get_player_names(root):
@@ -114,7 +114,10 @@ def adjacent_positions(pos):
 
 def card_id_to_front_filename(card_id):
     """
-    Map a card ID to its expected front image filename (e.g., 'Eichel_Sechs.png').
+    Map a card ID to its front image filename (e.g., 'c1_v1.png').
+
+    Card IDs are rank-major: the first four cards share value 1 and use
+    colours 1 through 4; the next four use value 2, and so on.
 
     Args:
         card_id (int): The card identifier.
@@ -122,7 +125,7 @@ def card_id_to_front_filename(card_id):
     Returns:
         str: The front image filename.
     """
-    rank = RANKS[card_id // 4]
-    suit = SUITS[card_id % 4]
-    return f"{SUIT_MAP[suit]}_{RANK_MAP[rank]}.png"
+    colour = card_id % len(SUITS) + 1
+    value = card_id // len(SUITS) + 1
+    return f"c{colour}_v{value}.png"
     import tkinter as tk

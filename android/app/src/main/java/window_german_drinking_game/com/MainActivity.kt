@@ -45,8 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -256,7 +256,10 @@ private fun AppRoot() {
         }
     }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = Color(0xFF0F381C),
+    ) { padding ->
         Box(
             modifier = Modifier
                 .padding(padding)
@@ -574,7 +577,10 @@ private fun PlayerSetupScreen(
             .ifEmpty { listOf("Player1") }
     }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = Color(0xFF0F381C),
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -704,8 +710,7 @@ private fun BoardView(
                                     contentDescription = if (isFaceUp && cardId != null) cardLabel(cardId) else "Card",
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer { rotationZ = 90f },
+                                        .fillMaxSize(),
                                 )
                             } else {
                                 Box(
@@ -725,51 +730,44 @@ private fun BoardView(
     }
 }
 
-private fun cardDrawableRes(cardId: Int): Int {
-    val rankNames = listOf("sechs", "sieben", "acht", "neun", "zehn", "unter", "ober", "koenig", "ass")
-    val suitNames = listOf("eichel", "blatt", "herz", "schelln")
-    val rank = rankNames[cardId / 4]
-    val suit = suitNames[cardId % 4]
-    val key = "${suit}_${rank}"
-    return when (key) {
-        "blatt_acht" -> R.drawable.blatt_acht
-        "blatt_ass" -> R.drawable.blatt_ass
-        "blatt_koenig" -> R.drawable.blatt_koenig
-        "blatt_neun" -> R.drawable.blatt_neun
-        "blatt_ober" -> R.drawable.blatt_ober
-        "blatt_sechs" -> R.drawable.blatt_sechs
-        "blatt_sieben" -> R.drawable.blatt_sieben
-        "blatt_unter" -> R.drawable.blatt_unter
-        "blatt_zehn" -> R.drawable.blatt_zehn
-        "eichel_acht" -> R.drawable.eichel_acht
-        "eichel_ass" -> R.drawable.eichel_ass
-        "eichel_koenig" -> R.drawable.eichel_koenig
-        "eichel_neun" -> R.drawable.eichel_neun
-        "eichel_ober" -> R.drawable.eichel_ober
-        "eichel_sechs" -> R.drawable.eichel_sechs
-        "eichel_sieben" -> R.drawable.eichel_sieben
-        "eichel_unter" -> R.drawable.eichel_unter
-        "eichel_zehn" -> R.drawable.eichel_zehn
-        "herz_acht" -> R.drawable.herz_acht
-        "herz_ass" -> R.drawable.herz_ass
-        "herz_koenig" -> R.drawable.herz_koenig
-        "herz_neun" -> R.drawable.herz_neun
-        "herz_ober" -> R.drawable.herz_ober
-        "herz_sechs" -> R.drawable.herz_sechs
-        "herz_sieben" -> R.drawable.herz_sieben
-        "herz_unter" -> R.drawable.herz_unter
-        "herz_zehn" -> R.drawable.herz_zehn
-        "schelln_acht" -> R.drawable.schelln_acht
-        "schelln_ass" -> R.drawable.schelln_ass
-        "schelln_koenig" -> R.drawable.schelln_koenig
-        "schelln_neun" -> R.drawable.schelln_neun
-        "schelln_ober" -> R.drawable.schelln_ober
-        "schelln_sechs" -> R.drawable.schelln_sechs
-        "schelln_sieben" -> R.drawable.schelln_sieben
-        "schelln_unter" -> R.drawable.schelln_unter
-        "schelln_zehn" -> R.drawable.schelln_zehn
-        else -> R.drawable.card_back
-    }
+private fun cardDrawableRes(cardId: Int): Int = when (cardId) {
+    0 -> R.drawable.c1_v1
+    1 -> R.drawable.c2_v1
+    2 -> R.drawable.c3_v1
+    3 -> R.drawable.c4_v1
+    4 -> R.drawable.c1_v2
+    5 -> R.drawable.c2_v2
+    6 -> R.drawable.c3_v2
+    7 -> R.drawable.c4_v2
+    8 -> R.drawable.c1_v3
+    9 -> R.drawable.c2_v3
+    10 -> R.drawable.c3_v3
+    11 -> R.drawable.c4_v3
+    12 -> R.drawable.c1_v4
+    13 -> R.drawable.c2_v4
+    14 -> R.drawable.c3_v4
+    15 -> R.drawable.c4_v4
+    16 -> R.drawable.c1_v5
+    17 -> R.drawable.c2_v5
+    18 -> R.drawable.c3_v5
+    19 -> R.drawable.c4_v5
+    20 -> R.drawable.c1_v6
+    21 -> R.drawable.c2_v6
+    22 -> R.drawable.c3_v6
+    23 -> R.drawable.c4_v6
+    24 -> R.drawable.c1_v7
+    25 -> R.drawable.c2_v7
+    26 -> R.drawable.c3_v7
+    27 -> R.drawable.c4_v7
+    28 -> R.drawable.c1_v8
+    29 -> R.drawable.c2_v8
+    30 -> R.drawable.c3_v8
+    31 -> R.drawable.c4_v8
+    32 -> R.drawable.c1_v9
+    33 -> R.drawable.c2_v9
+    34 -> R.drawable.c3_v9
+    35 -> R.drawable.c4_v9
+    else -> R.drawable.card_back
 }
 
 @Composable

@@ -12,13 +12,13 @@ val repoRoot = rootProject.projectDir.parentFile
 val generatedSharedResDir = layout.buildDirectory.dir("generated/res/sharedCards")
 
 val prepareSharedCardDrawables by tasks.registering(Copy::class) {
-    from(File(repoRoot, "resources/front")) {
+    from(File(repoRoot, "resources/cards/front")) {
         include("*.png")
         eachFile { name = name.lowercase() }
     }
-    from(File(repoRoot, "resources/back")) {
-        include("back.png")
-        rename("back.png", "card_back.png")
+    from(File(repoRoot, "resources/cards/back")) {
+        include("backside.png")
+        rename("backside.png", "card_back.png")
     }
     into(generatedSharedResDir.map { it.dir("drawable") })
 }

@@ -58,6 +58,8 @@ class WindowGame:
         """
         self.root = root
         self.root.title("Window Drinking Game")
+        self.background_color = "#0F381C"
+        self.root.configure(bg=self.background_color)
         self.game = CoreWindowGame(players=players)
         self.advisor = None
         self.advisor_formatter = None
@@ -90,7 +92,8 @@ class WindowGame:
         based on the screen size.
         """
         workspace_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        back_file = os.path.join(workspace_path, "resources", "back", "back.png")
+        back_file = os.path.join(workspace_path, "resources", "cards", "back", "backside.png")
+        front_dir = os.path.join(workspace_path, "resources", "cards", "front")
         
         # Get screen size
         screen_width = self.root.winfo_screenwidth()
@@ -100,10 +103,10 @@ class WindowGame:
         max_width = screen_width // 8  # TODO: Find way without workaround. Becaus the number 8 is arbitrary set because it fitted
         max_height = screen_height // 8  # TODO: Find way without workaround. Becaus the number 8 is arbitrary set because it fitted
 
-        img = Image.open(back_file)
-        img = img.rotate(90, expand=True)
-
-        old_sizes = img.size
+        # Fronts define the shared portrait card dimensions.
+        reference_file = os.path.join(front_dir, card_id_to_front_filename(0))
+        with Image.open(reference_file) as reference_img:
+            old_sizes = reference_img.size
         width_ratio = old_sizes[0] / max_width
         height_ratio = old_sizes[1] / max_height
 
@@ -113,16 +116,14 @@ class WindowGame:
         else:
             new_sizes = (int(old_sizes[0] * (1 / height_ratio)), int(old_sizes[1] * (1 / height_ratio)))
 
-        img = img.resize(new_sizes, Image.LANCZOS)
+        img = Image.open(back_file).resize(new_sizes, Image.LANCZOS)
         self.back_photo = ImageTk.PhotoImage(img)
 
         self.front_images = {}
-        front_dir = os.path.join(workspace_path, "resources", "front")
         for file in os.listdir(front_dir):
             if file.endswith(".png"):
                 file_path = os.path.join(front_dir, file)
                 img = Image.open(file_path)
-                img = img.rotate(90, expand=True)
                 img = img.resize(new_sizes, Image.LANCZOS)
                 self.front_images[file] = ImageTk.PhotoImage(img)
 
@@ -163,23 +164,29 @@ class WindowGame:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        self.frame_top = tk.Frame(self.root)
+        self.frame_top = tk.Frame(self.root, bg=self.background_color)
         self.frame_top.pack(side=tk.TOP, fill=tk.X)
 
-        self.frame_center = tk.Frame(self.root)
+        self.frame_center = tk.Frame(self.root, bg=self.background_color)
         self.frame_center.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        self.frame_game = tk.Frame(self.frame_center)
+        self.frame_game = tk.Frame(self.frame_center, bg=self.background_color)
         self.frame_game.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.BOTH, expand=True)
         self.card_border_inactive_color = self.frame_game.cget("bg")
 
-        self.frame_stats = tk.Frame(self.frame_center)
+        self.frame_stats = tk.Frame(self.frame_center, bg=self.background_color)
         self.frame_stats.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH, expand=True)
 
-        self.frame_bottom = tk.Frame(self.root)
+        self.frame_bottom = tk.Frame(self.root, bg=self.background_color)
         self.frame_bottom.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self.info_label = tk.Label(self.frame_bottom, text="", font=("Arial", 12))
+        self.info_label = tk.Label(
+            self.frame_bottom,
+            text="",
+            font=("Arial", 12),
+            bg=self.background_color,
+            fg="white",
+        )
         self.info_label.pack(side=tk.LEFT, padx=5)
 
         self.stop_turn_button = tk.Button(
