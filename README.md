@@ -4,7 +4,9 @@
 
 This project's purpose is the:
 - Development of the basic functionality of the German "Window" drinking game
-- The creation and training of a DRL-Agend for the prediction of the next best move
+- The creation of methods to predict the next best move, via
+   - The training of a DRL-Agend
+   - The development of a pure statistical method
 
 
 ## Table of Contents
@@ -21,94 +23,80 @@ This project's purpose is the:
 
 ### Setup
 - The cards used are from a German deck (order: 6 < 7 < 8 < 9 < 10 < U < O < K < A) with four suits (Eichel, Blatt, Herz, Schelle)
-- Arrange the cards in a “window” formation: all **corner** cards and the **handle** card are face-up; all others face-down.  
-- The remaining cards form a face-down stack.  
-- Typically, 3–8 players participate (but any number from 1 to 100 is also possible).
+- They are arrange in a “window” formation, where all **corner** cards and the **handle** card are face-up; all others face-down
+- The remaining cards of the deck form a face-down stack
+- Typically, 3–8 players participate (but any number from 1 to 100 is also possible)
 
 ### Gameplay
 1. **Initial/ Handle Rule**:
-   - At the start of the game and whenever the handle is removed, the only valid move is to select the card adjacent to the handle. The player must guess if that face‑down card is higher, same, or lower than the handle’s rank.
+   - At the start of the game and whenever the handle is removed, the only valid move is to select the card adjacent to the handle. The player must guess if the selected face‑down card is higher, same, or lower than the handle’s rank.
 2. **Guesses**:
    - If a face-down card is next to **one** (horizontally or vertically) face-up card, then the guess is either *higher*, *same* or *lower*
    - If a face-down card is **between two face-up cards**, the guess is whether its rank is *in between* or *outside* those two ranks (ties with boundary ranks count as *in between*).  
 3. **Multiple Boundaries**:
    - If a face-down card touches more than one pair of face-up cards (e.g., horizontally and vertically), the player must choose **either** the horizontal **or** the vertical pair as the boundaries.  
-   - “Around the corner” (mixing a horizontal card with a vertical card) is not allowed.  
+   - "Around the corner" (mixing a horizontal card with a vertical card) is not allowed.  
 4. **Correct Guess**:
    - The card is turned face-up.  
    - Special rule for 'same' guesses: If a player correctly guesses 'same', all other players must take one swallow.
-   - The player may continue guessing another card or pass the turn.  
+   - The player may continue guessing another card or pass the turn.
 5. **Wrong Guess**:
    - The player drinks a number of times equal to the total number of cards removed.
    - The guessed card is removed along with every open card that is directly or indirectly adjoining it (i.e. if an open card touches an open card that is adjacent to the guessed card, it is also removed).
    - If the handle (the card at the handle position) is removed in this process, it is immediately redealt face-up and the next turn must be played on a card adjacent to the new handle.
    - All removed cards are shuffled back into the deck.
    - Missing spots are redealt: corners and handle are always redealt face-up, others face-down.
-   - The same player takes the next turn.
+   - The same player takes the next turn and cannot pass the turn to the next person.
 
 ### Winning Condition
-- The game ends when **all cards** in the window are face-up.
+- The game ends when **all cards** in the window are face-up. A clear winner cannot be determined, since it is a drinking game (Maybe the person who drank the least/most? I don't know...).
 
-### Additional Notes
-- Only **ranks** matter (6–10, U, O, K, A); suits/colors are irrelevant.  
-- “In between” includes matching the boundary ranks.
+### Additional Notes (Additional information + hindsight)
+- Only **ranks** matter (6–10, U, O, K, A); suits/colors are irrelevant.
+- "In between" includes matching the boundary ranks.
 - If a face‑down card touches face‑up cards in more than one configuration (for example, one horizontal neighbor and two vertical neighbors), then if an in‑between option is available (i.e. from a pair of vertical or horizontal neighbors), it must be used. The player is not allowed to choose a higher/same/lower guess in such cases; they must make the in‑between/outside guess based on the available pair.
-- “Around the corner” (mixing a horizontal card with a vertical card) is not allowed.
+- "Around the corner" (mixing a horizontal card with a vertical card) is not allowed.
 
 ---
 # Development Documentation
 
 ## Architecture
-- core_game.py: Platform-independent game engine (shared logic)
-- game.py: Desktop Tkinter UI (human gameplay)
-- main.py: Desktop entry point (Tkinter app)
-- mobile_bridge.py: JSON-friendly bridge for mobile clients
-- simulation_env.py: Gymnasium wrapper around core_game.py for RL training/inference
-- agent.py: Stateful inference agent for a trained recurrent RLlib module
-- advisor.py: Non-executing desktop advisor that caches suggestions and retains public history
-- train.py: Config-driven recurrent PPO training using Gymnasium + RLlib
-- recurrent_masked_module.py: Thin adapter that applies legal-action masks to RLlib PPO logits
-- config.py: Definitions and configuration parameters for the game board/cards
-- utils.py: Helper functions for the whole game
-- configs/training_config.json: Training-specific configuration
-- configs/simulation_config.json: Simulation/game configuration for training
-- resources/additional/lookup_action_number_to_action.txt: Optional lookup reference (not runtime)
-
-### Android Integration Path
-1. Keep all game rules in `scripts/core_game.py` only.
-2. Use `scripts/mobile_bridge.py` as the Android-facing API layer.
-3. In Android, choose one of these integration approaches:
-   - Embed Python with Chaquopy and call `MobileGameBridge` from Kotlin.
-   - Run a small local Python service exposing bridge methods over HTTP/WebSocket and consume it from Compose.
-4. Build the Android UI in Kotlin/Compose using state from `get_state()` and send user actions through `act(...)`.
-5. Do not duplicate game rules in Kotlin; keep Kotlin as presentation + input only.
+- `scripts/core_game.py`: Platform-independent Python rules engine
+- `scripts/game.py`: Desktop Tkinter UI (human gameplay) `scripts/main.py`: Desktop entry point (Tkinter app)
+- `scripts/simulation_env.py`: Python engine adaption to Gymnasium
+  `scripts/train.py`, `scripts/recurrent_masked_module.py`, `scripts/agent.py`,
+  and `scripts/advisor.py`: provide recurrent PPO training and optional desktop move suggestions
+- `android/app/src/main/java/window_german_drinking_game/com/game/WindowGameEngine.kt`: Separate Kotlin implementation used by the Android/Compose app
+- `configs/simulation_config.json`: Configuration of the simulator and desktop app
+- `configs/training_config.json`: Training configuration
 
 
 ## Agent/ Training
-1. By not sorting out all invalid actions, the model will do too many invalid actions and learning will be (too) slow:
+
+The simulator exposes only public game information to the policy: the visible
+board and the history of revealed, removed, and redealt cards. It does not expose
+the identity of face-down cards or derived probability estimates.
+
+The action space is described by the document `resources\additional\lookup_action_number_to_action.txt`.
+
+Invalid actions are hard-masked before recurrent PPO samples an action. The mask
+contains legal game actions only. Wrong-guess rewards scale with the public drink/removal penalty, allowing the training objective to distinguish small and large mistakes. The policy uses an RLlib-managed LSTM whose state lasts for a complete game.
+
+### Masking Experiments
+
+Without action masking, the agent spends many moves on invalid guesses (top-right graph):
 <div align="center">
     <img src="resources/docs/development/runs1.png" width="50%" style="display:inline-block;">
 </div>
 <br />
 
-2. For that nearly all invalid moves are multiplied by 0.0, so that the move will not be selected by the model. That increases the performance of the model. A test is made with a few episodes: 
+Here, ~75-100% of all actions were invalid over the training episodes.
+
+With invalid actions masked, training can focus on legal moves:
 <div align="center">
     <img src="resources/docs/development/runs2.png" width="50%" style="display:inline-block;">
 </div>
 <br />
-
-3. The game is treated as a POMDP. The policy receives the visible board and raw
-   public events (revealed rank, result, removed positions/cards and redealt
-   positions), exactly the information a player can observe. It does not receive
-   inferred probabilities or hidden card identities.
-
-4. PPO uses an RLlib-managed LSTM whose state persists for the complete game.
-   Invalid actions are removed with a hard mask before sampling. The mask contains
-   game-rule legality only and no statistical estimate about face-down cards.
-
-5. Wrong-guess rewards scale with the public drinking/removal penalty. This makes
-   the training objective distinguish small mistakes from removal of large open
-   components.
 
 Train with `python scripts/train.py`. Each completed run writes a resumable RLlib
 checkpoint and a lightweight `module_final` inference checkpoint below `outputs/`.
@@ -180,16 +168,21 @@ and `module_interrupted_<steps>` (inference weights) before Ray shuts down.
   `pip install -r requirements/desktop.txt`
 - Training / RL stack:
   `pip install -r requirements/train.txt`
-- Mobile bridge backend only:
-  `pip install -r requirements/mobile_bridge.txt`
 
 The root `requirements.txt` points to the training profile for backward compatibility.
 
-## Android Online Multiplayer
-- The Android app supports offline play, creating an online room, and joining an online room.
-- Online rooms use Firebase Anonymous Auth plus Firebase Realtime Database; players do not need Firebase or Google accounts.
-- The host enters the full player list, creates a room code, and each phone joins with that code and its own player name.
-- Only the phone whose local player name matches the current player can make moves; other phones observe the synced state.
+## Android App
+
+The Android app is a Kotlin/Jetpack Compose client with its own local game engine.
+It supports offline play, room creation, and room joining. The shared card images
+are copied from `resources/cards` into generated Android resources during the
+Gradle build.
+
+For online play, it uses Firebase Anonymous Authentication and Firebase Realtime
+Database. The host creates a room from the complete player list. Each phone joins
+with the room code and a player name. Only the phone whose local player name is
+the current player can make a move, the other clients observe the synchronized
+state.
 
 ### Firebase Setup
 1. Create a Firebase project.
