@@ -1,196 +1,55 @@
-![Window game](./resources/docs/full_game.png)
+# Window
 
-# Window - a German drinking game
+Cross-platform implementation of the German Window card game. The Flutter app
+in `app/` is the single player-facing client for Android, iOS, browsers, and
+Windows. It currently supports complete offline/local games; online rooms and
+the optional best-move model are deliberately scheduled for later stages.
 
-This project's purpose is the:
-- Development of the basic functionality of the German "Window" drinking game
-- The creation of methods to predict the next best move, via
-   - The training of a DRL-Agend
-   - The development of a pure statistical method
+## Test the game on this PC
 
+Flutter has been installed locally at:
 
-## Table of Contents
-- [Game Explanation](#game-explanation)
-   - [Gameplay](#gameplay)
-   - [Winning Condition](#winning-condition)
-   - [Additional Notes](#additional-notes)
-- [Development Documentation](#development-documentation)
-   - [Architecture](#architecture)
-   - [Agent/ Training](#agent-training)
+`C:\Users\timss\Documents\Codex\tools\flutter_prebuilt\flutter`
 
+Open PowerShell and run:
 
-## Game Explanation
-
-### Setup
-- The cards used are from a German deck (order: 6 < 7 < 8 < 9 < 10 < U < O < K < A) with four suits (Eichel, Blatt, Herz, Schelle)
-- They are arrange in a “window” formation, where all **corner** cards and the **handle** card are face-up; all others face-down
-- The remaining cards of the deck form a face-down stack
-- Typically, 3–8 players participate (but any number from 1 to 100 is also possible)
-
-### Gameplay
-1. **Initial/ Handle Rule**:
-   - At the start of the game and whenever the handle is removed, the only valid move is to select the card adjacent to the handle. The player must guess if the selected face‑down card is higher, same, or lower than the handle’s rank.
-2. **Guesses**:
-   - If a face-down card is next to **one** (horizontally or vertically) face-up card, then the guess is either *higher*, *same* or *lower*
-   - If a face-down card is **between two face-up cards**, the guess is whether its rank is *in between* or *outside* those two ranks (ties with boundary ranks count as *in between*).  
-3. **Multiple Boundaries**:
-   - If a face-down card touches more than one pair of face-up cards (e.g., horizontally and vertically), the player must choose **either** the horizontal **or** the vertical pair as the boundaries.  
-   - "Around the corner" (mixing a horizontal card with a vertical card) is not allowed.  
-4. **Correct Guess**:
-   - The card is turned face-up.  
-   - Special rule for 'same' guesses: If a player correctly guesses 'same', all other players must take one swallow.
-   - The player may continue guessing another card or pass the turn.
-5. **Wrong Guess**:
-   - The player drinks a number of times equal to the total number of cards removed.
-   - The guessed card is removed along with every open card that is directly or indirectly adjoining it (i.e. if an open card touches an open card that is adjacent to the guessed card, it is also removed).
-   - If the handle (the card at the handle position) is removed in this process, it is immediately redealt face-up and the next turn must be played on a card adjacent to the new handle.
-   - All removed cards are shuffled back into the deck.
-   - Missing spots are redealt: corners and handle are always redealt face-up, others face-down.
-   - The same player takes the next turn and cannot pass the turn to the next person.
-
-### Winning Condition
-- The game ends when **all cards** in the window are face-up. A clear winner cannot be determined, since it is a drinking game (Maybe the person who drank the least/most? I don't know...).
-
-### Additional Notes (Additional information + hindsight)
-- Only **ranks** matter (6–10, U, O, K, A); suits/colors are irrelevant.
-- "In between" includes matching the boundary ranks.
-- If a face‑down card touches face‑up cards in more than one configuration (for example, one horizontal neighbor and two vertical neighbors), then if an in‑between option is available (i.e. from a pair of vertical or horizontal neighbors), it must be used. The player is not allowed to choose a higher/same/lower guess in such cases; they must make the in‑between/outside guess based on the available pair.
-- "Around the corner" (mixing a horizontal card with a vertical card) is not allowed.
-
----
-# Development Documentation
-
-## Architecture
-- `scripts/core_game.py`: Platform-independent Python rules engine
-- `scripts/game.py`: Desktop Tkinter UI (human gameplay) `scripts/main.py`: Desktop entry point (Tkinter app)
-- `scripts/simulation_env.py`: Python engine adaption to Gymnasium
-  `scripts/train.py`, `scripts/recurrent_masked_module.py`, `scripts/agent.py`,
-  and `scripts/advisor.py`: provide recurrent PPO training and optional desktop move suggestions
-- `android/app/src/main/java/window_german_drinking_game/com/game/WindowGameEngine.kt`: Separate Kotlin implementation used by the Android/Compose app
-- `configs/simulation_config.json`: Configuration of the simulator and desktop app
-- `configs/training_config.json`: Training configuration
-
-
-## Agent/ Training
-
-The simulator exposes only public game information to the policy: the visible
-board and the history of revealed, removed, and redealt cards. It does not expose
-the identity of face-down cards or derived probability estimates.
-
-The action space is described by the document `resources\additional\lookup_action_number_to_action.txt`.
-
-Invalid actions are hard-masked before recurrent PPO samples an action. The mask
-contains legal game actions only. Wrong-guess rewards scale with the public drink/removal penalty, allowing the training objective to distinguish small and large mistakes. The policy uses an RLlib-managed LSTM whose state lasts for a complete game.
-
-### Masking Experiments
-
-Without action masking, the agent spends many moves on invalid guesses (top-right graph):
-<div align="center">
-    <img src="resources/docs/development/runs1.png" width="50%" style="display:inline-block;">
-</div>
-<br />
-
-Here, ~75-100% of all actions were invalid over the training episodes.
-
-With invalid actions masked, training can focus on legal moves:
-<div align="center">
-    <img src="resources/docs/development/runs2.png" width="50%" style="display:inline-block;">
-</div>
-<br />
-
-Train with `python scripts/train.py`. Each completed run writes a resumable RLlib
-checkpoint and a lightweight `module_final` inference checkpoint below `outputs/`.
-The inference agent resets its memory only at the beginning of a new game.
-
-### Desktop Move Suggestions
-
-The Tkinter application is a controller/view over `CoreWindowGame`; it does not
-maintain a second copy of the rules or card state. If enabled, the advisor receives
-every completed move that the user actually chose. Merely showing or rejecting a
-suggestion changes neither the game nor the recurrent state. Repeated clicks show
-the cached suggestion for the same board state.
-
-Configure the advisor in `configs/simulation_config.json`:
-
-```json
-"advisor": {
-  "enabled": true,
-  "model_path": "outputs/2026-08-19_18-11-24/module_final",
-  "deterministic": true
-}
+```powershell
+$env:Path = "C:\Users\timss\Documents\Codex\tools\flutter_prebuilt\flutter\bin;$env:Path"
+Set-Location C:\Users\timss\Desktop\window_german_drinking_game\app
+flutter test
+flutter run -d chrome
 ```
 
-Paths may be absolute or relative to the repository root. Set `model_path` to
-`null` to use the newest run containing `module_final`, or set `enabled` to false
-to run the desktop game without RL dependencies. Suggestions require the training
-dependency profile. The button displays and highlights a move but never executes it.
+The last command opens the game in Chrome on this PC. Enter comma-separated
+player names, start a local game, and play through card guesses, incorrect-guess
+redeals, same-rank penalties, and turn changes.
 
-### Local Training Progress
+To build a browser release instead of launching a development session:
 
-Training does not require TensorBoard. Every run creates these local files:
+```powershell
+flutter build web
+```
 
-- `outputs/<run>/progress/metrics.csv`: all recorded values for later analysis.
-- `outputs/<run>/progress/training_progress.png`: a dashboard refreshed after
-  each configured number of PPO iterations.
+The generated Windows, Android, iOS, and web project targets are already in
+`app/`. iOS builds need a Mac with Xcode. The Flutter Windows target is present,
+but this PC's pre-existing Visual Studio Build Tools instance is incomplete;
+`flutter doctor` identifies the remaining Microsoft C++ setup issue before a
+native Windows executable can be built.
 
-The most useful game metrics are episode return, recent per-action accuracy,
-completion and truncation rates, the current/final/maximum face-up fractions, and
-the mean card/drink penalty per wrong guess. Step-level values continue updating
-while a long episode is in progress. Episode-level values are intentionally blank
-when no episode ended in that iteration, and evaluation values appear only on
-iterations where evaluation actually ran. PPO loss, value loss, entropy and
-explained variance are included as diagnostics, but loss alone does not measure
-whether the agent plays the game well.
+## Repository layout
 
-Plot frequency and rolling-average length are configured under `progress` in
-`configs/training_config.json`. One PPO iteration always collects a complete
-`train_batch_size`; setting `total_timesteps` below that value therefore still
-produces one full batch and only one point in the plot.
+- `app/lib/game_engine.dart` — canonical pure-Dart game rules, no UI or network code.
+- `app/lib/main.dart` — responsive local Flutter game interface.
+- `app/test/game_engine_test.dart` — deterministic rules compatibility tests.
+- `app/assets/cards/` — shared card artwork bundled into all Flutter targets.
+- `scripts/`, `configs/`, `requirements/` — retained Python simulation and RL-training tooling. These are not part of the player application and will be connected to the Flutter advisor only in the later model stage.
 
-The default recurrent horizon is 256 actions and `gamma` is 0.995 so older public
-card transitions can influence learning over a longer interval. Evaluation is
-deliberately less frequent and shorter than final benchmarking. For a reportable
-comparison, run a larger separate evaluation over fixed seeds after training.
+## Current migration boundary
 
-Learning rate and entropy use timestep schedules: both remain high during the
-rapid early-learning phase and then decay so PPO can refine a policy instead of
-continuing to move it aggressively after performance plateaus. Periodic model
-selection uses 20 evaluation games every roughly 25,000 steps. The best module is
-ranked by completion rate first and episode return second; this is less sensitive
-to lucky short five-game evaluations and reflects the actual goal of finishing
-the window.
-
-Pressing Ctrl+C saves both `checkpoint_interrupted_<steps>` (full training state)
-and `module_interrupted_<steps>` (inference weights) before Ray shuts down.
-
-## Setup Profiles
-- Desktop game only:
-  `pip install -r requirements/desktop.txt`
-- Training / RL stack:
-  `pip install -r requirements/train.txt`
-
-The root `requirements.txt` points to the training profile for backward compatibility.
-
-## Android App
-
-The Android app is a Kotlin/Jetpack Compose client with its own local game engine.
-It supports offline play, room creation, and room joining. The shared card images
-are copied from `resources/cards` into generated Android resources during the
-Gradle build.
-
-For online play, it uses Firebase Anonymous Authentication and Firebase Realtime
-Database. The host creates a room from the complete player list. Each phone joins
-with the room code and a player name. Only the phone whose local player name is
-the current player can make a move, the other clients observe the synchronized
-state.
-
-### Firebase Setup
-1. Create a Firebase project.
-2. Add an Android app with package name `window_german_drinking_game.com`.
-3. Enable Authentication -> Anonymous sign-in.
-4. Create a Realtime Database.
-5. Download `google-services.json` and place it at `android/app/google-services.json`.
-6. Deploy `firebase-database.rules.json` to the Realtime Database rules.
-7. Build/run the Android app from the `android` directory.
-
-The Gradle Google Services plugin is applied only when `android/app/google-services.json` exists, so local builds without Firebase credentials still compile but online rooms will show a configuration error at runtime.
+The old Android-specific application and Tkinter desktop interface remain in
+the repository only as a temporary rollback reference while this Flutter stage
+is being tested. They will be removed in the next cleanup commit after you
+confirm the new game works. The Python rules implementation then remains only
+as the established training/simulation implementation. Before the best-move
+model is migrated, we will add explicit cross-language fixtures so that the
+Dart and Python training rules remain behaviorally aligned.
