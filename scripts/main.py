@@ -58,6 +58,9 @@ def main():
     x_position = (screen_width - window_width) // 2
     y_position = (screen_height - window_height) // 2
     root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+    # Apply the requested geometry before WindowGame records its reference
+    # canvas for proportional desktop scaling.
+    root.update_idletasks()
 
     if DEVELOPMENT_MODE:
         players = ["Alice", "Bob", "Charlie"]

@@ -6,6 +6,8 @@ import os
 import random
 import time
 import math
+import queue
+import threading
 import tkinter as tk
 from PIL import Image, ImageTk
 
@@ -26,8 +28,6 @@ else:
         card_id_to_front_filename,
     )
 
-
-new_sizes = 0
 
 class WindowGame:
     """
@@ -64,6 +64,8 @@ class WindowGame:
         self.advisor = None
         self.advisor_formatter = None
         self.advisor_error = None
+        self.advisor_loading = False
+        self._advisor_load_results = queue.Queue()
         self.advisor_config = (
             advisor_config
             if advisor_config is not None
@@ -74,6 +76,18 @@ class WindowGame:
         self.ui_locked = False
         self.card_border_width = 3
         self.card_border_inactive_color = self.root.cget("bg")
+        # The desktop UI is designed at the size chosen by main.py. Every
+        # dimension below is derived from this canvas using one scale factor,
+        # so resizing never changes the layout's proportions.
+        self.reference_width = max(self.root.winfo_width(), 800)
+        self.reference_height = max(self.root.winfo_height(), 600)
+        self.window_aspect_ratio = self.reference_width / self.reference_height
+        self.minimum_scale = 0.60
+        self.layout_scale = 1.0
+        self.card_size = (1, 1)
+        self._resize_after_id = None
+        self._align_after_id = None
+        self._constraining_window_aspect = False
 
         self.init_images()
         self.correct_wrong_guess_ratio = {p: 0 for p in self.players}
@@ -83,49 +97,175 @@ class WindowGame:
         self.pending_new_cards = []
         self.confirm_button = None
 
-        self.initialize_advisor()
         self.update_ui()
+        self.info_label.config(
+            text=f"{self.current_player()}'s turn. Select a highlighted card to begin."
+        )
+        self.root.minsize(
+            int(self.reference_width * self.minimum_scale),
+            int(self.reference_height * self.minimum_scale),
+        )
+        self.root.bind("<Configure>", self.on_window_configure)
+        self.schedule_info_alignment()
+        self.start_advisor_initialization()
 
     def init_images(self):
         """
-        Load and process back and front images for the cards, resizing them dynamically
-        based on the screen size.
+        Load the source images.  Tkinter images are generated later at the
+        current layout scale and replaced whenever the window is resized.
         """
         workspace_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         back_file = os.path.join(workspace_path, "resources", "cards", "back", "backside.png")
         front_dir = os.path.join(workspace_path, "resources", "cards", "front")
         
-        # Get screen size
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-
-        # Calculate proportional image size
-        max_width = screen_width // 8  # TODO: Find way without workaround. Becaus the number 8 is arbitrary set because it fitted
-        max_height = screen_height // 8  # TODO: Find way without workaround. Becaus the number 8 is arbitrary set because it fitted
-
         # Fronts define the shared portrait card dimensions.
         reference_file = os.path.join(front_dir, card_id_to_front_filename(0))
         with Image.open(reference_file) as reference_img:
-            old_sizes = reference_img.size
-        width_ratio = old_sizes[0] / max_width
-        height_ratio = old_sizes[1] / max_height
-
-        global new_sizes
-        if(width_ratio > height_ratio):
-            new_sizes = (int(old_sizes[0] * (1 / width_ratio)), int(old_sizes[1] * (1 / width_ratio)))
-        else:
-            new_sizes = (int(old_sizes[0] * (1 / height_ratio)), int(old_sizes[1] * (1 / height_ratio)))
-
-        img = Image.open(back_file).resize(new_sizes, Image.LANCZOS)
-        self.back_photo = ImageTk.PhotoImage(img)
-
+            self.source_card_size = reference_img.size
+        self.back_source = Image.open(back_file).convert("RGBA").copy()
+        # Decode front images only when they become visible.  Most cards begin
+        # face-down, so eagerly decoding all 36 noticeably slows startup.
+        self.front_image_paths = {}
+        self.front_sources = {}
         self.front_images = {}
         for file in os.listdir(front_dir):
             if file.endswith(".png"):
-                file_path = os.path.join(front_dir, file)
-                img = Image.open(file_path)
-                img = img.resize(new_sizes, Image.LANCZOS)
-                self.front_images[file] = ImageTk.PhotoImage(img)
+                self.front_image_paths[file] = os.path.join(front_dir, file)
+        self.resize_card_images()
+
+    def on_window_configure(self, event):
+        """Coalesce live resize events before regenerating the card bitmaps."""
+        if event.widget is not self.root:
+            return
+        self.constrain_window_aspect_ratio()
+        if self._resize_after_id is not None:
+            self.root.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.root.after(16, self.apply_layout_scale)
+        self.schedule_info_alignment()
+
+    def constrain_window_aspect_ratio(self):
+        """Keep the main window at the reference layout's aspect ratio."""
+        if self._constraining_window_aspect:
+            return
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+
+        # Correct the dimension that needs the smaller adjustment.  This lets
+        # users resize freely while preventing distortion of the game canvas.
+        matching_height = round(width / self.window_aspect_ratio)
+        matching_width = round(height * self.window_aspect_ratio)
+        if abs(matching_height - height) <= abs(matching_width - width):
+            target_width, target_height = width, matching_height
+        else:
+            target_width, target_height = matching_width, height
+
+        min_width = int(self.reference_width * self.minimum_scale)
+        min_height = int(self.reference_height * self.minimum_scale)
+        if target_width < min_width or target_height < min_height:
+            target_width, target_height = min_width, min_height
+        if target_width == width and target_height == height:
+            return
+
+        self._constraining_window_aspect = True
+        try:
+            self.root.geometry(f"{target_width}x{target_height}")
+        finally:
+            self._constraining_window_aspect = False
+
+    def apply_layout_scale(self):
+        """Apply one uniform scale to the complete main-window interface."""
+        self._resize_after_id = None
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        scale = min(width / self.reference_width, height / self.reference_height)
+        scale = max(self.minimum_scale, scale)
+        if abs(scale - self.layout_scale) < 0.01 and self.card_size != (1, 1):
+            self.schedule_info_alignment()
+            return
+        self.layout_scale = scale
+        self.resize_card_images()
+        self.apply_widget_scale()
+        self.update_ui()
+        self.schedule_info_alignment()
+
+    def scaled(self, value, minimum=1):
+        return max(minimum, round(value * self.layout_scale))
+
+    def resize_card_images(self):
+        """Create PhotoImages at the current scale while retaining card ratio."""
+        max_width = self.scaled(self.reference_width / 12)
+        # A five-row board can use nearly all of the centre panel height.
+        # Width remains bounded by the six-column layout, preserving portrait
+        # cards and avoiding the oversized surrounding border.
+        max_height = self.scaled(self.reference_height / 6)
+        source_width, source_height = self.source_card_size
+        ratio = min(max_width / source_width, max_height / source_height)
+        self.card_size = (max(1, round(source_width * ratio)), max(1, round(source_height * ratio)))
+        self.back_photo = ImageTk.PhotoImage(self.back_source.resize(self.card_size, Image.LANCZOS))
+        # Existing front thumbnails no longer match the new scale.  They are
+        # rebuilt only if they are currently needed by get_front_photo().
+        self.front_images = {}
+
+    def get_front_photo(self, filename):
+        """Load and resize a front-card bitmap only when it is displayed."""
+        if filename not in self.front_image_paths:
+            return None
+        if filename not in self.front_sources:
+            with Image.open(self.front_image_paths[filename]) as image:
+                self.front_sources[filename] = image.convert("RGBA").copy()
+        if filename not in self.front_images:
+            self.front_images[filename] = ImageTk.PhotoImage(
+                self.front_sources[filename].resize(self.card_size, Image.LANCZOS)
+            )
+        return self.front_images[filename]
+
+    def apply_widget_scale(self):
+        """Scale the non-image parts of the main UI using the same factor."""
+        font_size = self.scaled(12, 8)
+        padding = self.scaled(5)
+        self.info_label.config(
+            font=("Arial", font_size),
+            borderwidth=self.scaled(1),
+            padx=self.scaled(6),
+            pady=self.scaled(4),
+        )
+        for button in (self.stop_turn_button, self.reset_game_button, self.suggestion_button):
+            button.config(font=("Arial", font_size), padx=padding, pady=self.scaled(2))
+        self.info_label.pack_configure(padx=0, pady=padding)
+        for button in (self.stop_turn_button, self.reset_game_button, self.suggestion_button):
+            button.pack_configure(padx=padding)
+        self.frame_game.pack_configure(padx=padding, pady=padding)
+        self.frame_stats.pack_configure(padx=padding, pady=padding)
+        # The stats table and controls inherit the statistics panel's single
+        # outer inset.  Adding another inset here created the uneven top and
+        # right borders seen in the previous layout.
+        self.frame_bottom.pack_configure(padx=0, pady=0)
+        for row in self.button_frames:
+            for container in row:
+                if container is not None:
+                    container.config(highlightthickness=self.scaled(self.card_border_width))
+                    container.grid_configure(padx=padding, pady=padding)
+
+    def schedule_info_alignment(self):
+        """Align status after Tkinter has applied the newest geometry."""
+        if self._align_after_id is not None:
+            self.root.after_cancel(self._align_after_id)
+        self._align_after_id = self.root.after(30, self.align_info_label)
+
+    def align_info_label(self):
+        """Align the status panel's top edge with the first card row."""
+        self._align_after_id = None
+        if not hasattr(self, "frame_game") or not self.frame_game.winfo_ismapped():
+            return
+        self.root.update_idletasks()
+        board_top = self.button_frames[0][0].winfo_rooty()
+        stats_top = self.frame_stats.winfo_rooty()
+        top_inset = max(self.scaled(5), board_top - stats_top)
+        self.info_label.pack_configure(pady=(top_inset, self.scaled(5)))
+
+        # Keep the table entirely within its panel.  Its compact labels and
+        # font size are chosen so it fits without clipping either edge.
+        self.stats_table.place_configure(x=0, width=self.frame_stats.winfo_width())
 
     def init_stats(self):
         """
@@ -164,30 +304,39 @@ class WindowGame:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        self.frame_top = tk.Frame(self.root, bg=self.background_color)
-        self.frame_top.pack(side=tk.TOP, fill=tk.X)
-
         self.frame_center = tk.Frame(self.root, bg=self.background_color)
-        self.frame_center.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.frame_center.pack(fill=tk.BOTH, expand=True)
 
         self.frame_game = tk.Frame(self.frame_center, bg=self.background_color)
         self.frame_game.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.BOTH, expand=True)
+        self.frame_game.grid_anchor("sw")
         self.card_border_inactive_color = self.frame_game.cget("bg")
 
         self.frame_stats = tk.Frame(self.frame_center, bg=self.background_color)
         self.frame_stats.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH, expand=True)
 
-        self.frame_bottom = tk.Frame(self.root, bg=self.background_color)
+        # The controls belong to the statistics column.  Its bottom edge is
+        # aligned with the board's last row, rather than creating a separate
+        # full-window button row below the board.
+        self.frame_bottom = tk.Frame(self.frame_stats, bg=self.background_color)
         self.frame_bottom.pack(side=tk.BOTTOM, fill=tk.X)
+        self.stats_table = tk.Frame(self.frame_stats, bg=self.background_color)
+        self.stats_table.place(relx=0, rely=0.5, anchor="w")
 
         self.info_label = tk.Label(
-            self.frame_bottom,
+            self.frame_stats,
             text="",
             font=("Arial", 12),
-            bg=self.background_color,
+            bg="#1D5A30",
             fg="white",
+            anchor=tk.W,
+            justify=tk.LEFT,
+            relief=tk.SOLID,
+            borderwidth=1,
+            padx=6,
+            pady=4,
         )
-        self.info_label.pack(side=tk.LEFT, padx=5)
+        self.info_label.pack(side=tk.TOP, fill=tk.X, padx=0, pady=5)
 
         self.stop_turn_button = tk.Button(
             self.frame_bottom, text="End Turn", command=self.end_turn, state=tk.DISABLED
@@ -195,7 +344,10 @@ class WindowGame:
         self.stop_turn_button.pack(side=tk.RIGHT, padx=5)
 
         self.reset_game_button = tk.Button(
-            self.frame_bottom, text="Reset Game", command=self.confirm_reset_game
+            self.frame_bottom,
+            text="Reset Game",
+            command=self.confirm_reset_game,
+            state=tk.DISABLED,
         )
         self.reset_game_button.pack(side=tk.RIGHT, padx=5)
 
@@ -215,8 +367,8 @@ class WindowGame:
         # Initialize buttons before adjusting their size
         self.initialize_card_buttons()
 
-        # Adjust button sizes dynamically
-        self.adjust_button_sizes()
+        # Images determine card button size; no character-based Button sizing.
+        self.apply_widget_scale()
 
     @staticmethod
     def load_default_advisor_config():
@@ -231,30 +383,63 @@ class WindowGame:
         except (OSError, ValueError):
             return {}
 
-    def initialize_advisor(self):
-        """Load the configured model and prepare advice for the initial board."""
+    def start_advisor_initialization(self):
+        """Load the optional model in the background without delaying the UI."""
+        if self.advisor_loading:
+            return
         if not self.advisor_config.get("enabled", False):
             self.advisor_error = "Model suggestions are disabled in simulation_config.json."
             self.suggestion_button.config(state=tk.NORMAL)
             return
+
+        self.advisor_loading = True
+        self.suggestion_button.config(text="Loading model hint...", state=tk.DISABLED)
+
+        def load_advisor():
+            try:
+                if __package__:
+                    from .advisor import AdvisorSession, format_suggestion
+                else:
+                    from advisor import AdvisorSession, format_suggestion
+                advisor = AdvisorSession(
+                    model_path=self.advisor_config.get("model_path"),
+                    deterministic=self.advisor_config.get("deterministic", True),
+                )
+                self._advisor_load_results.put((advisor, format_suggestion, None))
+            except Exception as exc:
+                self._advisor_load_results.put((None, None, str(exc)))
+
+        threading.Thread(target=load_advisor, daemon=True).start()
+        self.root.after(25, self.finish_advisor_initialization)
+
+    def finish_advisor_initialization(self):
+        """Apply a completed background advisor load on Tkinter's UI thread."""
         try:
-            if __package__:
-                from .advisor import AdvisorSession, format_suggestion
-            else:
-                from advisor import AdvisorSession, format_suggestion
-            self.advisor = AdvisorSession(
-                model_path=self.advisor_config.get("model_path"),
-                deterministic=self.advisor_config.get("deterministic", True),
-            )
-            self.advisor_formatter = format_suggestion
+            advisor, formatter, error = self._advisor_load_results.get_nowait()
+        except queue.Empty:
+            if self.advisor_loading:
+                self.root.after(25, self.finish_advisor_initialization)
+            return
+
+        self.advisor_loading = False
+        self.suggestion_button.config(text="Show model suggestion", state=tk.NORMAL)
+        if error is not None:
+            self.advisor_error = error
+            return
+        self.advisor = advisor
+        self.advisor_formatter = formatter
+        try:
+            # The player may have begun a turn while the model was loading.
+            # Reset against the current state so advisor history is correct.
             self.advisor.reset(self.game)
             self.advisor_error = None
-            self.suggestion_button.config(state=tk.NORMAL)
         except Exception as exc:
             self.advisor = None
             self.advisor_error = str(exc)
-            self.suggestion_button.config(state=tk.NORMAL)
-            self.info_label.config(text=f"Model advisor unavailable: {exc}")
+
+    def initialize_advisor(self):
+        """Compatibility wrapper for callers that request advisor setup."""
+        self.start_advisor_initialization()
 
     def record_advisor_transition(self, event):
         """Feed exactly one completed, actual user transition to model memory."""
@@ -272,7 +457,9 @@ class WindowGame:
         """Display cached advice without changing game or recurrent state."""
         if self.advisor is None:
             if self.advisor_config.get("enabled", False):
-                self.initialize_advisor()
+                self.start_advisor_initialization()
+                self.info_label.config(text="Model advisor is loading...")
+                return
         if self.advisor is None:
             self.info_label.config(
                 text=f"Model advisor unavailable: {self.advisor_error or 'not configured'}"
@@ -322,7 +509,7 @@ class WindowGame:
 
     def adjust_button_sizes(self):
         """
-        Adjust button sizes based on screen resolution without cropping images.
+        Adjust card button geometry after their images have been rescaled.
         """
         if not hasattr(self, "buttons") or not self.buttons:
             return
@@ -330,7 +517,7 @@ class WindowGame:
         for r in range(len(self.buttons)):
             for c in range(len(self.buttons[r])):
                 if self.buttons[r][c]:
-                    self.buttons[r][c].config(width=new_sizes[0], height=new_sizes[1])
+                    self.buttons[r][c].config(width=self.card_size[0], height=self.card_size[1])
 
     def on_card_click(self, r, c):
         """
@@ -548,6 +735,7 @@ class WindowGame:
 
     def commit_user_action(self, position, guess, orientation=None):
         """Commit only the action the user actually selected."""
+        self.reset_game_button.config(state=tk.NORMAL)
         self.clear_suggestion_display()
         result = self.game.begin_action(position, guess, orientation)
         if "event" not in result:
@@ -669,6 +857,9 @@ class WindowGame:
         """
         Configure a popup as modal so background widgets cannot be clicked.
         """
+        # Popups are created after the main window has already been scaled.
+        # Set their defaults before their child controls are constructed.
+        window.option_add("*Font", ("Arial", self.scaled(12, 8)))
         window.transient(self.root)
         window.grab_set()
         window.focus_force()
@@ -852,6 +1043,7 @@ class WindowGame:
         if self.advisor is not None:
             self.advisor.reset(self.game)
         self.stop_turn_button.config(state=tk.DISABLED)
+        self.reset_game_button.config(state=tk.DISABLED)
         self.update_ui()
 
     def confirm_reset_game(self):
@@ -898,22 +1090,29 @@ class WindowGame:
         """
         Update the statistics table in the UI with real-time game data.
         """
-        for widget in self.frame_stats.winfo_children():
+        for widget in self.stats_table.winfo_children():
             widget.destroy()
 
-        headers = ["Player", "Drinks", "Correct Guesses", "Wrong guesses", "Correct to wrong ratio", "Changed Cards", "Turns"]
-        screen_width = self.root.winfo_screenwidth()
-        font_size = max(10, int(screen_width * 0.008))  # Scale font size
+        headers = ["Player", "Drinks", "Correct", "Wrong", "C/W ratio", "Changed", "Turns"]
+        font_size = self.scaled(14, 8)
+        cell_x_padding = self.scaled(5)
+        cell_y_padding = self.scaled(2)
+
+        # Stretch the table borders/cells across the full statistics column;
+        # the larger text then uses the available space instead of clustering
+        # at the left.
+        for col in range(len(headers)):
+            self.stats_table.columnconfigure(col, weight=1)
 
         for col, header in enumerate(headers):
             label = tk.Label(
-                self.frame_stats,
+                self.stats_table,
                 text=header,
                 font=("Arial", font_size, "bold"),
                 borderwidth=1,
                 relief="solid",
-                padx=5,
-                pady=2
+                padx=cell_x_padding,
+                pady=cell_y_padding
             )
             label.grid(row=1, column=col, sticky="nsew")
         total_changed = 0
@@ -939,13 +1138,13 @@ class WindowGame:
             ]
             for col, val in enumerate(values):
                 label = tk.Label(
-                    self.frame_stats,
+                    self.stats_table,
                     text=str(val),
                     font=("Arial", font_size),
                     borderwidth=1,
                     relief="solid",
-                    padx=5,
-                    pady=2
+                    padx=cell_x_padding,
+                    pady=cell_y_padding
                 )
                 label.grid(row=row, column=col, sticky="nsew")
         sum_row = len(self.players) + 2
@@ -956,13 +1155,13 @@ class WindowGame:
         totals = ["Total", total_drinks, total_correct, total_wrong, f"{average_ratio:.2f}", f"{total_changed} of 17", ""]
         for col, val in enumerate(totals):
             label = tk.Label(
-                self.frame_stats,
+                self.stats_table,
                 text=str(val),
                 font=("Arial", font_size, "bold"),
                 borderwidth=1,
                 relief="solid",
-                padx=5,
-                pady=2
+                padx=cell_x_padding,
+                pady=cell_y_padding
             )
             label.grid(row=sum_row, column=col, sticky="nsew")
 
@@ -990,8 +1189,9 @@ class WindowGame:
                 if card_id is not None:
                     if self.face_up[r][c]:
                         filename = card_id_to_front_filename(card_id)
-                        if filename in self.front_images:
-                            widget.config(image=self.front_images[filename], text="")
+                        image = self.get_front_photo(filename)
+                        if image is not None:
+                            widget.config(image=image, text="")
                         else:
                             widget.config(text=card_id_to_label(card_id))
                     else:
