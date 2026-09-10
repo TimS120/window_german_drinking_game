@@ -7,7 +7,7 @@ import 'game_engine.dart';
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
 // the number of cells alone.  This keeps every card fully visible.
-const double _boardAspectRatio = 0.88;
+const double _boardAspectRatio = 0.74;
 
 void main() => runApp(const WindowGameApp());
 
@@ -266,7 +266,6 @@ class _GameShellState extends State<GameShell> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Expanded(
-                        flex: 3,
                         child: LayoutBuilder(
                           builder:
                               (
@@ -288,10 +287,7 @@ class _GameShellState extends State<GameShell> {
                         ),
                       ),
                       const SizedBox(width: 24),
-                      SizedBox(
-                        width: 360,
-                        child: SingleChildScrollView(child: info),
-                      ),
+                      Expanded(child: SingleChildScrollView(child: info)),
                     ],
                   )
                 : ListView(
@@ -416,60 +412,76 @@ class _Scoreboard extends StatelessWidget {
                   .reduce((double total, double value) => total + value) /
               playerStats.length;
 
-    DataRow row(String player, PlayerStats value) => DataRow(
-      cells: <DataCell>[
-        DataCell(
-          Text(
-            player,
-            style: TextStyle(
-              fontWeight: player == currentPlayer
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-            ),
-          ),
-        ),
-        DataCell(Text('${value.drinks}')),
-        DataCell(Text('${value.correct}')),
-        DataCell(Text('${value.wrong}')),
-        DataCell(Text(_correctWrongRatio(value).toStringAsFixed(2))),
-        DataCell(Text('${value.changedCards}')),
-        DataCell(Text('${value.turns}')),
-      ],
-    );
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columnSpacing: 14,
-        headingRowHeight: 34,
-        dataRowMinHeight: 36,
-        dataRowMaxHeight: 44,
-        columns: const <DataColumn>[
-          DataColumn(label: Text('Player')),
-          DataColumn(label: Text('Drinks'), numeric: true),
-          DataColumn(label: Text('Correct'), numeric: true),
-          DataColumn(label: Text('Wrong'), numeric: true),
-          DataColumn(label: Text('C/W ratio'), numeric: true),
-          DataColumn(label: Text('Changed'), numeric: true),
-          DataColumn(label: Text('Turns'), numeric: true),
-        ],
-        rows: <DataRow>[
-          for (final String player in players) row(player, stats[player]!),
-          DataRow(
-            cells: <DataCell>[
-              const DataCell(Text('Total')),
-              DataCell(Text('$totalDrinks')),
-              DataCell(Text('$totalCorrect')),
-              DataCell(Text('$totalWrong')),
-              DataCell(Text(averageRatio.toStringAsFixed(2))),
-              DataCell(Text('$totalChanged of 17')),
-              DataCell(Text('$totalTurns')),
-            ],
-          ),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool compact = constraints.maxWidth < 520;
+        final Widget table = Table(
+          border: TableBorder.all(color: Theme.of(context).dividerColor),
+          columnWidths: const <int, TableColumnWidth>{
+            0: FlexColumnWidth(1.5),
+            1: FlexColumnWidth(),
+            2: FlexColumnWidth(),
+            3: FlexColumnWidth(),
+            4: FlexColumnWidth(1.25),
+            5: FlexColumnWidth(1.2),
+            6: FlexColumnWidth(),
+          },
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          children: <TableRow>[
+            _tableRow(const <String>[
+              'Player',
+              'Drinks',
+              'Correct',
+              'Wrong',
+              'C/W ratio',
+              'Changed',
+              'Turns',
+            ], bold: true),
+            for (final String player in players)
+              _tableRow(<String>[
+                player,
+                '${stats[player]!.drinks}',
+                '${stats[player]!.correct}',
+                '${stats[player]!.wrong}',
+                _correctWrongRatio(stats[player]!).toStringAsFixed(2),
+                '${stats[player]!.changedCards}',
+                '${stats[player]!.turns}',
+              ], bold: player == currentPlayer),
+            _tableRow(<String>[
+              'Total',
+              '$totalDrinks',
+              '$totalCorrect',
+              '$totalWrong',
+              averageRatio.toStringAsFixed(2),
+              '$totalChanged of 17',
+              '$totalTurns',
+            ], bold: true),
+          ],
+        );
+        if (!compact) return table;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(width: 520, child: table),
+        );
+      },
     );
   }
+
+  TableRow _tableRow(List<String> values, {bool bold = false}) => TableRow(
+    children: values
+        .map(
+          (String value) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: bold ? FontWeight.bold : null),
+            ),
+          ),
+        )
+        .toList(),
+  );
 }
 
 double _correctWrongRatio(PlayerStats stats) =>
@@ -487,76 +499,87 @@ class _Board extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AspectRatio(
     aspectRatio: _boardAspectRatio,
-    child: GridView.builder(
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 6,
-        childAspectRatio: .72,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-      ),
-      itemCount: 30,
-      itemBuilder: (BuildContext context, int index) {
-        final Position position = Position(index ~/ 6, index % 6);
-        if (!game.isValidSlot(position)) return const SizedBox.shrink();
-        final bool faceUp = snapshot.faceUp[position.row][position.column];
-        final bool selectable = snapshot.validSelectable.contains(position);
-        final int? card = snapshot.cardGrid[position.row][position.column];
-        return Semantics(
-          button: selectable,
-          label: position == handlePosition
-              ? 'Handle card'
-              : (faceUp
-                    ? 'Face-up ${game.cardLabel(card!)}'
-                    : 'Face-down card'),
-          child: InkWell(
-            onTap: selectable ? () => onSelect(position) : null,
-            borderRadius: BorderRadius.circular(10),
-            child: Ink(
-              decoration: BoxDecoration(
-                color: faceUp
-                    ? const Color(0xfff3ead2)
-                    : const Color(0xff164b83),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: selectable
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.black54,
-                  width: selectable ? 3 : 1,
-                ),
-                boxShadow: const <BoxShadow>[
-                  BoxShadow(
-                    color: Colors.black38,
-                    blurRadius: 3,
-                    offset: Offset(1, 2),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(9),
-                child: Image.asset(
-                  faceUp
-                      ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
-                      : 'assets/cards/card_back.png',
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Center(
-                    child: Text(
-                      faceUp ? game.cardLabel(card!) : '?',
-                      style: TextStyle(
-                        color: faceUp ? const Color(0xff251c13) : Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: faceUp ? 18 : 30,
-                      ),
+    child: Column(
+      children: List<Widget>.generate(
+        windowLayout.length,
+        (int row) => Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: row == windowLayout.length - 1 ? 0 : 6,
+            ),
+            child: Row(
+              children: List<Widget>.generate(
+                windowLayout.first.length,
+                (int column) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: column == windowLayout.first.length - 1 ? 0 : 6,
                     ),
+                    child: _cardSlot(context, Position(row, column)),
                   ),
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     ),
   );
+
+  Widget _cardSlot(BuildContext context, Position position) {
+    if (!game.isValidSlot(position)) return const SizedBox.shrink();
+    final bool faceUp = snapshot.faceUp[position.row][position.column];
+    final bool selectable = snapshot.validSelectable.contains(position);
+    final int? card = snapshot.cardGrid[position.row][position.column];
+    return Semantics(
+      button: selectable,
+      label: position == handlePosition
+          ? 'Handle card'
+          : (faceUp ? 'Face-up ${game.cardLabel(card!)}' : 'Face-down card'),
+      child: InkWell(
+        onTap: selectable ? () => onSelect(position) : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: faceUp ? const Color(0xfff3ead2) : const Color(0xff164b83),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selectable
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.black54,
+              width: selectable ? 3 : 1,
+            ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 3,
+                offset: Offset(1, 2),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Image.asset(
+              faceUp
+                  ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
+                  : 'assets/cards/card_back.png',
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => Center(
+                child: Text(
+                  faceUp ? game.cardLabel(card!) : '?',
+                  style: TextStyle(
+                    color: faceUp ? const Color(0xff251c13) : Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: faceUp ? 18 : 30,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 String _guessLabel(GuessType guess) => switch (guess) {
