@@ -33,6 +33,7 @@ class OnlineRoom {
     required this.hostUid,
     required this.state,
     required this.seats,
+    required this.started,
   });
 
   final String code;
@@ -40,6 +41,7 @@ class OnlineRoom {
   final String hostUid;
   final GameState state;
   final List<RoomSeat> seats;
+  final bool started;
 
   factory OnlineRoom.fromSnapshot(String code, DataSnapshot snapshot) {
     final Map<Object?, Object?> raw = Map<Object?, Object?>.from(
@@ -59,6 +61,8 @@ class OnlineRoom {
         Map<Object?, Object?>.from(raw['state'] as Map),
       ),
       seats: seats,
+      // Rooms created before the lobby migration were already active games.
+      started: raw['started'] != false,
     );
   }
 }
@@ -140,18 +144,13 @@ class FirebaseRoomRepository {
   Future<String> createRoom({
     required GameState state,
     required List<String> localPlayers,
-    required List<String> remoteSeats,
   }) async {
-    final List<String> players = <String>[...localPlayers, ...remoteSeats];
-    final List<RoomSeat> seats = players
+    final List<RoomSeat> seats = localPlayers
         .asMap()
         .entries
         .map(
-          (MapEntry<int, String> entry) => RoomSeat(
-            index: entry.key,
-            name: entry.value,
-            ownerUid: entry.key < localPlayers.length ? uid : null,
-          ),
+          (MapEntry<int, String> entry) =>
+              RoomSeat(index: entry.key, name: entry.value, ownerUid: uid),
         )
         .toList();
     for (int attempt = 0; attempt < 8; attempt++) {
@@ -162,7 +161,13 @@ class FirebaseRoomRepository {
       ) {
         if (current != null) return Transaction.abort();
         return Transaction.success(
-          _publicRoom(hostUid: uid, version: 1, seats: seats, state: state),
+          _publicRoom(
+            hostUid: uid,
+            version: 1,
+            seats: seats,
+            state: state,
+            started: false,
+          ),
         );
       });
       if (!reserved.committed) continue;
@@ -172,12 +177,12 @@ class FirebaseRoomRepository {
     throw StateError('Could not reserve a room code. Please try again.');
   }
 
-  Future<void> requestSeat({
+  Future<void> requestLobbyJoin({
     required String roomCode,
     required String seatName,
   }) => _addRequest(roomCode, <String, dynamic>{
     'uid': uid,
-    'type': 'claimSeat',
+    'type': 'joinLobby',
     'seatName': seatName,
     'expectedVersion': -1,
     'createdAt': ServerValue.timestamp,
@@ -201,6 +206,7 @@ class FirebaseRoomRepository {
     required int version,
     required List<RoomSeat> seats,
     required GameState state,
+    required bool started,
   }) =>
       _database.ref('rooms/${roomCode.toUpperCase()}').update(<String, dynamic>{
         'private': GameStateCodec.encode(state),
@@ -209,6 +215,7 @@ class FirebaseRoomRepository {
           version: version,
           seats: seats,
           state: state,
+          started: started,
         ),
       });
 
@@ -245,10 +252,12 @@ class FirebaseRoomRepository {
     required int version,
     required List<RoomSeat> seats,
     required GameState state,
+    required bool started,
   }) => <String, dynamic>{
     'hostUid': hostUid,
     'version': version,
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
+    'started': started,
     'state': _publicState(state),
   };
 

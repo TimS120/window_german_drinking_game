@@ -57,9 +57,8 @@ class GameShell extends StatefulWidget {
 
 class _GameShellState extends State<GameShell> {
   final TextEditingController _players = TextEditingController(
-    text: 'Player 1, Player 2',
+    text: 'Player 1',
   );
-  final TextEditingController _remoteSeats = TextEditingController();
   final TextEditingController _roomCode = TextEditingController();
   final TextEditingController _seatName = TextEditingController();
   WindowGameEngine? _game;
@@ -75,7 +74,6 @@ class _GameShellState extends State<GameShell> {
   @override
   void dispose() {
     _players.dispose();
-    _remoteSeats.dispose();
     _roomCode.dispose();
     _seatName.dispose();
     _roomSubscription?.cancel();
@@ -104,40 +102,50 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _createRoom() async {
     if (!widget.firebaseEnabled) {
-      setState(() => _message = 'Firebase is not configured for this build yet.');
+      setState(
+        () => _message = 'Firebase is not configured for this build yet.',
+      );
       return;
     }
     final List<String> local = _names(_players);
-    final List<String> remote = _names(_remoteSeats);
     if (local.isEmpty) {
       setState(() => _message = 'Enter at least one player on this device.');
       return;
     }
-    if (<String>{...local, ...remote}.length != local.length + remote.length) {
-      setState(() => _message = 'Every local and remote seat needs a unique name.');
+    if (local.toSet().length != local.length) {
+      setState(
+        () =>
+            _message = 'Every player sharing this device needs a unique name.',
+      );
       return;
     }
     try {
       setState(() => _busy = true);
       final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
       await rooms.signInAnonymously();
-      final WindowGameEngine game = WindowGameEngine(<String>[...local, ...remote]);
+      final WindowGameEngine game = WindowGameEngine(local);
       final String code = await rooms.createRoom(
         state: game.exportState(),
         localPlayers: local,
-        remoteSeats: remote,
       );
       _roomCode.text = code;
       _game = game;
       await _watchRoom(code);
     } catch (error) {
-      if (mounted) setState(() { _busy = false; _message = 'Could not create room: $error'; });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Could not create room: $error';
+        });
+      }
     }
   }
 
   Future<void> _joinRoom() async {
     if (!widget.firebaseEnabled) {
-      setState(() => _message = 'Firebase is not configured for this build yet.');
+      setState(
+        () => _message = 'Firebase is not configured for this build yet.',
+      );
       return;
     }
     try {
@@ -149,42 +157,60 @@ class _GameShellState extends State<GameShell> {
       if (code.isEmpty || seatName.isEmpty) {
         setState(() {
           _busy = false;
-          _message = 'Enter both the room code and your reserved seat name.';
+          _message = 'Enter both the room code and your player name.';
         });
         return;
       }
       await _watchRoom(code);
-      await rooms.requestSeat(roomCode: code, seatName: seatName);
-      if (mounted) setState(() => _message = 'Seat request sent. Waiting for the host.');
+      await rooms.requestLobbyJoin(roomCode: code, seatName: seatName);
+      if (mounted) {
+        setState(() => _message = 'Join request sent. Waiting for the lobby.');
+      }
     } catch (error) {
-      if (mounted) setState(() { _busy = false; _message = 'Could not join room: $error'; });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Could not join room: $error';
+        });
+      }
     }
   }
 
   Future<void> _watchRoom(String code) async {
     await _roomSubscription?.cancel();
-    _roomSubscription = _rooms!.observeRoom(code).listen(
-      (OnlineRoom? room) {
-        if (!mounted || room == null) return;
-        final bool isHost = room.hostUid == _rooms?.uid;
-        setState(() {
-          _room = room;
-          _hostVersion = isHost ? math.max(_hostVersion, room.version) : room.version;
-          if (!isHost) _game = WindowGameEngine.fromState(room.state);
-          _busy = false;
-          _message = _game == null
-              ? 'Restoring host state for room ${room.code}…'
-              : 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
-        });
-        if (isHost) {
-          _watchRequests(room.code);
-          _restoreHostStateIfNeeded(room);
-        }
-      },
-      onError: (Object error) {
-        if (mounted) setState(() { _busy = false; _message = 'Room connection failed: $error'; });
-      },
-    );
+    _roomSubscription = _rooms!
+        .observeRoom(code)
+        .listen(
+          (OnlineRoom? room) {
+            if (!mounted || room == null) return;
+            final bool isHost = room.hostUid == _rooms?.uid;
+            setState(() {
+              _room = room;
+              _hostVersion = isHost
+                  ? math.max(_hostVersion, room.version)
+                  : room.version;
+              if (!isHost) _game = WindowGameEngine.fromState(room.state);
+              _busy = false;
+              _message = !room.started
+                  ? 'Lobby ${room.code}: waiting for the host to start.'
+                  : _game == null
+                  ? 'Restoring host state for room ${room.code}…'
+                  : 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+            });
+            if (isHost) {
+              _watchRequests(room.code);
+              _restoreHostStateIfNeeded(room);
+            }
+          },
+          onError: (Object error) {
+            if (mounted) {
+              setState(() {
+                _busy = false;
+                _message = 'Room connection failed: $error';
+              });
+            }
+          },
+        );
   }
 
   Future<void> _returnToMenu() async {
@@ -216,7 +242,9 @@ class _GameShellState extends State<GameShell> {
       _watchRequests(room.code);
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'The host state could not be restored: $error');
+        setState(
+          () => _message = 'The host state could not be restored: $error',
+        );
       }
     }
   }
@@ -225,6 +253,7 @@ class _GameShellState extends State<GameShell> {
   bool get _isHost => _isOnline && _room!.hostUid == _rooms?.uid;
   bool get _canControlCurrentTurn {
     if (!_isOnline) return true;
+    if (!_room!.started) return false;
     final int index = _isHost
         ? _game!.exportState().currentPlayerIndex
         : _room!.state.currentPlayerIndex;
@@ -233,9 +262,14 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _submitOnline(Map<String, dynamic> action) async {
     final OnlineRoom? room = _room;
-    if (room == null || !_canControlCurrentTurn || _busy) return;
+    if (room == null || !room.started || !_canControlCurrentTurn || _busy) {
+      return;
+    }
     try {
-      setState(() { _busy = true; _message = 'Submitting move…'; });
+      setState(() {
+        _busy = true;
+        _message = 'Submitting move…';
+      });
       if (_isHost) {
         await _applyHostAction(action);
       } else {
@@ -244,10 +278,42 @@ class _GameShellState extends State<GameShell> {
           expectedVersion: room.version,
           action: action,
         );
-        if (mounted) setState(() { _busy = false; _message = 'Move request sent to host.'; });
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _message = 'Move request sent to host.';
+          });
+        }
       }
     } catch (error) {
-      if (mounted) setState(() { _busy = false; _message = 'Move rejected: $error'; });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Move rejected: $error';
+        });
+      }
+    }
+  }
+
+  Future<void> _startLobbyGame() async {
+    final OnlineRoom? room = _room;
+    if (room == null || room.started || !_isHost || _busy) return;
+    try {
+      setState(() {
+        _busy = true;
+        _message = 'Starting game…';
+        _game = WindowGameEngine(
+          room.seats.map((RoomSeat seat) => seat.name).toList(),
+        );
+      });
+      await _publishHostState(started: true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _message = 'Could not start the lobby: $error';
+        });
+      }
     }
   }
 
@@ -255,12 +321,16 @@ class _GameShellState extends State<GameShell> {
     if (_requestRoomCode == code && _requestSubscription != null) return;
     _requestSubscription?.cancel();
     _requestRoomCode = code;
-    _requestSubscription = _rooms!.observeRequests(code).listen(
-      _processHostRequest,
-      onError: (Object error) {
-        if (mounted) setState(() => _message = 'Room host request error: $error');
-      },
-    );
+    _requestSubscription = _rooms!
+        .observeRequests(code)
+        .listen(
+          _processHostRequest,
+          onError: (Object error) {
+            if (mounted) {
+              setState(() => _message = 'Room host request error: $error');
+            }
+          },
+        );
   }
 
   Future<void> _processHostRequest(RoomRequest request) async {
@@ -268,20 +338,27 @@ class _GameShellState extends State<GameShell> {
     final WindowGameEngine? game = _game;
     if (!_isHost || room == null || game == null) return;
     try {
-      if (request.type == 'claimSeat') {
-        final List<RoomSeat> seats = room.seats
-            .map((RoomSeat seat) => RoomSeat(
-                  index: seat.index,
-                  name: seat.name,
-                  ownerUid: seat.name == request.seatName && seat.ownerUid == null
-                      ? request.uid
-                      : seat.ownerUid,
-                ))
-            .toList();
-        if (seats.any((RoomSeat seat) => seat.ownerUid == request.uid)) {
+      if (request.type == 'joinLobby' && !room.started) {
+        final String name = request.seatName?.trim() ?? '';
+        final bool nameTaken = room.seats.any(
+          (RoomSeat seat) => seat.name.toLowerCase() == name.toLowerCase(),
+        );
+        final bool alreadyJoined = room.seats.any(
+          (RoomSeat seat) => seat.ownerUid == request.uid,
+        );
+        if (name.isNotEmpty && !nameTaken && !alreadyJoined) {
+          final List<RoomSeat> seats = <RoomSeat>[
+            ...room.seats,
+            RoomSeat(
+              index: room.seats.length,
+              name: name,
+              ownerUid: request.uid,
+            ),
+          ];
           await _publishHostState(seats: seats);
         }
-      } else if (request.type == 'action' &&
+      } else if (room.started &&
+          request.type == 'action' &&
           request.expectedVersion == _hostVersion &&
           _seatOwnerForCurrentTurn == request.uid) {
         await _applyHostAction(request.action);
@@ -299,7 +376,9 @@ class _GameShellState extends State<GameShell> {
     final WindowGameEngine? game = _game;
     final OnlineRoom? room = _room;
     if (game == null || room == null) return null;
-    return room.seats.elementAtOrNull(game.exportState().currentPlayerIndex)?.ownerUid;
+    return room.seats
+        .elementAtOrNull(game.exportState().currentPlayerIndex)
+        ?.ownerUid;
   }
 
   Future<void> _applyHostAction(Map<String, dynamic> action) async {
@@ -307,7 +386,9 @@ class _GameShellState extends State<GameShell> {
     final String type = '${action['type']}';
     GuessResult? result;
     if (type == 'guess') {
-      final List<dynamic> values = List<dynamic>.from(action['position'] as List);
+      final List<dynamic> values = List<dynamic>.from(
+        action['position'] as List,
+      );
       if (values.length != 2 || values.any((dynamic value) => value is! num)) {
         return;
       }
@@ -315,7 +396,9 @@ class _GameShellState extends State<GameShell> {
         (values[0] as num).toInt(),
         (values[1] as num).toInt(),
       );
-      final Orientation orientation = Orientation.values.byName('${action['orientation']}');
+      final Orientation orientation = Orientation.values.byName(
+        '${action['orientation']}',
+      );
       final List<GuessOption> options = game
           .getValidOptionsForCard(position)
           .where((GuessOption value) => value.orientation == orientation)
@@ -341,7 +424,7 @@ class _GameShellState extends State<GameShell> {
     await _publishHostState();
   }
 
-  Future<void> _publishHostState({List<RoomSeat>? seats}) async {
+  Future<void> _publishHostState({List<RoomSeat>? seats, bool? started}) async {
     final OnlineRoom room = _room!;
     final int previousVersion = _hostVersion;
     final int nextVersion = _hostVersion + 1;
@@ -353,12 +436,18 @@ class _GameShellState extends State<GameShell> {
         version: nextVersion,
         seats: seats ?? room.seats,
         state: _game!.exportState(),
+        started: started ?? room.started,
       );
     } catch (_) {
       _hostVersion = previousVersion;
       rethrow;
     }
-    if (mounted) setState(() { _busy = false; _message = '${_game!.currentPlayer}\'s turn.'; });
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _message = '${_game!.currentPlayer}\'s turn.';
+      });
+    }
   }
 
   Future<void> _select(Position position) async {
@@ -520,14 +609,6 @@ class _GameShellState extends State<GameShell> {
                       ),
                       onSubmitted: (_) => _start(),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _remoteSeats,
-                      decoration: const InputDecoration(
-                        labelText: 'Remote player seats (optional)',
-                        hintText: 'Carla, David',
-                      ),
-                    ),
                     const SizedBox(height: 8),
                     Text(
                       _message,
@@ -543,7 +624,11 @@ class _GameShellState extends State<GameShell> {
                     FilledButton.icon(
                       onPressed: _busy ? null : _createRoom,
                       icon: const Icon(Icons.group),
-                      label: Text(widget.firebaseEnabled ? 'Create online room' : 'Online rooms need Firebase setup'),
+                      label: Text(
+                        widget.firebaseEnabled
+                            ? 'Create online lobby'
+                            : 'Online rooms need Firebase setup',
+                      ),
                     ),
                     const Divider(height: 32),
                     TextField(
@@ -554,7 +639,9 @@ class _GameShellState extends State<GameShell> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: _seatName,
-                      decoration: const InputDecoration(labelText: 'Your reserved seat name'),
+                      decoration: const InputDecoration(
+                        labelText: 'Your player name',
+                      ),
                     ),
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
@@ -563,6 +650,81 @@ class _GameShellState extends State<GameShell> {
                       label: const Text('Join online room'),
                     ),
                   ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (_isOnline && !_room!.started) {
+      final OnlineRoom room = _room!;
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Window lobby'),
+          actions: <Widget>[
+            IconButton(
+              tooltip: 'Leave lobby and return to menu',
+              icon: const Icon(Icons.home_outlined),
+              onPressed: _returnToMenu,
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Card(
+                margin: const EdgeInsets.all(24),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        'Room ${room.code}',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isHost
+                            ? 'Share this code. Players may join until you start the game.'
+                            : 'You are in the lobby. Waiting for the host to start.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Players (${room.seats.length})',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      ...room.seats.map(
+                        (RoomSeat seat) => ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person),
+                          title: Text(seat.name),
+                          trailing: seat.ownerUid == room.hostUid
+                              ? const Text('Host')
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _message,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      if (_isHost) ...<Widget>[
+                        const SizedBox(height: 20),
+                        FilledButton.icon(
+                          onPressed: _busy ? null : _startLobbyGame,
+                          icon: const Icon(Icons.play_arrow),
+                          label: const Text('Start game and lock lobby'),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -592,8 +754,10 @@ class _GameShellState extends State<GameShell> {
           setState(() => _message = '${game.currentPlayer} starts a new game.');
         }
       },
-      onConfirmSame: () => _submitOnline(<String, dynamic>{'type': 'confirmSame'}),
-      onConfirmRemovals: () => _submitOnline(<String, dynamic>{'type': 'confirmRemovals'}),
+      onConfirmSame: () =>
+          _submitOnline(<String, dynamic>{'type': 'confirmSame'}),
+      onConfirmRemovals: () =>
+          _submitOnline(<String, dynamic>{'type': 'confirmRemovals'}),
     );
     final Widget board = _Board(
       game: game,
@@ -606,7 +770,9 @@ class _GameShellState extends State<GameShell> {
         title: const Text('Window'),
         actions: <Widget>[
           IconButton(
-            tooltip: _isOnline ? 'Leave room and return to menu' : 'Return to menu',
+            tooltip: _isOnline
+                ? 'Leave room and return to menu'
+                : 'Return to menu',
             icon: const Icon(Icons.home_outlined),
             onPressed: _returnToMenu,
           ),
@@ -729,14 +895,16 @@ class _Info extends StatelessWidget {
                 : null,
             child: const Text('End turn'),
           ),
-          if (roomCode != null && snapshot.pendingSamePosition != null) ...<Widget>[
+          if (roomCode != null &&
+              snapshot.pendingSamePosition != null) ...<Widget>[
             const SizedBox(height: 8),
             FilledButton.tonal(
               onPressed: canControl && !busy ? onConfirmSame : null,
               child: const Text('Confirm same-rank penalty'),
             ),
           ],
-          if (roomCode != null && snapshot.pendingRemovals.isNotEmpty) ...<Widget>[
+          if (roomCode != null &&
+              snapshot.pendingRemovals.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             FilledButton.tonal(
               onPressed: canControl && !busy ? onConfirmRemovals : null,
@@ -1006,7 +1174,8 @@ class _Board extends StatelessWidget {
   Widget _cardSlot(BuildContext context, Position position) {
     if (!game.isValidSlot(position)) return const SizedBox.shrink();
     final bool faceUp = snapshot.faceUp[position.row][position.column];
-    final bool selectable = enabled && snapshot.validSelectable.contains(position);
+    final bool selectable =
+        enabled && snapshot.validSelectable.contains(position);
     final bool markedForRemoval = snapshot.pendingRemovals.contains(position);
     final int? card = snapshot.cardGrid[position.row][position.column];
     return Semantics(

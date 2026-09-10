@@ -35,10 +35,11 @@ The generated Windows, Android, iOS, and web project targets are already in
 
 ## Online rooms (Firebase)
 
-Online rooms have mixed seats: player names in **Players** are people sharing
-the device that creates the room; names in **Remote player seats** are reserved
-for players who join from their own device. The host shares the six-character
-room code and the reserved seat name. Each turn can be controlled only by the
+Online rooms begin as an open lobby. Player names in **Players** are people
+sharing the host device; other people join independently with the six-character
+room code and a name they choose themselves. The host sees the roster and
+presses **Start game and lock lobby** when everybody is present. After that,
+the roster and turn order are fixed. Each turn can be controlled only by the
 Firebase account that owns that player seat.
 
 This version works on Firebase's free Spark plan. The device that creates a
