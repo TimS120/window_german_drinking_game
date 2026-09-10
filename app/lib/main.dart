@@ -1,7 +1,11 @@
 import 'dart:math' as math;
+import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Orientation;
 
+import 'firebase_options.dart';
+import 'firebase_room_repository.dart';
 import 'game_engine.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
@@ -9,10 +13,24 @@ import 'game_engine.dart';
 // the number of cells alone.  This keeps every card fully visible.
 const double _boardAspectRatio = 0.74;
 
-void main() => runApp(const WindowGameApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  bool firebaseEnabled = false;
+  try {
+    final FirebaseOptions? options = WindowFirebaseOptions.currentPlatform;
+    if (options != null) {
+      await Firebase.initializeApp(options: options);
+      firebaseEnabled = true;
+    }
+  } catch (_) {
+    // Offline/local play remains available when Firebase is not configured.
+  }
+  runApp(WindowGameApp(firebaseEnabled: firebaseEnabled));
+}
 
 class WindowGameApp extends StatelessWidget {
-  const WindowGameApp({super.key});
+  const WindowGameApp({super.key, required this.firebaseEnabled});
+  final bool firebaseEnabled;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Window',
@@ -23,14 +41,16 @@ class WindowGameApp extends StatelessWidget {
         seedColor: const Color(0xffd4a72c),
         brightness: Brightness.dark,
       ),
+      scaffoldBackgroundColor: const Color(0xFF0F381C),
       useMaterial3: true,
     ),
-    home: const GameShell(),
+    home: GameShell(firebaseEnabled: firebaseEnabled),
   );
 }
 
 class GameShell extends StatefulWidget {
-  const GameShell({super.key});
+  const GameShell({super.key, required this.firebaseEnabled});
+  final bool firebaseEnabled;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -39,12 +59,23 @@ class _GameShellState extends State<GameShell> {
   final TextEditingController _players = TextEditingController(
     text: 'Player 1, Player 2',
   );
+  final TextEditingController _remoteSeats = TextEditingController();
+  final TextEditingController _roomCode = TextEditingController();
+  final TextEditingController _seatName = TextEditingController();
   WindowGameEngine? _game;
   String _message = 'Choose player names to begin a local game.';
+  FirebaseRoomRepository? _rooms;
+  StreamSubscription<OnlineRoom?>? _roomSubscription;
+  OnlineRoom? _room;
+  bool _busy = false;
 
   @override
   void dispose() {
     _players.dispose();
+    _remoteSeats.dispose();
+    _roomCode.dispose();
+    _seatName.dispose();
+    _roomSubscription?.cancel();
     super.dispose();
   }
 
@@ -59,6 +90,95 @@ class _GameShellState extends State<GameShell> {
       _message =
           '${_game!.currentPlayer} starts. Select a card next to the handle.';
     });
+  }
+
+  List<String> _names(TextEditingController controller) => controller.text
+      .split(',')
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .toList();
+
+  Future<void> _createRoom() async {
+    if (!widget.firebaseEnabled) {
+      setState(() => _message = 'Firebase is not configured for this build yet.');
+      return;
+    }
+    final List<String> local = _names(_players);
+    final List<String> remote = _names(_remoteSeats);
+    if (local.isEmpty) {
+      setState(() => _message = 'Enter at least one player on this device.');
+      return;
+    }
+    try {
+      setState(() => _busy = true);
+      final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
+      await rooms.signInAnonymously();
+      final String code = await rooms.createRoom(
+        localPlayers: local,
+        remoteSeats: remote,
+      );
+      _roomCode.text = code;
+      await _watchRoom(code);
+    } catch (error) {
+      if (mounted) setState(() { _busy = false; _message = 'Could not create room: $error'; });
+    }
+  }
+
+  Future<void> _joinRoom() async {
+    if (!widget.firebaseEnabled) {
+      setState(() => _message = 'Firebase is not configured for this build yet.');
+      return;
+    }
+    try {
+      setState(() => _busy = true);
+      final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
+      await rooms.signInAnonymously();
+      final String code = _roomCode.text.trim().toUpperCase();
+      await rooms.joinRoom(roomCode: code, seatName: _seatName.text.trim());
+      await _watchRoom(code);
+    } catch (error) {
+      if (mounted) setState(() { _busy = false; _message = 'Could not join room: $error'; });
+    }
+  }
+
+  Future<void> _watchRoom(String code) async {
+    await _roomSubscription?.cancel();
+    _roomSubscription = _rooms!.observeRoom(code).listen(
+      (OnlineRoom? room) {
+        if (!mounted || room == null) return;
+        setState(() {
+          _room = room;
+          _game = WindowGameEngine.fromState(room.state);
+          _busy = false;
+          _message = 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+        });
+      },
+      onError: (Object error) {
+        if (mounted) setState(() { _busy = false; _message = 'Room connection failed: $error'; });
+      },
+    );
+  }
+
+  bool get _isOnline => _room != null;
+  bool get _canControlCurrentTurn {
+    if (!_isOnline) return true;
+    final int index = _room!.state.currentPlayerIndex;
+    return _room!.seats.elementAtOrNull(index)?.ownerUid == _rooms?.uid;
+  }
+
+  Future<void> _submitOnline(Map<String, dynamic> action) async {
+    final OnlineRoom? room = _room;
+    if (room == null || !_canControlCurrentTurn || _busy) return;
+    try {
+      setState(() { _busy = true; _message = 'Submitting move…'; });
+      await _rooms!.submitAction(
+        roomCode: room.code,
+        expectedVersion: room.version,
+        action: action,
+      );
+    } catch (error) {
+      if (mounted) setState(() { _busy = false; _message = 'Move rejected: $error'; });
+    }
   }
 
   Future<void> _select(Position position) async {
@@ -110,7 +230,16 @@ class _GameShellState extends State<GameShell> {
       ),
     );
     if (!mounted || guess == null) return;
-    await _handle(game.applyGuess(position, option, guess));
+    if (_isOnline) {
+      await _submitOnline(<String, dynamic>{
+        'type': 'guess',
+        'position': <int>[position.row, position.column],
+        'orientation': option.orientation.name,
+        'guess': guess.name,
+      });
+    } else {
+      await _handle(game.applyGuess(position, option, guess));
+    }
   }
 
   Future<void> _handle(GuessResult result) async {
@@ -211,6 +340,14 @@ class _GameShellState extends State<GameShell> {
                       ),
                       onSubmitted: (_) => _start(),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _remoteSeats,
+                      decoration: const InputDecoration(
+                        labelText: 'Remote player seats (optional)',
+                        hintText: 'Carla, David',
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       _message,
@@ -221,6 +358,29 @@ class _GameShellState extends State<GameShell> {
                       onPressed: _start,
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('Start local game'),
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _createRoom,
+                      icon: const Icon(Icons.group),
+                      label: Text(widget.firebaseEnabled ? 'Create online room' : 'Online rooms need Firebase setup'),
+                    ),
+                    const Divider(height: 32),
+                    TextField(
+                      controller: _roomCode,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(labelText: 'Room code'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _seatName,
+                      decoration: const InputDecoration(labelText: 'Your reserved seat name'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _joinRoom,
+                      icon: const Icon(Icons.login),
+                      label: const Text('Join online room'),
                     ),
                   ],
                 ),
@@ -235,22 +395,52 @@ class _GameShellState extends State<GameShell> {
       game: game,
       snapshot: snapshot,
       message: _message,
+      roomCode: _room?.code,
+      busy: _busy,
+      canControl: _canControlCurrentTurn,
       onEndTurn: () {
-        game.endTurn();
-        setState(() => _message = '${game.currentPlayer}\'s turn.');
+        if (_isOnline) {
+          _submitOnline(<String, dynamic>{'type': 'endTurn'});
+        } else {
+          game.endTurn();
+          setState(() => _message = '${game.currentPlayer}\'s turn.');
+        }
       },
       onReset: () {
-        game.resetGame();
-        setState(() => _message = '${game.currentPlayer} starts a new game.');
+        if (!_isOnline) {
+          game.resetGame();
+          setState(() => _message = '${game.currentPlayer} starts a new game.');
+        }
       },
+      onConfirmSame: () => _submitOnline(<String, dynamic>{'type': 'confirmSame'}),
+      onConfirmRemovals: () => _submitOnline(<String, dynamic>{'type': 'confirmRemovals'}),
     );
     final Widget board = _Board(
       game: game,
       snapshot: snapshot,
+      enabled: _canControlCurrentTurn && !_busy,
       onSelect: _select,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Window')),
+      appBar: AppBar(
+        title: const Text('Window'),
+        actions: <Widget>[
+          if (_isOnline)
+            IconButton(
+              tooltip: 'Leave online room',
+              icon: const Icon(Icons.logout),
+              onPressed: () async {
+                await _roomSubscription?.cancel();
+                if (!mounted) return;
+                setState(() {
+                  _room = null;
+                  _game = null;
+                  _message = 'Left the room. Choose player names to begin.';
+                });
+              },
+            ),
+        ],
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints size) => Padding(
@@ -299,14 +489,24 @@ class _Info extends StatelessWidget {
     required this.game,
     required this.snapshot,
     required this.message,
+    required this.roomCode,
+    required this.busy,
+    required this.canControl,
     required this.onEndTurn,
     required this.onReset,
+    required this.onConfirmSame,
+    required this.onConfirmRemovals,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
   final String message;
+  final String? roomCode;
+  final bool busy;
+  final bool canControl;
   final VoidCallback onEndTurn;
   final VoidCallback onReset;
+  final VoidCallback onConfirmSame;
+  final VoidCallback onConfirmRemovals;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -322,11 +522,12 @@ class _Info extends StatelessWidget {
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
-              IconButton(
-                onPressed: onReset,
-                tooltip: 'New local game',
-                icon: const Icon(Icons.refresh),
-              ),
+              if (roomCode == null)
+                IconButton(
+                  onPressed: onReset,
+                  tooltip: 'New local game',
+                  icon: const Icon(Icons.refresh),
+                ),
             ],
           ),
           Text(
@@ -335,6 +536,12 @@ class _Info extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(message),
+          if (roomCode != null) ...<Widget>[
+            const SizedBox(height: 8),
+            SelectableText('Online room: $roomCode'),
+            if (!canControl)
+              const Text('Waiting for the player who owns this seat.'),
+          ],
           if (snapshot.mustSelectAdjacentToHandle)
             const Padding(
               padding: EdgeInsets.only(top: 8),
@@ -346,9 +553,25 @@ class _Info extends StatelessWidget {
           Text('Deck: ${snapshot.deckSize} cards'),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: snapshot.turnCanEnd ? onEndTurn : null,
+            onPressed: snapshot.turnCanEnd && canControl && !busy
+                ? onEndTurn
+                : null,
             child: const Text('End turn'),
           ),
+          if (roomCode != null && snapshot.pendingSamePosition != null) ...<Widget>[
+            const SizedBox(height: 8),
+            FilledButton.tonal(
+              onPressed: canControl && !busy ? onConfirmSame : null,
+              child: const Text('Confirm same-rank penalty'),
+            ),
+          ],
+          if (roomCode != null && snapshot.pendingRemovals.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            FilledButton.tonal(
+              onPressed: canControl && !busy ? onConfirmRemovals : null,
+              child: const Text('Redeal marked cards'),
+            ),
+          ],
           const Divider(height: 30),
           Text('Scoreboard', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -572,10 +795,12 @@ class _Board extends StatelessWidget {
   const _Board({
     required this.game,
     required this.snapshot,
+    required this.enabled,
     required this.onSelect,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
+  final bool enabled;
   final ValueChanged<Position> onSelect;
   @override
   Widget build(BuildContext context) => AspectRatio(
@@ -610,7 +835,7 @@ class _Board extends StatelessWidget {
   Widget _cardSlot(BuildContext context, Position position) {
     if (!game.isValidSlot(position)) return const SizedBox.shrink();
     final bool faceUp = snapshot.faceUp[position.row][position.column];
-    final bool selectable = snapshot.validSelectable.contains(position);
+    final bool selectable = enabled && snapshot.validSelectable.contains(position);
     final bool markedForRemoval = snapshot.pendingRemovals.contains(position);
     final int? card = snapshot.cardGrid[position.row][position.column];
     return Semantics(

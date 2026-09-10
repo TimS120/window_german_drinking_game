@@ -30,6 +30,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cloud_functions: ^6.0.5
+  firebase_auth: ^6.1.2
+  firebase_core: ^4.3.0
+  firebase_database: ^12.1.0
 
 
 dev_dependencies:

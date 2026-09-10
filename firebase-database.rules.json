@@ -2,10 +2,15 @@
   "rules": {
     "rooms": {
       "$roomCode": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "state": {
-          ".validate": "newData.hasChildren(['players', 'currentPlayerIdx', 'deck', 'cardGrid', 'faceUp', 'version', 'updatedAt'])"
+        ".read": false,
+        ".write": false,
+        "public": {
+          ".read": "auth != null",
+          ".write": false
+        },
+        "private": {
+          ".read": false,
+          ".write": false
         }
       }
     }

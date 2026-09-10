@@ -139,6 +139,7 @@ class GameSnapshot {
     required this.validSelectable,
     required this.stats,
     required this.pendingRemovals,
+    required this.pendingSamePosition,
     required this.gameEnded,
   });
 
@@ -151,6 +152,7 @@ class GameSnapshot {
   final Set<Position> validSelectable;
   final Map<String, PlayerStats> stats;
   final Set<Position> pendingRemovals;
+  final Position? pendingSamePosition;
   final bool gameEnded;
 }
 
@@ -504,6 +506,7 @@ class WindowGameEngine {
     validSelectable: validSelectablePositions(),
     stats: Map<String, PlayerStats>.unmodifiable(_stats),
     pendingRemovals: pendingRemovals,
+    pendingSamePosition: _pendingSamePosition,
     gameEnded: gameEnded,
   );
 
