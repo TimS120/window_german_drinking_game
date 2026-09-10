@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 /// Example: --dart-define=FIREBASE_API_KEY=... (see README).
 class WindowFirebaseOptions {
   static const String _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const String _webApiKey = String.fromEnvironment('FIREBASE_WEB_API_KEY');
   static const String _legacyAppId = String.fromEnvironment('FIREBASE_APP_ID');
   static const String _androidAppId = String.fromEnvironment('FIREBASE_ANDROID_APP_ID');
   static const String _webAppId = String.fromEnvironment('FIREBASE_WEB_APP_ID');
@@ -19,7 +20,8 @@ class WindowFirebaseOptions {
     final String appId = kIsWeb
         ? (_webAppId.isNotEmpty ? _webAppId : _legacyAppId)
         : (_androidAppId.isNotEmpty ? _androidAppId : _legacyAppId);
-    if (_apiKey.isEmpty ||
+    final String apiKey = kIsWeb && _webApiKey.isNotEmpty ? _webApiKey : _apiKey;
+    if (apiKey.isEmpty ||
         appId.isEmpty ||
         _projectId.isEmpty ||
         _senderId.isEmpty ||
@@ -27,7 +29,7 @@ class WindowFirebaseOptions {
       return null;
     }
     return FirebaseOptions(
-      apiKey: _apiKey,
+      apiKey: apiKey,
       appId: appId,
       projectId: _projectId,
       messagingSenderId: _senderId,

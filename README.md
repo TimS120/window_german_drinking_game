@@ -64,6 +64,7 @@ To connect a build, create a local `firebase-options.json` beside this README
 ```json
 {
   "FIREBASE_API_KEY": "...",
+  "FIREBASE_WEB_API_KEY": "...",
   "FIREBASE_ANDROID_APP_ID": "...",
   "FIREBASE_WEB_APP_ID": "...",
   "FIREBASE_PROJECT_ID": "window-game",
