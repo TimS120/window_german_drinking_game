@@ -41,15 +41,21 @@ for players who join from their own device. The host shares the six-character
 room code and the reserved seat name. Each turn can be controlled only by the
 Firebase account that owns that player seat.
 
-The client never writes room state. It can only read a sanitized public board:
-the identities of face-down cards and the deck stay in the private server
-state. `createRoom`, `joinRoom`, and `submitAction` are callable Cloud
-Functions. The function validates the active seat, expected version, legal
-card option, and rule outcome before publishing the next snapshot.
+This version works on Firebase's free Spark plan. The device that creates a
+room is the **host**: it alone reads the private deck and validates actions
+before publishing the next sanitized board. Other devices can only read the
+public board and submit a seat or move request. Face-down card identities and
+the deck never reach guest devices.
+
+Keep the host game open while people are playing. This is an excellent
+lightweight solution for a friendly drinking game, but it deliberately does
+not claim to be cheat-proof: the host device is trusted instead of a paid
+server runtime.
 
 There is deliberately no static shared password. Enable **Anonymous** sign-in
-in Firebase Authentication. The `firebase-database.rules.json` file denies all
-client room writes and denies reads of `/rooms/$roomCode/private`.
+in Firebase Authentication. The `firebase-database.rules.json` file lets only
+the room host publish state or read private state; guests can create only
+requests bearing their own Firebase UID.
 
 To connect a build, create a local `firebase-options.json` beside this README
 (it is ignored by Git) with the public Firebase identifiers from the
@@ -76,36 +82,29 @@ Run the app with:
 flutter run -d chrome --dart-define-from-file=..\firebase-options.json
 ```
 
-Deploy the authoritative backend from the repository root after signing into
+Once, deploy the database rules from the repository root after signing into
 the intended Firebase project:
 
 ```powershell
 $env:NODE_OPTIONS = "--use-system-ca" # needed on this PC because Avast scans HTTPS
-npx firebase-tools use window-game
-npm --prefix functions run deploy
+npx firebase-tools deploy --only database --project window-game
 ```
 
-Cloud Functions require the Firebase project's billing configuration to permit
-the Cloud Functions runtime. Do not deploy until the project is deliberately
-selected in the Firebase CLI.
+This deploy uses Realtime Database only; it does **not** need the Blaze plan.
 
 ## Repository layout
 
 - `app/lib/game_engine.dart` — canonical pure-Dart game rules, no UI or network code.
 - `app/lib/main.dart` — responsive local/online Flutter game interface.
-- `app/lib/firebase_room_repository.dart` — authenticated, read-only room
-  listener and callable-action client.
-- `functions/src/index.ts` — authoritative Firebase room and rules backend.
+- `app/lib/firebase_room_repository.dart` — authenticated Firebase room
+  transport, host state publisher, and guest-request client.
 - `app/test/game_engine_test.dart` — deterministic rules compatibility tests.
 - `app/assets/cards/` — shared card artwork bundled into all Flutter targets.
 - `scripts/`, `configs/`, `requirements/` — retained Python simulation and RL-training tooling. These are not part of the player application and will be connected to the Flutter advisor only in the later model stage.
 
 ## Current migration boundary
 
-The old Android-specific application and Tkinter desktop interface remain in
-the repository only as a temporary rollback reference while this Flutter stage
-is being tested. They will be removed in the next cleanup commit after you
-confirm the new game works. The Python rules implementation then remains only
-as the established training/simulation implementation. Before the best-move
-model is migrated, we will add explicit cross-language fixtures so that the
-Dart and Python training rules remain behaviorally aligned.
+The Python rules implementation remains as the established
+training/simulation implementation. Before the best-move model is migrated,
+we will add explicit cross-language fixtures so that the Dart and Python
+training rules remain behaviorally aligned.

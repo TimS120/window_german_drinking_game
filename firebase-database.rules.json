@@ -6,11 +6,18 @@
         ".write": false,
         "public": {
           ".read": "auth != null",
-          ".write": false
+          ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() === auth.uid) || (data.exists() && data.child('hostUid').val() === auth.uid && newData.child('hostUid').val() === auth.uid))"
         },
         "private": {
-          ".read": false,
-          ".write": false
+          ".read": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid",
+          ".write": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid"
+        },
+        "requests": {
+          ".read": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid",
+          "$requestId": {
+            ".write": "auth != null && (root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid || (!data.exists() && root.child('rooms').child($roomCode).child('public').exists() && newData.child('uid').val() === auth.uid))",
+            ".validate": "newData.hasChildren(['uid', 'type', 'createdAt'])"
+          }
         }
       }
     }

@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:math';
 
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
@@ -12,13 +12,18 @@ class RoomSeat {
   final int index;
   final String name;
   final String? ownerUid;
-  bool get isRemote => ownerUid == null;
 
   factory RoomSeat.fromJson(Map<Object?, Object?> value) => RoomSeat(
     index: (value['index'] as num?)?.toInt() ?? 0,
     name: '${value['name'] ?? ''}',
     ownerUid: value['ownerUid'] as String?,
   );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'index': index,
+    'name': name,
+    'ownerUid': ownerUid,
+  };
 }
 
 class OnlineRoom {
@@ -48,19 +53,64 @@ class OnlineRoom {
       code: code,
       version: (raw['version'] as num?)?.toInt() ?? 0,
       hostUid: '${raw['hostUid'] ?? ''}',
-      state: GameStateCodec.decode(Map<Object?, Object?>.from(raw['state'] as Map)),
+      state: GameStateCodec.decode(
+        Map<Object?, Object?>.from(raw['state'] as Map),
+      ),
       seats: seats,
     );
   }
 }
 
-/// The client may observe room snapshots, but it never writes game state.
-/// Every mutation goes through a callable Cloud Function.
-class FirebaseRoomRepository {
-  FirebaseRoomRepository({FirebaseFunctions? functions})
-    : _functions = functions ?? FirebaseFunctions.instance;
+class RoomRequest {
+  const RoomRequest({
+    required this.id,
+    required this.uid,
+    required this.type,
+    required this.action,
+    required this.expectedVersion,
+    this.seatName,
+  });
 
-  final FirebaseFunctions _functions;
+  final String id;
+  final String uid;
+  final String type;
+  final Map<String, dynamic> action;
+  final int expectedVersion;
+  final String? seatName;
+
+  factory RoomRequest.fromSnapshot(DataSnapshot snapshot) {
+    final Map<Object?, Object?> raw = Map<Object?, Object?>.from(
+      snapshot.value as Map,
+    );
+    final Object? rawAction = raw['action'];
+    return RoomRequest(
+      id: snapshot.key!,
+      uid: '${raw['uid'] ?? ''}',
+      type: '${raw['type'] ?? ''}',
+      action: rawAction is Map
+          ? rawAction.map(
+              (Object? key, Object? value) => MapEntry('$key', value),
+            )
+          : <String, dynamic>{},
+      expectedVersion: (raw['expectedVersion'] as num?)?.toInt() ?? -1,
+      seatName: raw['seatName'] as String?,
+    );
+  }
+}
+
+/// Spark-plan multiplayer transport.
+///
+/// The room creator is the trusted host: only its authenticated Firebase UID
+/// may read/write private state, publish board snapshots, or process requests.
+/// Guests can read the sanitized public state and add a request only under
+/// their own UID. This is intentionally host-authoritative, not a substitute
+/// for a server-side anti-cheat service.
+class FirebaseRoomRepository {
+  FirebaseRoomRepository({FirebaseDatabase? database})
+    : _database = database ?? FirebaseDatabase.instance;
+
+  final FirebaseDatabase _database;
+  final Random _random = Random.secure();
 
   Future<String> signInAnonymously() async {
     final User? user = FirebaseAuth.instance.currentUser;
@@ -69,43 +119,149 @@ class FirebaseRoomRepository {
 
   String get uid => FirebaseAuth.instance.currentUser!.uid;
 
-  Stream<OnlineRoom?> observeRoom(String roomCode) => FirebaseDatabase.instance
-      .ref('rooms/${roomCode.toUpperCase()}/public')
+  Stream<OnlineRoom?> observeRoom(String roomCode) => _publicRef(roomCode)
       .onValue
       .map((DatabaseEvent event) => event.snapshot.exists
           ? OnlineRoom.fromSnapshot(roomCode.toUpperCase(), event.snapshot)
           : null);
 
+  Stream<RoomRequest> observeRequests(String roomCode) => _requestsRef(roomCode)
+      .onChildAdded
+      .where((DatabaseEvent event) => event.snapshot.exists)
+      .map((DatabaseEvent event) => RoomRequest.fromSnapshot(event.snapshot));
+
+  Future<GameState?> loadPrivateState(String roomCode) async =>
+      decodePrivate(await _privateRef(roomCode).get());
+
   Future<String> createRoom({
+    required GameState state,
     required List<String> localPlayers,
     required List<String> remoteSeats,
   }) async {
-    final HttpsCallableResult<dynamic> result = await _functions
-        .httpsCallable('createRoom')
-        .call(<String, dynamic>{
-          'localPlayers': localPlayers,
-          'remoteSeats': remoteSeats,
-        });
-    return '${(result.data as Map)['roomCode']}';
+    final List<String> players = <String>[...localPlayers, ...remoteSeats];
+    final List<RoomSeat> seats = players
+        .asMap()
+        .entries
+        .map(
+          (MapEntry<int, String> entry) => RoomSeat(
+            index: entry.key,
+            name: entry.value,
+            ownerUid: entry.key < localPlayers.length ? uid : null,
+          ),
+        )
+        .toList();
+    for (int attempt = 0; attempt < 8; attempt++) {
+      final String code = _newCode();
+      final DatabaseReference publicRef = _publicRef(code);
+      final TransactionResult reserved = await publicRef.runTransaction(
+        (Object? current) {
+          if (current != null) return Transaction.abort();
+          return Transaction.success(_publicRoom(
+            hostUid: uid,
+            version: 1,
+            seats: seats,
+            state: state,
+          ));
+        },
+      );
+      if (!reserved.committed) continue;
+      await _privateRef(code).set(GameStateCodec.encode(state));
+      return code;
+    }
+    throw StateError('Could not reserve a room code. Please try again.');
   }
 
-  Future<void> joinRoom({required String roomCode, required String seatName}) =>
-      _call('joinRoom', <String, dynamic>{
-        'roomCode': roomCode.toUpperCase(),
-        'seatName': seatName,
-      });
+  Future<void> requestSeat({
+    required String roomCode,
+    required String seatName,
+  }) => _addRequest(roomCode, <String, dynamic>{
+    'uid': uid,
+    'type': 'claimSeat',
+    'seatName': seatName,
+    'expectedVersion': -1,
+    'createdAt': ServerValue.timestamp,
+  });
 
-  Future<void> submitAction({
+  Future<void> requestAction({
     required String roomCode,
     required int expectedVersion,
     required Map<String, dynamic> action,
-  }) => _call('submitAction', <String, dynamic>{
-    'roomCode': roomCode,
+  }) => _addRequest(roomCode, <String, dynamic>{
+    'uid': uid,
+    'type': 'action',
     'expectedVersion': expectedVersion,
     'action': action,
+    'createdAt': ServerValue.timestamp,
   });
 
-  Future<void> _call(String name, Map<String, dynamic> data) async {
-    await _functions.httpsCallable(name).call(data);
+  Future<void> publishState({
+    required String roomCode,
+    required String hostUid,
+    required int version,
+    required List<RoomSeat> seats,
+    required GameState state,
+  }) => _database.ref('rooms/${roomCode.toUpperCase()}').update(
+    <String, dynamic>{
+      'private': GameStateCodec.encode(state),
+      'public': _publicRoom(
+        hostUid: hostUid,
+        version: version,
+        seats: seats,
+        state: state,
+      ),
+    },
+  );
+
+  Future<void> deleteRequest(String roomCode, String requestId) =>
+      _requestsRef(roomCode).child(requestId).remove();
+
+  GameState? decodePrivate(DataSnapshot snapshot) {
+    if (!snapshot.exists || snapshot.value is! Map) return null;
+    return GameStateCodec.decode(Map<Object?, Object?>.from(snapshot.value as Map));
+  }
+
+  DatabaseReference _publicRef(String code) =>
+      _database.ref('rooms/${code.toUpperCase()}/public');
+  DatabaseReference _privateRef(String code) =>
+      _database.ref('rooms/${code.toUpperCase()}/private');
+  DatabaseReference _requestsRef(String code) =>
+      _database.ref('rooms/${code.toUpperCase()}/requests');
+
+  Future<void> _addRequest(String roomCode, Map<String, dynamic> value) =>
+      _requestsRef(roomCode).push().set(value);
+
+  String _newCode() {
+    const String alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return List<String>.generate(
+      6,
+      (_) => alphabet[_random.nextInt(alphabet.length)],
+    ).join();
+  }
+
+  Map<String, dynamic> _publicRoom({
+    required String hostUid,
+    required int version,
+    required List<RoomSeat> seats,
+    required GameState state,
+  }) => <String, dynamic>{
+    'hostUid': hostUid,
+    'version': version,
+    'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
+    'state': _publicState(state),
+  };
+
+  Map<String, dynamic> _publicState(GameState state) {
+    final Map<String, dynamic> value = GameStateCodec.encode(state);
+    final List<List<dynamic>> cards = (value['cardGrid'] as List<dynamic>)
+        .map((dynamic row) => List<dynamic>.from(row as List<dynamic>))
+        .toList();
+    for (int row = 0; row < cards.length; row++) {
+      for (int column = 0; column < cards[row].length; column++) {
+        if (!state.faceUp[row][column]) cards[row][column] = null;
+      }
+    }
+    value['cardGrid'] = cards;
+    value['deck'] = <int>[];
+    return value;
   }
 }

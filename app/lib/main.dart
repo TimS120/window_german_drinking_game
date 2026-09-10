@@ -66,7 +66,10 @@ class _GameShellState extends State<GameShell> {
   String _message = 'Choose player names to begin a local game.';
   FirebaseRoomRepository? _rooms;
   StreamSubscription<OnlineRoom?>? _roomSubscription;
+  StreamSubscription<RoomRequest>? _requestSubscription;
+  String? _requestRoomCode;
   OnlineRoom? _room;
+  int _hostVersion = 0;
   bool _busy = false;
 
   @override
@@ -76,6 +79,7 @@ class _GameShellState extends State<GameShell> {
     _roomCode.dispose();
     _seatName.dispose();
     _roomSubscription?.cancel();
+    _requestSubscription?.cancel();
     super.dispose();
   }
 
@@ -109,15 +113,22 @@ class _GameShellState extends State<GameShell> {
       setState(() => _message = 'Enter at least one player on this device.');
       return;
     }
+    if (<String>{...local, ...remote}.length != local.length + remote.length) {
+      setState(() => _message = 'Every local and remote seat needs a unique name.');
+      return;
+    }
     try {
       setState(() => _busy = true);
       final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
       await rooms.signInAnonymously();
+      final WindowGameEngine game = WindowGameEngine(<String>[...local, ...remote]);
       final String code = await rooms.createRoom(
+        state: game.exportState(),
         localPlayers: local,
         remoteSeats: remote,
       );
       _roomCode.text = code;
+      _game = game;
       await _watchRoom(code);
     } catch (error) {
       if (mounted) setState(() { _busy = false; _message = 'Could not create room: $error'; });
@@ -134,8 +145,17 @@ class _GameShellState extends State<GameShell> {
       final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
       await rooms.signInAnonymously();
       final String code = _roomCode.text.trim().toUpperCase();
-      await rooms.joinRoom(roomCode: code, seatName: _seatName.text.trim());
+      final String seatName = _seatName.text.trim();
+      if (code.isEmpty || seatName.isEmpty) {
+        setState(() {
+          _busy = false;
+          _message = 'Enter both the room code and your reserved seat name.';
+        });
+        return;
+      }
       await _watchRoom(code);
+      await rooms.requestSeat(roomCode: code, seatName: seatName);
+      if (mounted) setState(() => _message = 'Seat request sent. Waiting for the host.');
     } catch (error) {
       if (mounted) setState(() { _busy = false; _message = 'Could not join room: $error'; });
     }
@@ -146,12 +166,20 @@ class _GameShellState extends State<GameShell> {
     _roomSubscription = _rooms!.observeRoom(code).listen(
       (OnlineRoom? room) {
         if (!mounted || room == null) return;
+        final bool isHost = room.hostUid == _rooms?.uid;
         setState(() {
           _room = room;
-          _game = WindowGameEngine.fromState(room.state);
+          _hostVersion = isHost ? math.max(_hostVersion, room.version) : room.version;
+          if (!isHost) _game = WindowGameEngine.fromState(room.state);
           _busy = false;
-          _message = 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+          _message = _game == null
+              ? 'Restoring host state for room ${room.code}…'
+              : 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
         });
+        if (isHost) {
+          _watchRequests(room.code);
+          _restoreHostStateIfNeeded(room);
+        }
       },
       onError: (Object error) {
         if (mounted) setState(() { _busy = false; _message = 'Room connection failed: $error'; });
@@ -159,10 +187,33 @@ class _GameShellState extends State<GameShell> {
     );
   }
 
+  Future<void> _restoreHostStateIfNeeded(OnlineRoom room) async {
+    if (_game != null || !_isHost) return;
+    try {
+      final GameState? privateState = await _rooms!.loadPrivateState(room.code);
+      if (!mounted || privateState == null || !_isHost) return;
+      setState(() {
+        _game = WindowGameEngine.fromState(privateState);
+        _message = 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+      });
+      await _requestSubscription?.cancel();
+      _requestSubscription = null;
+      _requestRoomCode = null;
+      _watchRequests(room.code);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'The host state could not be restored: $error');
+      }
+    }
+  }
+
   bool get _isOnline => _room != null;
+  bool get _isHost => _isOnline && _room!.hostUid == _rooms?.uid;
   bool get _canControlCurrentTurn {
     if (!_isOnline) return true;
-    final int index = _room!.state.currentPlayerIndex;
+    final int index = _isHost
+        ? _game!.exportState().currentPlayerIndex
+        : _room!.state.currentPlayerIndex;
     return _room!.seats.elementAtOrNull(index)?.ownerUid == _rooms?.uid;
   }
 
@@ -171,14 +222,129 @@ class _GameShellState extends State<GameShell> {
     if (room == null || !_canControlCurrentTurn || _busy) return;
     try {
       setState(() { _busy = true; _message = 'Submitting move…'; });
-      await _rooms!.submitAction(
-        roomCode: room.code,
-        expectedVersion: room.version,
-        action: action,
-      );
+      if (_isHost) {
+        await _applyHostAction(action);
+      } else {
+        await _rooms!.requestAction(
+          roomCode: room.code,
+          expectedVersion: room.version,
+          action: action,
+        );
+        if (mounted) setState(() { _busy = false; _message = 'Move request sent to host.'; });
+      }
     } catch (error) {
       if (mounted) setState(() { _busy = false; _message = 'Move rejected: $error'; });
     }
+  }
+
+  void _watchRequests(String code) {
+    if (_requestRoomCode == code && _requestSubscription != null) return;
+    _requestSubscription?.cancel();
+    _requestRoomCode = code;
+    _requestSubscription = _rooms!.observeRequests(code).listen(
+      _processHostRequest,
+      onError: (Object error) {
+        if (mounted) setState(() => _message = 'Room host request error: $error');
+      },
+    );
+  }
+
+  Future<void> _processHostRequest(RoomRequest request) async {
+    final OnlineRoom? room = _room;
+    final WindowGameEngine? game = _game;
+    if (!_isHost || room == null || game == null) return;
+    try {
+      if (request.type == 'claimSeat') {
+        final List<RoomSeat> seats = room.seats
+            .map((RoomSeat seat) => RoomSeat(
+                  index: seat.index,
+                  name: seat.name,
+                  ownerUid: seat.name == request.seatName && seat.ownerUid == null
+                      ? request.uid
+                      : seat.ownerUid,
+                ))
+            .toList();
+        if (seats.any((RoomSeat seat) => seat.ownerUid == request.uid)) {
+          await _publishHostState(seats: seats);
+        }
+      } else if (request.type == 'action' &&
+          request.expectedVersion == _hostVersion &&
+          _seatOwnerForCurrentTurn == request.uid) {
+        await _applyHostAction(request.action);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Ignored invalid room request: $error');
+      }
+    } finally {
+      await _rooms!.deleteRequest(room.code, request.id);
+    }
+  }
+
+  String? get _seatOwnerForCurrentTurn {
+    final WindowGameEngine? game = _game;
+    final OnlineRoom? room = _room;
+    if (game == null || room == null) return null;
+    return room.seats.elementAtOrNull(game.exportState().currentPlayerIndex)?.ownerUid;
+  }
+
+  Future<void> _applyHostAction(Map<String, dynamic> action) async {
+    final WindowGameEngine game = _game!;
+    final String type = '${action['type']}';
+    GuessResult? result;
+    if (type == 'guess') {
+      final List<dynamic> values = List<dynamic>.from(action['position'] as List);
+      if (values.length != 2 || values.any((dynamic value) => value is! num)) {
+        return;
+      }
+      final Position position = Position(
+        (values[0] as num).toInt(),
+        (values[1] as num).toInt(),
+      );
+      final Orientation orientation = Orientation.values.byName('${action['orientation']}');
+      final List<GuessOption> options = game
+          .getValidOptionsForCard(position)
+          .where((GuessOption value) => value.orientation == orientation)
+          .toList();
+      if (options.isEmpty) return;
+      result = game.applyGuess(
+        position,
+        options.first,
+        GuessType.values.byName('${action['guess']}'),
+      );
+    } else if (type == 'confirmSame') {
+      result = game.confirmSameGuess();
+    } else if (type == 'confirmRemovals') {
+      if (game.pendingRemovals.isEmpty) return;
+      game.confirmRemovals();
+    } else if (type == 'endTurn') {
+      if (!game.turnCanEnd) return;
+      game.endTurn();
+    } else {
+      return;
+    }
+    if (result?.invalidReason != null) return;
+    await _publishHostState();
+  }
+
+  Future<void> _publishHostState({List<RoomSeat>? seats}) async {
+    final OnlineRoom room = _room!;
+    final int previousVersion = _hostVersion;
+    final int nextVersion = _hostVersion + 1;
+    _hostVersion = nextVersion;
+    try {
+      await _rooms!.publishState(
+        roomCode: room.code,
+        hostUid: room.hostUid,
+        version: nextVersion,
+        seats: seats ?? room.seats,
+        state: _game!.exportState(),
+      );
+    } catch (_) {
+      _hostVersion = previousVersion;
+      rethrow;
+    }
+    if (mounted) setState(() { _busy = false; _message = '${_game!.currentPlayer}\'s turn.'; });
   }
 
   Future<void> _select(Position position) async {
@@ -431,10 +597,13 @@ class _GameShellState extends State<GameShell> {
               icon: const Icon(Icons.logout),
               onPressed: () async {
                 await _roomSubscription?.cancel();
+                await _requestSubscription?.cancel();
                 if (!mounted) return;
                 setState(() {
                   _room = null;
                   _game = null;
+                  _requestRoomCode = null;
+                  _hostVersion = 0;
                   _message = 'Left the room. Choose player names to begin.';
                 });
               },

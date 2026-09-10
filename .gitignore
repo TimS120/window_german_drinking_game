@@ -26,9 +26,7 @@ android/local.properties
 *.apk
 *.aab
 
-# Firebase deployment dependencies and local project selection
-functions/node_modules/
-functions/lib/
+# Firebase local project configuration
 .firebaserc
 firebase-options.json
 
