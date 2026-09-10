@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'dart:async';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Orientation;
 
 import 'firebase_options.dart';
@@ -15,16 +14,9 @@ const double _boardAspectRatio = 0.74;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  bool firebaseEnabled = false;
-  try {
-    final FirebaseOptions? options = WindowFirebaseOptions.currentPlatform;
-    if (options != null) {
-      await Firebase.initializeApp(options: options);
-      firebaseEnabled = true;
-    }
-  } catch (_) {
-    // Offline/local play remains available when Firebase is not configured.
-  }
+  // Multiplayer uses Firebase's HTTPS APIs. Local play stays available when
+  // the public Firebase build configuration was not supplied.
+  final bool firebaseEnabled = WindowFirebaseOptions.windowsRestOptions != null;
   runApp(WindowGameApp(firebaseEnabled: firebaseEnabled));
 }
 

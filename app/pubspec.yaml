@@ -30,9 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  firebase_auth: ^6.1.2
-  firebase_core: ^4.3.0
-  firebase_database: ^12.1.0
+  http: ^1.6.0
 
 
 dev_dependencies:
