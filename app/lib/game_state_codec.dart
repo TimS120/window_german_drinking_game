@@ -21,7 +21,10 @@ class GameStateCodec {
     'turnCanEnd': state.turnCanEnd,
     'pendingSamePosition': state.pendingSamePosition == null
         ? null
-        : <int>[state.pendingSamePosition!.row, state.pendingSamePosition!.column],
+        : <int>[
+            state.pendingSamePosition!.row,
+            state.pendingSamePosition!.column,
+          ],
     'stats': <String, dynamic>{
       for (final MapEntry<String, PlayerStats> entry in state.stats.entries)
         entry.key: _encodeStats(entry.value),
@@ -76,28 +79,37 @@ class GameStateCodec {
   static List<String> _strings(Object? value) => value is List
       ? value.map((Object? item) => '$item').toList()
       : <String>[];
-  static List<List<int?>> _grid(Object? value) => value is List
-      ? value
-            .map(
-              (Object? row) => row is List
-                  ? row.map((Object? item) => item is num ? item.toInt() : null).toList()
-                  : <int?>[],
-            )
-            .toList()
-      : <List<int?>>[];
-  static List<List<bool>> _boolGrid(Object? value) => value is List
-      ? value
-            .map(
-              (Object? row) => row is List
-                  ? row.map((Object? item) => item == true).toList()
-                  : <bool>[],
-            )
-            .toList()
-      : <List<bool>>[];
+
+  /// Realtime Database represents a list containing null values as a sparse
+  /// numeric-keyed map. Public room snapshots intentionally hide card values,
+  /// so always rebuild the fixed Window board shape when reading it.
+  static List<List<int?>> _grid(Object? value) => List<List<int?>>.generate(
+    windowLayout.length,
+    (int row) => List<int?>.generate(windowLayout[row].length, (int column) {
+      final Object? item = _indexedValue(_indexedValue(value, row), column);
+      return item is num ? item.toInt() : null;
+    }),
+  );
+
+  static List<List<bool>> _boolGrid(Object? value) => List<List<bool>>.generate(
+    windowLayout.length,
+    (int row) => List<bool>.generate(
+      windowLayout[row].length,
+      (int column) => _indexedValue(_indexedValue(value, row), column) == true,
+    ),
+  );
+
+  static Object? _indexedValue(Object? source, int index) {
+    if (source is List) return index < source.length ? source[index] : null;
+    if (source is Map) return source[index] ?? source['$index'];
+    return null;
+  }
+
   static Set<Position> _positions(Object? value) => value is List
       ? value.map(_positionOrNull).whereType<Position>().toSet()
       : <Position>{};
-  static Position? _positionOrNull(Object? value) => value is List && value.length == 2
+  static Position? _positionOrNull(Object? value) =>
+      value is List && value.length == 2
       ? Position(_int(value[0]), _int(value[1]))
       : null;
 }

@@ -279,8 +279,10 @@ class WindowGameEngine {
 
   int? cardAt(Position position) => _cardGrid[position.row][position.column];
   bool isFaceUp(Position position) => _faceUp[position.row][position.column];
-  String cardLabel(int cardId) =>
-      '${const <String>['6', '7', '8', '9', '10', 'U', 'O', 'K', 'A'][cardId ~/ 4]}.${const <String>['E', 'B', 'H', 'S'][cardId % 4]}';
+  String cardLabel(int cardId) {
+    if (cardId < 0 || cardId >= 36) return '?';
+    return '${const <String>['6', '7', '8', '9', '10', 'U', 'O', 'K', 'A'][cardId ~/ 4]}.${const <String>['E', 'B', 'H', 'S'][cardId % 4]}';
+  }
 
   List<Position> adjacentPositions(Position position) {
     const List<Position> offsets = <Position>[

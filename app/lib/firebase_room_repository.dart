@@ -47,7 +47,9 @@ class OnlineRoom {
     );
     final List<RoomSeat> seats = (raw['seats'] as List? ?? const <Object?>[])
         .whereType<Map>()
-        .map((Map value) => RoomSeat.fromJson(Map<Object?, Object?>.from(value)))
+        .map(
+          (Map value) => RoomSeat.fromJson(Map<Object?, Object?>.from(value)),
+        )
         .toList();
     return OnlineRoom(
       code: code,
@@ -114,16 +116,18 @@ class FirebaseRoomRepository {
 
   Future<String> signInAnonymously() async {
     final User? user = FirebaseAuth.instance.currentUser;
-    return user?.uid ?? (await FirebaseAuth.instance.signInAnonymously()).user!.uid;
+    return user?.uid ??
+        (await FirebaseAuth.instance.signInAnonymously()).user!.uid;
   }
 
   String get uid => FirebaseAuth.instance.currentUser!.uid;
 
-  Stream<OnlineRoom?> observeRoom(String roomCode) => _publicRef(roomCode)
-      .onValue
-      .map((DatabaseEvent event) => event.snapshot.exists
-          ? OnlineRoom.fromSnapshot(roomCode.toUpperCase(), event.snapshot)
-          : null);
+  Stream<OnlineRoom?> observeRoom(String roomCode) =>
+      _publicRef(roomCode).onValue.map(
+        (DatabaseEvent event) => event.snapshot.exists
+            ? OnlineRoom.fromSnapshot(roomCode.toUpperCase(), event.snapshot)
+            : null,
+      );
 
   Stream<RoomRequest> observeRequests(String roomCode) => _requestsRef(roomCode)
       .onChildAdded
@@ -153,17 +157,14 @@ class FirebaseRoomRepository {
     for (int attempt = 0; attempt < 8; attempt++) {
       final String code = _newCode();
       final DatabaseReference publicRef = _publicRef(code);
-      final TransactionResult reserved = await publicRef.runTransaction(
-        (Object? current) {
-          if (current != null) return Transaction.abort();
-          return Transaction.success(_publicRoom(
-            hostUid: uid,
-            version: 1,
-            seats: seats,
-            state: state,
-          ));
-        },
-      );
+      final TransactionResult reserved = await publicRef.runTransaction((
+        Object? current,
+      ) {
+        if (current != null) return Transaction.abort();
+        return Transaction.success(
+          _publicRoom(hostUid: uid, version: 1, seats: seats, state: state),
+        );
+      });
       if (!reserved.committed) continue;
       await _privateRef(code).set(GameStateCodec.encode(state));
       return code;
@@ -200,24 +201,25 @@ class FirebaseRoomRepository {
     required int version,
     required List<RoomSeat> seats,
     required GameState state,
-  }) => _database.ref('rooms/${roomCode.toUpperCase()}').update(
-    <String, dynamic>{
-      'private': GameStateCodec.encode(state),
-      'public': _publicRoom(
-        hostUid: hostUid,
-        version: version,
-        seats: seats,
-        state: state,
-      ),
-    },
-  );
+  }) =>
+      _database.ref('rooms/${roomCode.toUpperCase()}').update(<String, dynamic>{
+        'private': GameStateCodec.encode(state),
+        'public': _publicRoom(
+          hostUid: hostUid,
+          version: version,
+          seats: seats,
+          state: state,
+        ),
+      });
 
   Future<void> deleteRequest(String roomCode, String requestId) =>
       _requestsRef(roomCode).child(requestId).remove();
 
   GameState? decodePrivate(DataSnapshot snapshot) {
     if (!snapshot.exists || snapshot.value is! Map) return null;
-    return GameStateCodec.decode(Map<Object?, Object?>.from(snapshot.value as Map));
+    return GameStateCodec.decode(
+      Map<Object?, Object?>.from(snapshot.value as Map),
+    );
   }
 
   DatabaseReference _publicRef(String code) =>
@@ -257,7 +259,10 @@ class FirebaseRoomRepository {
         .toList();
     for (int row = 0; row < cards.length; row++) {
       for (int column = 0; column < cards[row].length; column++) {
-        if (!state.faceUp[row][column]) cards[row][column] = null;
+        // Do not write null here: Realtime Database may turn the row into a
+        // sparse map. -1 is not a real card id and is never displayed while
+        // the matching faceUp entry is false.
+        if (!state.faceUp[row][column]) cards[row][column] = -1;
       }
     }
     value['cardGrid'] = cards;

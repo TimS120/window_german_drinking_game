@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/game_engine.dart';
+import 'package:window_game/game_state_codec.dart';
 
 void main() {
   group('WindowGameEngine', () {
@@ -120,6 +121,35 @@ void main() {
       expect(game.snapshot().stats['Anna']!.changedCards, 1);
       expect(game.snapshot().stats['Ben']!.turns, 1);
     });
+
+    test(
+      'decodes a sparse Firebase public card grid at the full board size',
+      () {
+        final WindowGameEngine game = WindowGameEngine(<String>[
+          'Anna',
+        ], seed: 4);
+        final Map<String, dynamic> encoded = GameStateCodec.encode(
+          game.exportState(),
+        );
+        encoded['cardGrid'] = <String, Object?>{
+          '0': <String, Object?>{'0': 3},
+        };
+        encoded['faceUp'] = <String, Object?>{
+          '0': <String, Object?>{'0': true},
+        };
+
+        final GameState decoded = GameStateCodec.decode(
+          Map<Object?, Object?>.from(encoded),
+        );
+
+        expect(decoded.cardGrid, hasLength(windowLayout.length));
+        expect(decoded.cardGrid[0], hasLength(windowLayout.first.length));
+        expect(decoded.cardGrid[0][0], 3);
+        expect(decoded.cardGrid[2][4], isNull);
+        expect(decoded.faceUp[0][0], isTrue);
+        expect(decoded.faceUp[2][4], isFalse);
+      },
+    );
   });
 }
 
