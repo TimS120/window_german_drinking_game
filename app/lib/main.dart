@@ -1,6 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart' hide Orientation;
 
 import 'game_engine.dart';
+
+// The board has six portrait-card columns and five rows.  Its aspect ratio is
+// calculated from the card aspect ratio and the grid gaps, rather than from
+// the number of cells alone.  This keeps every card fully visible.
+const double _boardAspectRatio = 0.88;
 
 void main() => runApp(const WindowGameApp());
 
@@ -258,9 +265,33 @@ class _GameShellState extends State<GameShell> {
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Expanded(flex: 3, child: board),
+                      Expanded(
+                        flex: 3,
+                        child: LayoutBuilder(
+                          builder:
+                              (
+                                BuildContext context,
+                                BoxConstraints boardConstraints,
+                              ) {
+                                final double boardWidth = math.min(
+                                  boardConstraints.maxWidth,
+                                  boardConstraints.maxHeight *
+                                      _boardAspectRatio,
+                                );
+                                return Center(
+                                  child: SizedBox(
+                                    width: boardWidth,
+                                    child: board,
+                                  ),
+                                );
+                              },
+                        ),
+                      ),
                       const SizedBox(width: 24),
-                      SizedBox(width: 310, child: info),
+                      SizedBox(
+                        width: 360,
+                        child: SingleChildScrollView(child: info),
+                      ),
                     ],
                   )
                 : ListView(
@@ -331,32 +362,118 @@ class _Info extends StatelessWidget {
           const Divider(height: 30),
           Text('Scoreboard', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          for (final String player in game.players)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    player,
-                    style: TextStyle(
-                      fontWeight: player == snapshot.currentPlayer
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  Text(
-                    'Drinks ${snapshot.stats[player]!.drinks} · Correct ${snapshot.stats[player]!.correct} · Wrong ${snapshot.stats[player]!.wrong}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
+          _Scoreboard(
+            players: game.players,
+            currentPlayer: snapshot.currentPlayer,
+            stats: snapshot.stats,
+          ),
         ],
       ),
     ),
   );
 }
+
+class _Scoreboard extends StatelessWidget {
+  const _Scoreboard({
+    required this.players,
+    required this.currentPlayer,
+    required this.stats,
+  });
+
+  final List<String> players;
+  final String currentPlayer;
+  final Map<String, PlayerStats> stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<PlayerStats> playerStats = players
+        .map((String player) => stats[player]!)
+        .toList();
+    final int totalDrinks = playerStats.fold(
+      0,
+      (int total, PlayerStats value) => total + value.drinks,
+    );
+    final int totalCorrect = playerStats.fold(
+      0,
+      (int total, PlayerStats value) => total + value.correct,
+    );
+    final int totalWrong = playerStats.fold(
+      0,
+      (int total, PlayerStats value) => total + value.wrong,
+    );
+    final int totalChanged = playerStats.fold(
+      0,
+      (int total, PlayerStats value) => total + value.changedCards,
+    );
+    final int totalTurns = playerStats.fold(
+      0,
+      (int total, PlayerStats value) => total + value.turns,
+    );
+    final double averageRatio = playerStats.isEmpty
+        ? 0
+        : playerStats
+                  .map(_correctWrongRatio)
+                  .reduce((double total, double value) => total + value) /
+              playerStats.length;
+
+    DataRow row(String player, PlayerStats value) => DataRow(
+      cells: <DataCell>[
+        DataCell(
+          Text(
+            player,
+            style: TextStyle(
+              fontWeight: player == currentPlayer
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+            ),
+          ),
+        ),
+        DataCell(Text('${value.drinks}')),
+        DataCell(Text('${value.correct}')),
+        DataCell(Text('${value.wrong}')),
+        DataCell(Text(_correctWrongRatio(value).toStringAsFixed(2))),
+        DataCell(Text('${value.changedCards}')),
+        DataCell(Text('${value.turns}')),
+      ],
+    );
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columnSpacing: 14,
+        headingRowHeight: 34,
+        dataRowMinHeight: 36,
+        dataRowMaxHeight: 44,
+        columns: const <DataColumn>[
+          DataColumn(label: Text('Player')),
+          DataColumn(label: Text('Drinks'), numeric: true),
+          DataColumn(label: Text('Correct'), numeric: true),
+          DataColumn(label: Text('Wrong'), numeric: true),
+          DataColumn(label: Text('C/W ratio'), numeric: true),
+          DataColumn(label: Text('Changed'), numeric: true),
+          DataColumn(label: Text('Turns'), numeric: true),
+        ],
+        rows: <DataRow>[
+          for (final String player in players) row(player, stats[player]!),
+          DataRow(
+            cells: <DataCell>[
+              const DataCell(Text('Total')),
+              DataCell(Text('$totalDrinks')),
+              DataCell(Text('$totalCorrect')),
+              DataCell(Text('$totalWrong')),
+              DataCell(Text(averageRatio.toStringAsFixed(2))),
+              DataCell(Text('$totalChanged of 17')),
+              DataCell(Text('$totalTurns')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+double _correctWrongRatio(PlayerStats stats) =>
+    stats.wrong == 0 ? stats.correct.toDouble() : stats.correct / stats.wrong;
 
 class _Board extends StatelessWidget {
   const _Board({
@@ -369,7 +486,7 @@ class _Board extends StatelessWidget {
   final ValueChanged<Position> onSelect;
   @override
   Widget build(BuildContext context) => AspectRatio(
-    aspectRatio: 6 / 5,
+    aspectRatio: _boardAspectRatio,
     child: GridView.builder(
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
