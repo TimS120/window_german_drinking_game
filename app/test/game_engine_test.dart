@@ -35,6 +35,11 @@ void main() {
         game.pendingRemovals,
         containsAll(<Position>[target, handlePosition]),
       );
+      expect(
+        game.isFaceUp(target),
+        isTrue,
+        reason: 'The wrong card stays revealed until removal is confirmed.',
+      );
       expect(game.snapshot().stats['Anna']!.wrong, 1);
       expect(
         game.snapshot().stats['Anna']!.drinks,

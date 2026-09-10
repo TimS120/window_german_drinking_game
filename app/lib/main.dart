@@ -16,6 +16,7 @@ class WindowGameApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Window',
+    navigatorKey: navigatorKey,
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(
@@ -69,49 +70,43 @@ class _GameShellState extends State<GameShell> {
     }
     final GuessOption? option = options.length == 1
         ? options.single
-        : await showDialog<GuessOption>(
-            context: context,
-            builder: (BuildContext context) => AlertDialog(
-              title: const Text('Choose the comparison'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: options
-                    .map(
-                      (GuessOption value) => ListTile(
-                        title: Text(
-                          value.orientation == Orientation.horizontal
-                              ? 'Horizontal cards'
-                              : 'Vertical cards',
-                        ),
-                        subtitle: Text(
-                          value.type == GuessOptionType.inBetween
-                              ? 'In-between or outside'
-                              : 'Higher, same, or lower',
-                        ),
-                        onTap: () => Navigator.pop(context, value),
+        : await _showMovableGameDialog<GuessOption>(
+            title: 'Choose the comparison',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: options
+                  .map(
+                    (GuessOption value) => ListTile(
+                      title: Text(
+                        value.orientation == Orientation.horizontal
+                            ? 'Horizontal cards'
+                            : 'Vertical cards',
                       ),
-                    )
-                    .toList(),
-              ),
+                      subtitle: Text(
+                        value.type == GuessOptionType.inBetween
+                            ? 'In-between or outside'
+                            : 'Higher, same, or lower',
+                      ),
+                      onTap: () => Navigator.pop(context, value),
+                    ),
+                  )
+                  .toList(),
             ),
           );
     if (!mounted || option == null) return;
-    final GuessType? guess = await showDialog<GuessType>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Your guess'),
-        content: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: option.guesses
-              .map(
-                (GuessType value) => FilledButton(
-                  onPressed: () => Navigator.pop(context, value),
-                  child: Text(_guessLabel(value)),
-                ),
-              )
-              .toList(),
-        ),
+    final GuessType? guess = await _showMovableGameDialog<GuessType>(
+      title: 'Your guess',
+      content: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: option.guesses
+            .map(
+              (GuessType value) => FilledButton(
+                onPressed: () => Navigator.pop(context, value),
+                child: Text(_guessLabel(value)),
+              ),
+            )
+            .toList(),
       ),
     );
     if (!mounted || guess == null) return;
@@ -125,21 +120,18 @@ class _GameShellState extends State<GameShell> {
       return;
     }
     if (result.requiresSameConfirmation) {
-      await showDialog<void>(
-        context: context,
+      await _showMovableGameDialog<void>(
+        title: 'Correct: same rank!',
         barrierDismissible: false,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('Correct: same rank!'),
-          content: Text(
-            'Every other player takes one swallow. ${game.currentPlayer} can continue after confirming.',
-          ),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Continue'),
-            ),
-          ],
+        content: Text(
+          'Every other player takes one swallow. ${game.currentPlayer} can continue after confirming.',
         ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Continue'),
+          ),
+        ],
       );
       if (!mounted) return;
       final GuessResult confirmed = game.confirmSameGuess();
@@ -153,21 +145,23 @@ class _GameShellState extends State<GameShell> {
     if (result.requiresRemovalConfirmation) {
       final int penalty = game.pendingPenalty;
       final int removed = game.pendingRemovals.length;
-      await showDialog<void>(
-        context: context,
+      setState(
+        () => _message = 'Wrong guess. The revealed card and every card with a red border will be redealt.',
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await _showMovableGameDialog<void>(
+        title: 'Wrong guess',
         barrierDismissible: false,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('Wrong guess'),
-          content: Text(
-            '${game.currentPlayer} takes $penalty swallow${penalty == 1 ? '' : 's'}. $removed card${removed == 1 ? '' : 's'} will be removed and redealt.',
-          ),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Redeal cards'),
-            ),
-          ],
+        content: Text(
+          '${game.currentPlayer} takes $penalty swallow${penalty == 1 ? '' : 's'}. $removed card${removed == 1 ? '' : 's'} will be removed and redealt.',
         ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Redeal cards'),
+          ),
+        ],
       );
       if (!mounted) return;
       game.confirmRemovals();
@@ -369,6 +363,93 @@ class _Info extends StatelessWidget {
   );
 }
 
+Future<T?> _showMovableGameDialog<T>({
+  required String title,
+  required Widget content,
+  List<Widget> actions = const <Widget>[],
+  bool barrierDismissible = true,
+}) => showDialog<T>(
+  context: navigatorKey.currentContext!,
+  barrierDismissible: barrierDismissible,
+  builder: (BuildContext context) =>
+      _MovableGameDialog(title: title, content: content, actions: actions),
+);
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+class _MovableGameDialog extends StatefulWidget {
+  const _MovableGameDialog({
+    required this.title,
+    required this.content,
+    required this.actions,
+  });
+
+  final String title;
+  final Widget content;
+  final List<Widget> actions;
+
+  @override
+  State<_MovableGameDialog> createState() => _MovableGameDialogState();
+}
+
+class _MovableGameDialogState extends State<_MovableGameDialog> {
+  Offset _translation = Offset.zero;
+
+  @override
+  Widget build(BuildContext context) => Transform.translate(
+    offset: _translation,
+    child: Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            MouseRegion(
+              cursor: SystemMouseCursors.move,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (DragUpdateDetails details) =>
+                    setState(() => _translation += details.delta),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.drag_indicator),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+              child: widget.content,
+            ),
+            if (widget.actions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: widget.actions,
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _Scoreboard extends StatelessWidget {
   const _Scoreboard({
     required this.players,
@@ -530,6 +611,7 @@ class _Board extends StatelessWidget {
     if (!game.isValidSlot(position)) return const SizedBox.shrink();
     final bool faceUp = snapshot.faceUp[position.row][position.column];
     final bool selectable = snapshot.validSelectable.contains(position);
+    final bool markedForRemoval = snapshot.pendingRemovals.contains(position);
     final int? card = snapshot.cardGrid[position.row][position.column];
     return Semantics(
       button: selectable,
@@ -544,10 +626,12 @@ class _Board extends StatelessWidget {
             color: faceUp ? const Color(0xfff3ead2) : const Color(0xff164b83),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selectable
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.black54,
-              width: selectable ? 3 : 1,
+              color: markedForRemoval
+                  ? Colors.redAccent
+                  : (selectable
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.black54),
+              width: markedForRemoval ? 4 : (selectable ? 3 : 1),
             ),
             boxShadow: const <BoxShadow>[
               BoxShadow(
