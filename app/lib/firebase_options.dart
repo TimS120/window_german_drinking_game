@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Firebase's public client identifiers. They are supplied at build time so
 /// the repository contains no project-specific configuration file.
 ///
@@ -15,7 +17,9 @@ class WindowFirebaseOptions {
   /// FlutterFire desktop plugins. Those plugins currently dispatch some
   /// callbacks from the wrong thread on Windows.
   static WindowFirebaseRestOptions? get windowsRestOptions {
-    final String apiKey = _webApiKey.isNotEmpty ? _webApiKey : _apiKey;
+    final String apiKey = kIsWeb && _webApiKey.isNotEmpty
+        ? _webApiKey
+        : _apiKey;
     if (apiKey.isEmpty || _databaseUrl.isEmpty) return null;
     return WindowFirebaseRestOptions(apiKey: apiKey, databaseUrl: _databaseUrl);
   }
