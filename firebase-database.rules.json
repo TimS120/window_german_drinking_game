@@ -15,7 +15,7 @@
         "requests": {
           ".read": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid",
           "$requestId": {
-            ".write": "auth != null && (root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid || (!data.exists() && root.child('rooms').child($roomCode).child('public').exists() && newData.child('uid').val() === auth.uid))",
+            ".write": "auth != null && (root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid || (!data.exists() && newData.child('uid').val() === auth.uid))",
             ".validate": "newData.hasChildren(['uid', 'type', 'createdAt'])"
           }
         }

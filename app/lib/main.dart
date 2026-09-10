@@ -187,6 +187,20 @@ class _GameShellState extends State<GameShell> {
     );
   }
 
+  Future<void> _returnToMenu() async {
+    await _roomSubscription?.cancel();
+    await _requestSubscription?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _room = null;
+      _game = null;
+      _requestRoomCode = null;
+      _hostVersion = 0;
+      _busy = false;
+      _message = 'Choose player names to begin a local game.';
+    });
+  }
+
   Future<void> _restoreHostStateIfNeeded(OnlineRoom room) async {
     if (_game != null || !_isHost) return;
     try {
@@ -591,23 +605,11 @@ class _GameShellState extends State<GameShell> {
       appBar: AppBar(
         title: const Text('Window'),
         actions: <Widget>[
-          if (_isOnline)
-            IconButton(
-              tooltip: 'Leave online room',
-              icon: const Icon(Icons.logout),
-              onPressed: () async {
-                await _roomSubscription?.cancel();
-                await _requestSubscription?.cancel();
-                if (!mounted) return;
-                setState(() {
-                  _room = null;
-                  _game = null;
-                  _requestRoomCode = null;
-                  _hostVersion = 0;
-                  _message = 'Left the room. Choose player names to begin.';
-                });
-              },
-            ),
+          IconButton(
+            tooltip: _isOnline ? 'Leave room and return to menu' : 'Return to menu',
+            icon: const Icon(Icons.home_outlined),
+            onPressed: _returnToMenu,
+          ),
         ],
       ),
       body: SafeArea(
