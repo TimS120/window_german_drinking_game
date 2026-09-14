@@ -1,6 +1,6 @@
 {
   "format": 2,
   "actionSize": 301,
-  "trained": false,
-  "description": "Deterministic untrained ONNX model used to verify the shared RL workflow."
+  "trained": true,
+  "description": "Window policy exported from the PyTorch MaskedPPO pipeline."
 }

@@ -1027,7 +1027,7 @@ class _Info extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             Text(
-              '${proposal!.source} · estimated success ${(proposal!.confidence * 100).toStringAsFixed(0)}%'
+              '${proposal!.source} · ${proposal!.source.contains('statistics') ? 'estimated success' : 'model confidence'} ${(proposal!.confidence * 100).toStringAsFixed(0)}%'
               '${proposal!.valueEstimate == null ? '' : ' · value ${proposal!.valueEstimate!.toStringAsFixed(2)}'}',
               style: Theme.of(context).textTheme.bodySmall,
             ),

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'game_engine.dart';
+import 'onnx_session_loader.dart';
 
 /// Fixed observation/action contract shared with the future Python trainer.
 class WindowRlContract {
@@ -141,8 +142,8 @@ class WindowRlPolicy {
   final OnnxRuntime _runtime;
   OrtSession? _session;
   bool _loadTried = false;
-  String? _loadError;
   bool _modelIsTrained = false;
+  String? _inferenceError;
 
   Future<AiMoveProposal?> propose(WindowGameEngine game) async {
     final List<PolicyAction> actions = WindowRlCodec.validActions(game);
@@ -150,59 +151,84 @@ class WindowRlPolicy {
     await _ensureSession();
     final OrtSession? session = _session;
     if (session == null) return statisticsProposal(game, actions: actions);
+    final OrtValue input = await OrtValue.fromList(
+      WindowRlCodec.encodeObservation(game),
+      <int>[1, WindowRlContract.featureSize],
+    );
+    Map<String, OrtValue> outputs = <String, OrtValue>{};
     try {
-      final OrtValue input = await OrtValue.fromList(
-        WindowRlCodec.encodeObservation(game),
-        <int>[1, WindowRlContract.featureSize],
-      );
-      final Map<String, OrtValue> outputs = await session.run(
-        <String, OrtValue>{session.inputNames.first: input},
-      );
-      try {
-        final List<double> logits = _toDoubles(
-          await outputs[WindowRlContract.policyOutput]!.asList(),
+      outputs = await session.run(<String, OrtValue>{
+        session.inputNames.first: input,
+      });
+      final OrtValue? policyOutput = outputs[WindowRlContract.policyOutput];
+      if (policyOutput == null) {
+        throw StateError(
+          'Model did not return ${WindowRlContract.policyOutput}.',
         );
-        if (logits.length != WindowRlContract.actionSize) {
-          throw StateError(
-            'Policy has ${logits.length} actions; expected '
-            '${WindowRlContract.actionSize}.',
-          );
-        }
-        final OrtValue? valueOutput = outputs[WindowRlContract.valueOutput];
-        final double? value = valueOutput == null
-            ? null
-            : _toDoubles(await valueOutput.asList()).firstOrNull;
-        final PolicyAction best = actions.reduce(
-          (PolicyAction current, PolicyAction candidate) =>
-              logits[candidate.index] > logits[current.index]
-              ? candidate
-              : current,
-        );
-        return AiMoveProposal(
-          action: best,
-          confidence: _maskedConfidence(best, actions, logits),
-          valueEstimate: value,
-          source: _modelIsTrained
-              ? 'ONNX policy'
-              : 'ONNX test model (untrained)',
-        );
-      } finally {
-        input.dispose();
-        for (final OrtValue output in outputs.values) {
-          output.dispose();
-        }
       }
-    } catch (_) {
-      return statisticsProposal(game, actions: actions);
+      // Flattened output avoids platform plugins reporting a symbolic batch
+      // dimension, which cannot be reshaped by `asList()` on some targets.
+      List<double> logits = _toDoubles(await policyOutput.asFlattenedList());
+      if (logits.length != WindowRlContract.actionSize) {
+        throw StateError(
+          'Policy has ${logits.length} actions (runtime tensor '
+          '${policyOutput.shape}); expected '
+          '${WindowRlContract.actionSize}.',
+        );
+      }
+      final OrtValue? valueOutput = outputs[WindowRlContract.valueOutput];
+      final double? value = valueOutput == null
+          ? null
+          : _toDoubles(await valueOutput.asFlattenedList()).firstOrNull;
+      final PolicyAction best = actions.reduce(
+        (PolicyAction current, PolicyAction candidate) =>
+            logits[candidate.index] > logits[current.index]
+            ? candidate
+            : current,
+      );
+      _inferenceError = null;
+      return AiMoveProposal(
+        action: best,
+        confidence: _maskedConfidence(best, actions, logits),
+        valueEstimate: value,
+        source: _modelIsTrained ? 'ONNX policy' : 'ONNX test model (untrained)',
+      );
+    } catch (error) {
+      _inferenceError = '$error';
+      return _statisticsFallback(game, actions);
+    } finally {
+      await input.dispose();
+      for (final OrtValue output in outputs.values) {
+        await output.dispose();
+      }
     }
   }
 
   String get availabilityMessage {
-    if (_session != null) return 'ONNX test model loaded.';
+    if (_inferenceError != null) {
+      return 'ONNX inference failed; using pure statistics. $_inferenceError';
+    }
+    if (_session != null) {
+      return _modelIsTrained
+          ? 'ONNX policy loaded.'
+          : 'ONNX test model loaded.';
+    }
     if (!_loadTried) {
       return 'Bundled ONNX test model will load when you request a proposal.';
     }
     return 'Model unavailable; using the pure-statistics fallback.';
+  }
+
+  AiMoveProposal _statisticsFallback(
+    WindowGameEngine game,
+    List<PolicyAction> actions,
+  ) {
+    final AiMoveProposal fallback = statisticsProposal(game, actions: actions);
+    return AiMoveProposal(
+      action: fallback.action,
+      confidence: fallback.confidence,
+      source: 'ONNX inference failed → Pure statistics',
+    );
   }
 
   Future<void> _ensureSession() async {
@@ -216,12 +242,11 @@ class WindowRlPolicy {
       if (metadata is Map) {
         _modelIsTrained = metadata['trained'] == true;
       }
-      _session = await _runtime.createSessionFromAsset(
+      _session = await createWindowPolicySession(
+        _runtime,
         WindowRlContract.modelAsset,
       );
-    } catch (error) {
-      _loadError = '$error';
-    }
+    } catch (_) {}
   }
 
   static AiMoveProposal statisticsProposal(

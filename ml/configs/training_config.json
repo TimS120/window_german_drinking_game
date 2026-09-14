@@ -1,0 +1,38 @@
+{
+  "seed": 42,
+  "algorithm": {
+    "name": "MaskedPPO",
+    "total_timesteps": 500,
+    "rollout_steps": 256,
+    "learning_rate": 0.0003,
+    "gamma": 0.995,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "entropy_coefficient": 0.01,
+    "value_coefficient": 0.5,
+    "max_grad_norm": 0.5,
+    "update_epochs": 8,
+    "minibatch_size": 256,
+    "hidden_size": 128
+  },
+  "environment": {
+    "max_steps": 1000,
+    "parallel_environments": 4
+  },
+  "reward": {
+    "correct_guess": 1.0,
+    "wrong_drink": -1.0,
+    "pass": 0.0,
+    "complete_game": 25.0
+  },
+  "checkpoint": {
+    "save_every_timesteps": 50000
+  },
+  "evaluation": {
+    "episodes": 10,
+    "deterministic": true
+  },
+  "output": {
+    "base_dir": "runs"
+  }
+}

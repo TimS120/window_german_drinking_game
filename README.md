@@ -105,7 +105,8 @@ This deploy uses Realtime Database only; it does **not** need the Blaze plan.
 - `app/test/game_engine_test.dart` — deterministic rules compatibility tests.
 - `app/test/rl_policy_test.dart` — RL input/action contract tests.
 - `app/assets/cards/` — shared card artwork bundled into all Flutter targets.
-- `ml/` — future PyTorch RL checkpoint format and checkpoint-to-ONNX exporter.
+- `ml/` — Flutter-compatible masked-PPO trainer, checkpoint format, and
+  checkpoint-to-ONNX exporter. See [`ml/README.md`](ml/README.md).
 
 ## Best-move proposal / future RL model
 
@@ -114,7 +115,7 @@ advisory only: it never plays a card or changes a multiplayer room. Until a
 trained model is exported, it uses a transparent probability-based heuristic
 and says so in the UI.
 
-The future RL policy contract is fixed at a 95-float observation and 300 action
+The RL policy contract is fixed at a 95-float observation and 301 action
 logits. Train and export it on this PC using the instructions in
 [`ml/README.md`](ml/README.md). Exported models belong at
 `app/assets/models/window_policy.onnx`; that directory is bundled for Windows,

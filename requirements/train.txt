@@ -1,5 +1,0 @@
--r base.txt
-gymnasium==1.2.2
-matplotlib==3.10.9
-ray[rllib]==2.56.0
-torch==2.12.0

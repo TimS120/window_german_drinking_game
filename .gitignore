@@ -9,24 +9,17 @@ __pycache__/
 .mypy_cache/
 
 # Training/runtime artifacts
-outputs/
-scripts/models/runs/
-scripts/models/runs2/
-scripts/models/**/*.tfevents.*
+ml/runs/
 
-# Optional: ignore local model checkpoints/binaries
-# scripts/models/*.pth
-# scripts/models/*.zip
+# Local training checkpoints are reproducible and are not app assets.
 ml/checkpoints/
 app/assets/models/*.onnx
 !app/assets/models/window_policy.onnx
 
 # Android / Gradle
-android/.gradle/
-android/**/build/
 app/android/.kotlin/
 .gradle-user-home/
-android/local.properties
+app/android/local.properties
 *.apk
 *.aab
 
