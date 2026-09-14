@@ -36,6 +36,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    buildTypes.all {
+        proguardFiles("proguard-rules.pro")
+    }
 }
 
 kotlin {

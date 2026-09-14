@@ -17,10 +17,14 @@ scripts/models/**/*.tfevents.*
 # Optional: ignore local model checkpoints/binaries
 # scripts/models/*.pth
 # scripts/models/*.zip
+ml/checkpoints/
+app/assets/models/*.onnx
+!app/assets/models/window_policy.onnx
 
 # Android / Gradle
 android/.gradle/
 android/**/build/
+app/android/.kotlin/
 .gradle-user-home/
 android/local.properties
 *.apk

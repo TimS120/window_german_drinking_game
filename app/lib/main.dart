@@ -6,11 +6,14 @@ import 'package:flutter/material.dart' hide Orientation;
 import 'firebase_options.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
+import 'rl_policy.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
 // the number of cells alone.  This keeps every card fully visible.
 const double _boardAspectRatio = 0.74;
+
+enum _AdvisorMethod { rlModel, statistics }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,6 +65,9 @@ class _GameShellState extends State<GameShell> {
   OnlineRoom? _room;
   int _hostVersion = 0;
   bool _busy = false;
+  final WindowRlPolicy _rlPolicy = WindowRlPolicy();
+  AiMoveProposal? _proposal;
+  bool _proposing = false;
 
   @override
   void dispose() {
@@ -81,6 +87,7 @@ class _GameShellState extends State<GameShell> {
         .toList();
     setState(() {
       _game = WindowGameEngine(names);
+      _proposal = null;
       _message =
           '${_game!.currentPlayer} starts. Select a card next to the handle.';
     });
@@ -260,6 +267,7 @@ class _GameShellState extends State<GameShell> {
     try {
       setState(() {
         _busy = true;
+        _proposal = null;
         _message = 'Submitting move…';
       });
       if (_isHost) {
@@ -284,6 +292,49 @@ class _GameShellState extends State<GameShell> {
           _message = 'Move rejected: $error';
         });
       }
+    }
+  }
+
+  Future<void> _proposeMove() async {
+    final WindowGameEngine? game = _game;
+    if (game == null || !_canControlCurrentTurn || _busy || _proposing) return;
+    final _AdvisorMethod? method = await _showMovableGameDialog<_AdvisorMethod>(
+      title: 'Best-move prediction',
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ListTile(
+            leading: const Icon(Icons.psychology_outlined),
+            title: const Text('RL model'),
+            subtitle: Text(_rlPolicy.availabilityMessage),
+            onTap: () => Navigator.pop(context, _AdvisorMethod.rlModel),
+          ),
+          ListTile(
+            leading: const Icon(Icons.query_stats_outlined),
+            title: const Text('Pure statistics'),
+            subtitle: const Text(
+              'Choose the legal move with the best card-count probability.',
+            ),
+            onTap: () => Navigator.pop(context, _AdvisorMethod.statistics),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || method == null) return;
+    setState(() => _proposing = true);
+    try {
+      final AiMoveProposal? proposal = method == _AdvisorMethod.rlModel
+          ? await _rlPolicy.propose(game)
+          : WindowRlPolicy.statisticsProposal(game);
+      if (!mounted) return;
+      setState(() {
+        _proposal = proposal;
+        _message = proposal == null
+            ? 'Finish the pending action before requesting a proposal.'
+            : 'Suggested move: ${proposal.action.label}.';
+      });
+    } finally {
+      if (mounted) setState(() => _proposing = false);
     }
   }
 
@@ -444,6 +495,7 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _select(Position position) async {
     final WindowGameEngine game = _game!;
+    final PolicyAction? suggestedAction = _proposal?.action;
     final List<GuessOption> options = game.getValidOptionsForCard(position);
     if (options.isEmpty) {
       setState(() => _message = 'That card cannot be selected yet.');
@@ -468,6 +520,19 @@ class _GameShellState extends State<GameShell> {
                             ? 'In-between or outside'
                             : 'Higher, same, or lower',
                       ),
+                      tileColor:
+                          suggestedAction?.position == position &&
+                              suggestedAction?.orientation == value.orientation
+                          ? Colors.lightBlue.withValues(alpha: 0.25)
+                          : null,
+                      trailing:
+                          suggestedAction?.position == position &&
+                              suggestedAction?.orientation == value.orientation
+                          ? const Icon(
+                              Icons.auto_awesome,
+                              color: Colors.lightBlueAccent,
+                            )
+                          : null,
                       onTap: () => Navigator.pop(context, value),
                     ),
                   )
@@ -483,14 +548,32 @@ class _GameShellState extends State<GameShell> {
         children: option.guesses
             .map(
               (GuessType value) => FilledButton(
+                style:
+                    suggestedAction?.position == position &&
+                        suggestedAction?.orientation == option.orientation &&
+                        suggestedAction?.guess == value
+                    ? FilledButton.styleFrom(
+                        backgroundColor: Colors.lightBlue,
+                        foregroundColor: Colors.black,
+                      )
+                    : null,
                 onPressed: () => Navigator.pop(context, value),
-                child: Text(_guessLabel(value)),
+                child: Text(
+                  suggestedAction?.position == position &&
+                          suggestedAction?.orientation == option.orientation &&
+                          suggestedAction?.guess == value
+                      ? '${_guessLabel(value)} · suggested'
+                      : _guessLabel(value),
+                ),
               ),
             )
             .toList(),
       ),
     );
     if (!mounted || guess == null) return;
+    // A proposal is deliberately a one-move hint. It disappears as soon as
+    // the player commits any guess, whether or not it was the suggested one.
+    setState(() => _proposal = null);
     if (_isOnline) {
       await _submitOnline(<String, dynamic>{
         'type': 'guess',
@@ -737,7 +820,10 @@ class _GameShellState extends State<GameShell> {
           _submitOnline(<String, dynamic>{'type': 'endTurn'});
         } else {
           game.endTurn();
-          setState(() => _message = '${game.currentPlayer}\'s turn.');
+          setState(() {
+            _proposal = null;
+            _message = '${game.currentPlayer}\'s turn.';
+          });
         }
       },
       onReset: () {
@@ -750,12 +836,17 @@ class _GameShellState extends State<GameShell> {
           _submitOnline(<String, dynamic>{'type': 'confirmSame'}),
       onConfirmRemovals: () =>
           _submitOnline(<String, dynamic>{'type': 'confirmRemovals'}),
+      proposal: _proposal,
+      proposing: _proposing,
+      policyStatus: _rlPolicy.availabilityMessage,
+      onPropose: _proposeMove,
     );
     final Widget board = _Board(
       game: game,
       snapshot: snapshot,
       enabled: _canControlCurrentTurn && !_busy,
       onSelect: _select,
+      proposal: _proposal,
     );
     return Scaffold(
       appBar: AppBar(
@@ -825,6 +916,10 @@ class _Info extends StatelessWidget {
     required this.onReset,
     required this.onConfirmSame,
     required this.onConfirmRemovals,
+    required this.proposal,
+    required this.proposing,
+    required this.policyStatus,
+    required this.onPropose,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
@@ -836,6 +931,10 @@ class _Info extends StatelessWidget {
   final VoidCallback onReset;
   final VoidCallback onConfirmSame;
   final VoidCallback onConfirmRemovals;
+  final AiMoveProposal? proposal;
+  final bool proposing;
+  final String policyStatus;
+  final VoidCallback onPropose;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -885,7 +984,17 @@ class _Info extends StatelessWidget {
             onPressed: snapshot.turnCanEnd && canControl && !busy
                 ? onEndTurn
                 : null,
-            child: const Text('End turn'),
+            style: proposal?.action.isPass == true
+                ? FilledButton.styleFrom(
+                    backgroundColor: Colors.lightBlue,
+                    foregroundColor: Colors.black,
+                  )
+                : null,
+            child: Text(
+              proposal?.action.isPass == true
+                  ? 'End turn · suggested'
+                  : 'End turn',
+            ),
           ),
           if (roomCode != null &&
               snapshot.pendingSamePosition != null) ...<Widget>[
@@ -901,6 +1010,26 @@ class _Info extends StatelessWidget {
             FilledButton.tonal(
               onPressed: canControl && !busy ? onConfirmRemovals : null,
               child: const Text('Redeal marked cards'),
+            ),
+          ],
+          const Divider(height: 30),
+          OutlinedButton.icon(
+            onPressed: canControl && !busy && !proposing ? onPropose : null,
+            icon: const Icon(Icons.psychology_outlined),
+            label: Text(proposing ? 'Finding best move…' : 'Propose best move'),
+          ),
+          const SizedBox(height: 8),
+          Text(policyStatus, style: Theme.of(context).textTheme.bodySmall),
+          if (proposal != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              'Suggestion: ${proposal!.action.label}',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            Text(
+              '${proposal!.source} · estimated success ${(proposal!.confidence * 100).toStringAsFixed(0)}%'
+              '${proposal!.valueEstimate == null ? '' : ' · value ${proposal!.valueEstimate!.toStringAsFixed(2)}'}',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
           const Divider(height: 30),
@@ -1128,11 +1257,13 @@ class _Board extends StatelessWidget {
     required this.snapshot,
     required this.enabled,
     required this.onSelect,
+    required this.proposal,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
   final bool enabled;
   final ValueChanged<Position> onSelect;
+  final AiMoveProposal? proposal;
   @override
   Widget build(BuildContext context) => AspectRatio(
     aspectRatio: _boardAspectRatio,
@@ -1169,6 +1300,7 @@ class _Board extends StatelessWidget {
     final bool selectable =
         enabled && snapshot.validSelectable.contains(position);
     final bool markedForRemoval = snapshot.pendingRemovals.contains(position);
+    final bool proposed = proposal?.action.position == position;
     final int? card = snapshot.cardGrid[position.row][position.column];
     return Semantics(
       button: selectable,
@@ -1185,10 +1317,12 @@ class _Board extends StatelessWidget {
             border: Border.all(
               color: markedForRemoval
                   ? Colors.redAccent
-                  : (selectable
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.black54),
-              width: markedForRemoval ? 4 : (selectable ? 3 : 1),
+                  : (proposed
+                        ? Colors.lightBlueAccent
+                        : (selectable
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.black54)),
+              width: markedForRemoval || proposed ? 4 : (selectable ? 3 : 1),
             ),
             boxShadow: const <BoxShadow>[
               BoxShadow(

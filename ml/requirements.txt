@@ -1,0 +1,4 @@
+# Install in a dedicated virtual environment before training or exporting.
+numpy>=1.26,<3
+onnx>=1.16,<2
+torch>=2.4,<3

@@ -3,7 +3,7 @@
 Cross-platform implementation of the German Window card game. The Flutter app
 in `app/` is the single player-facing client for Android, iOS, browsers, and
 Windows. It supports complete offline/local games and Firebase-backed online
-rooms; the optional best-move model remains a later stage.
+rooms and an untrained, on-device best-move proposal pipeline.
 
 ## Test the game on this PC
 
@@ -100,13 +100,27 @@ This deploy uses Realtime Database only; it does **not** need the Blaze plan.
 - `app/lib/main.dart` — responsive local/online Flutter game interface.
 - `app/lib/firebase_room_repository.dart` — authenticated Firebase room
   transport, host state publisher, and guest-request client.
+- `app/lib/rl_policy.dart` — shared RL observation/action contract, ONNX
+  inference adapter, and safe untrained heuristic fallback.
 - `app/test/game_engine_test.dart` — deterministic rules compatibility tests.
+- `app/test/rl_policy_test.dart` — RL input/action contract tests.
 - `app/assets/cards/` — shared card artwork bundled into all Flutter targets.
-- `scripts/`, `configs/`, `requirements/` — retained Python simulation and RL-training tooling. These are not part of the player application and will be connected to the Flutter advisor only in the later model stage.
+- `ml/` — future PyTorch RL checkpoint format and checkpoint-to-ONNX exporter.
 
-## Current migration boundary
+## Best-move proposal / future RL model
 
-The Python rules implementation remains as the established
-training/simulation implementation. Before the best-move model is migrated,
-we will add explicit cross-language fixtures so that the Dart and Python
-training rules remain behaviorally aligned.
+The **Propose best move** button is available during an eligible turn. It is
+advisory only: it never plays a card or changes a multiplayer room. Until a
+trained model is exported, it uses a transparent probability-based heuristic
+and says so in the UI.
+
+The future RL policy contract is fixed at a 95-float observation and 300 action
+logits. Train and export it on this PC using the instructions in
+[`ml/README.md`](ml/README.md). Exported models belong at
+`app/assets/models/window_policy.onnx`; that directory is bundled for Windows,
+Android, iOS, and web. The runtime then loads the ONNX model automatically and
+masks invalid moves before it proposes the highest-scoring legal action.
+
+`window_policy.onnx` is a deliberately untrained, deterministic test model
+that is shared in Git to exercise the full workflow. Local checkpoints and any
+other exported ONNX artifacts are ignored by Git intentionally.
