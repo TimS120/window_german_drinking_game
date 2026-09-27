@@ -4,6 +4,12 @@ This is the only training pipeline for the Flutter game. It uses masked PPO,
 PyTorch checkpoints, and ONNX export. The Flutter application on Windows,
 Android, iOS, and web consumes the same `window_policy.onnx` artifact.
 
+Training is GPU-native by default. `cuda_environment.py` holds the batched
+game state, deck, observations, legal-action masks, sampled actions, rewards,
+and PPO tensors on CUDA. The readable `environment.py` is retained as the
+single-game reference implementation. No data is copied to the CPU during a
+rollout; CUDA synchronization happens only for CSV/checkpoint reporting.
+
 ## Compatibility contract
 
 - Observation: `float32[1, 95]` named `observation`.
@@ -27,14 +33,25 @@ the rewards target minimizing that player's drinks.
 
 ## Train a model
 
-From the repository root in PowerShell:
+From the repository root on Linux:
 
-```powershell
+```bash
 cd ml
-py -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-.\.venv\Scripts\python train.py
+.venv/bin/python train.py
 ```
+
+The repository-local `ml/.venv` is the supported environment. It includes
+the CUDA-enabled PyTorch wheel. Verify the install before a long run:
+
+```bash
+ml/.venv/bin/python -c 'import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))'
+```
+
+The default configuration runs 4,096 simulations concurrently and collects
+65,536 GPU-resident transitions per PPO update. It is tuned for a modern
+desktop NVIDIA GPU. For a short smoke test, copy the configuration and use
+values that remain divisible: for example `parallel_environments: 256`,
+`rollout_steps: 4096`, and `total_timesteps: 8192`.
 
 Training writes a timestamped directory below `ml/runs/`. It contains the
 copied configurations, `metrics.csv`, periodic checkpoints, and the final
@@ -42,9 +59,12 @@ copied configurations, `metrics.csv`, periodic checkpoints, and the final
 changing it to `10000` in `configs/training_config.json` to validate the run;
 use `500000` or more for an initial real experiment.
 
-`environment.parallel_environments` runs several independent simulated games
-per rollout. It increases data collection throughput but does not change the
-single shared policy or the ONNX file produced at the end.
+`environment.parallel_environments` runs independent games in one CUDA batch.
+It increases data-collection throughput but does not change the single shared
+policy or the ONNX file produced at the end. `rollout_steps` and
+`total_timesteps` must each be exact multiples of this value. Add `--compile`
+after a successful normal run to allow PyTorch to compile the network; it can
+improve long experiments but has a one-time startup cost.
 
 ## Export and deploy
 
