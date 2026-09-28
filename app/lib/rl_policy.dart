@@ -7,14 +7,22 @@ import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'game_engine.dart';
 import 'onnx_session_loader.dart';
 
-/// Fixed observation/action contract shared with the future Python trainer.
+/// Versioned recurrent observation/action contract shared with the trainer.
 class WindowRlContract {
+  static const int checkpointFormat = 4;
   static const int rows = 5;
   static const int columns = 6;
-  static const int featuresPerCell = 3;
-  static const int globalFeatures = 5;
-  static const int featureSize =
-      rows * columns * featuresPerCell + globalFeatures;
+  static const int cardFeatures = 2;
+  static const int boardFeatureSize = rows * columns * cardFeatures;
+  static const int actionFeatureSize = 5;
+  static const int outcomeFeatureSize = 3;
+  static const int removedFeatureSize = rows * columns * cardFeatures;
+  static const int flagFeatureSize = 2;
+  static const int historyFeatureSize =
+      boardFeatureSize + actionFeatureSize + outcomeFeatureSize +
+      removedFeatureSize + flagFeatureSize;
+  static const int defaultHistoryLength = 16;
+  static const int maxHistoryLength = maxPublicHistoryEvents + 1;
   static const int orientations = 2;
   static const int guessTypes = 5;
   static const int cardActionSize = rows * columns * orientations * guessTypes;
@@ -83,30 +91,115 @@ class AiMoveProposal {
 }
 
 class WindowRlCodec {
-  static List<double> encodeObservation(WindowGameEngine game) {
+  static List<double> encodeHistory(
+    WindowGameEngine game, {
+    int historyLength = WindowRlContract.defaultHistoryLength,
+  }) {
+    final List<PublicMoveEvent> events = game.recentEvents;
+    final List<List<double>> records = <List<double>>[
+      for (final PublicMoveEvent event in events) _eventFeatures(event),
+      _currentFeatures(game),
+    ];
+    final List<List<double>> recent = records.length > historyLength
+        ? records.sublist(records.length - historyLength)
+        : records;
+    final List<double> result = <double>[
+      for (int index = recent.length; index < historyLength; index++)
+        ...List<double>.filled(WindowRlContract.historyFeatureSize, 0),
+      for (final List<double> record in recent) ...record,
+    ];
+    assert(
+      result.length == historyLength * WindowRlContract.historyFeatureSize,
+    );
+    return result;
+  }
+
+  static List<double> _currentFeatures(WindowGameEngine game) => _features(
+    board: List<List<int?>>.generate(
+      WindowRlContract.rows,
+      (int row) => List<int?>.generate(WindowRlContract.columns, (int column) {
+        final Position position = Position(row, column);
+        return game.isValidSlot(position) && game.isFaceUp(position)
+            ? game.cardAt(position)
+            : null;
+      }),
+    ),
+    actionIndex: -1,
+    outcome: '',
+    removed: _emptyBoard(),
+    mustSelect: game.mustSelectAdjacentToHandle,
+    canEnd: game.turnCanEnd,
+  );
+
+  static List<double> _eventFeatures(PublicMoveEvent event) => _features(
+    board: event.boardBefore,
+    actionIndex: event.actionIndex,
+    outcome: event.outcome,
+    removed: event.removedCards,
+    mustSelect: event.mustSelectAdjacentToHandle,
+    canEnd: event.turnCanEnd,
+  );
+
+  static List<List<int?>> _emptyBoard() => List<List<int?>>.generate(
+    WindowRlContract.rows,
+    (int _) => List<int?>.filled(WindowRlContract.columns, null),
+  );
+
+  static List<double> _features({
+    required List<List<int?>> board,
+    required int actionIndex,
+    required String outcome,
+    required List<List<int?>> removed,
+    required bool mustSelect,
+    required bool canEnd,
+  }) {
     final List<double> result = <double>[];
     for (int row = 0; row < WindowRlContract.rows; row++) {
       for (int column = 0; column < WindowRlContract.columns; column++) {
-        final Position position = Position(row, column);
-        final bool slot = game.isValidSlot(position);
-        final bool faceUp = slot && game.isFaceUp(position);
-        final int? card = slot ? game.cardAt(position) : null;
-        result.addAll(<double>[
-          slot ? 1 : 0,
-          faceUp ? 1 : 0,
-          faceUp && card != null ? (card ~/ 4) / 8 : -1,
-        ]);
+        final bool slot = windowLayout[row][column];
+        final int? card = board[row][column];
+        result.addAll(card == null
+            ? <double>[slot ? -1 : -2, slot ? -1 : -2]
+            : <double>[(card ~/ 4) / 8, (card % 4) / 3]);
       }
     }
-    final GameState state = game.exportState();
+    if (actionIndex < 0) {
+      result.addAll(List<double>.filled(WindowRlContract.actionFeatureSize, 0));
+    } else if (actionIndex == WindowRlContract.passActionIndex) {
+      result.addAll(const <double>[1, 0, 0, 0, 0]);
+    } else {
+      int encoded = actionIndex;
+      final double guess = (encoded % 5) / 4;
+      encoded ~/= 5;
+      final double orientation = (encoded % 2).toDouble();
+      encoded ~/= 2;
+      result.addAll(<double>[
+        0,
+        (encoded ~/ 6) / 4,
+        (encoded % 6) / 5,
+        orientation,
+        guess,
+      ]);
+    }
     result.addAll(<double>[
-      game.mustSelectAdjacentToHandle ? 1 : 0,
-      game.turnCanEnd ? 1 : 0,
-      game.pendingRemovals.isNotEmpty ? 1 : 0,
-      state.pendingSamePosition == null ? 0 : 1,
-      state.players.length.clamp(1, 8) / 8,
+      outcome == 'correct' ? 1 : 0,
+      outcome == 'wrong' ? 1 : 0,
+      outcome == 'pass' ? 1 : 0,
     ]);
-    assert(result.length == WindowRlContract.featureSize);
+    for (int row = 0; row < WindowRlContract.rows; row++) {
+      for (int column = 0; column < WindowRlContract.columns; column++) {
+        final bool slot = windowLayout[row][column];
+        final int? card = removed[row][column];
+        result.addAll(card == null
+            ? <double>[slot ? -1 : -2, slot ? -1 : -2]
+            : <double>[(card ~/ 4) / 8, (card % 4) / 3]);
+      }
+    }
+    result.addAll(<double>[
+      mustSelect ? 1 : 0,
+      canEnd ? 1 : 0,
+    ]);
+    assert(result.length == WindowRlContract.historyFeatureSize);
     return result;
   }
 
@@ -143,6 +236,7 @@ class WindowRlPolicy {
   OrtSession? _session;
   bool _loadTried = false;
   bool _modelIsTrained = false;
+  int _historyLength = WindowRlContract.defaultHistoryLength;
   String? _inferenceError;
 
   Future<AiMoveProposal?> propose(WindowGameEngine game) async {
@@ -152,8 +246,8 @@ class WindowRlPolicy {
     final OrtSession? session = _session;
     if (session == null) return statisticsProposal(game, actions: actions);
     final OrtValue input = await OrtValue.fromList(
-      WindowRlCodec.encodeObservation(game),
-      <int>[1, WindowRlContract.featureSize],
+      WindowRlCodec.encodeHistory(game, historyLength: _historyLength),
+      <int>[1, _historyLength, WindowRlContract.historyFeatureSize],
     );
     Map<String, OrtValue> outputs = <String, OrtValue>{};
     try {
@@ -240,6 +334,18 @@ class WindowRlPolicy {
         await rootBundle.loadString(WindowRlContract.metadataAsset),
       );
       if (metadata is Map) {
+        if (metadata['format'] != WindowRlContract.checkpointFormat ||
+            metadata['historyFeatureSize'] !=
+                WindowRlContract.historyFeatureSize ||
+            metadata['historyLength'] is! num ||
+            (metadata['historyLength'] as num).toInt() < 1 ||
+            (metadata['historyLength'] as num).toInt() >
+                WindowRlContract.maxHistoryLength) {
+          throw StateError(
+            'Bundled model does not match the recurrent policy contract.',
+          );
+        }
+        _historyLength = (metadata['historyLength'] as num).toInt();
         _modelIsTrained = metadata['trained'] == true;
       }
       _session = await createWindowPolicySession(

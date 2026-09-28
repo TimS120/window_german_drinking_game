@@ -29,6 +29,7 @@ class GameStateCodec {
       for (final MapEntry<String, PlayerStats> entry in state.stats.entries)
         entry.key: _encodeStats(entry.value),
     },
+    'recentEvents': state.recentEvents.map(_encodeEvent).toList(),
   };
 
   static GameState decode(Map<Object?, Object?> source) {
@@ -50,6 +51,7 @@ class GameStateCodec {
         for (final MapEntry<String, dynamic> entry in rawStats.entries)
           entry.key: _decodeStats(_map(entry.value)),
       },
+      recentEvents: _events(json['recentEvents']),
     );
   }
 
@@ -112,4 +114,29 @@ class GameStateCodec {
       value is List && value.length == 2
       ? Position(_int(value[0]), _int(value[1]))
       : null;
+
+  static Map<String, dynamic> _encodeEvent(PublicMoveEvent event) =>
+      <String, dynamic>{
+        'boardBefore': event.boardBefore,
+        'actionIndex': event.actionIndex,
+        'outcome': event.outcome,
+        'removedCards': event.removedCards,
+        'mustSelectAdjacentToHandle': event.mustSelectAdjacentToHandle,
+        'turnCanEnd': event.turnCanEnd,
+      };
+
+  static List<PublicMoveEvent> _events(Object? value) => value is List
+      ? value.whereType<Map>().map((Map item) {
+          final Map<String, dynamic> event = _map(item);
+          return PublicMoveEvent(
+            boardBefore: _grid(event['boardBefore']),
+            actionIndex: _int(event['actionIndex']),
+            outcome: '${event['outcome'] ?? ''}',
+            removedCards: _grid(event['removedCards']),
+            mustSelectAdjacentToHandle:
+                event['mustSelectAdjacentToHandle'] == true,
+            turnCanEnd: event['turnCanEnd'] == true,
+          );
+        }).toList()
+      : <PublicMoveEvent>[];
 }

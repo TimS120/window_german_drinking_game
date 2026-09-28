@@ -1,11 +1,12 @@
 {
   "seed": 42,
   "algorithm": {
-    "name": "MaskedPPO",
-    "total_timesteps": 1048576,
+    "name": "RecurrentMaskedPPO",
+    "total_timesteps": 67108864,
     "rollout_steps": 65536,
     "learning_rate": 0.0003,
-    "gamma": 0.995,
+    "final_learning_rate": 0.00003,
+    "gamma": 0.999,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
     "entropy_coefficient": 0.01,
@@ -17,7 +18,9 @@
   },
   "environment": {
     "max_steps": 1000,
-    "parallel_environments": 4096
+    "parallel_environments": 4096,
+    "player_count": 4,
+    "history_length": 16
   },
   "reward": {
     "correct_guess": 1.0,
@@ -26,10 +29,11 @@
     "complete_game": 25.0
   },
   "checkpoint": {
-    "save_every_timesteps": 262144
+    "save_every_timesteps": 1048576
   },
   "evaluation": {
-    "episodes": 128,
+    "episodes": 512,
+    "every_timesteps": 1048576,
     "deterministic": true
   },
   "output": {

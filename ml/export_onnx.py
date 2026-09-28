@@ -8,9 +8,23 @@ from pathlib import Path
 
 import onnx
 import torch
+from torch import nn
 
-from window_rl.contract import ACTION_SIZE, CHECKPOINT_FORMAT, FEATURE_SIZE
+from window_rl.contract import ACTION_SIZE, CHECKPOINT_FORMAT, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, MAX_HISTORY_LENGTH
 from window_rl.model import WindowPolicyValueNet
+
+
+class DeploymentPolicy(nn.Module):
+    """Keep the Flutter value output scalar while training uses four critics."""
+
+    def __init__(self, model: WindowPolicyValueNet) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, history: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, relative_values = self.model(history)
+        # Head zero is always the player currently making the proposal.
+        return logits, relative_values[:, :1]
 
 
 def load_checkpoint(path: Path) -> tuple[WindowPolicyValueNet, dict]:
@@ -39,12 +53,15 @@ def main() -> None:
     args = parser.parse_args()
     model, payload = load_checkpoint(args.checkpoint)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    observation = torch.zeros((1, FEATURE_SIZE), dtype=torch.float32)
+    history_length = int(payload.get("training", {}).get("history_length", HISTORY_LENGTH))
+    if not 1 <= history_length <= MAX_HISTORY_LENGTH:
+        raise ValueError(f"Checkpoint history_length must be between 1 and {MAX_HISTORY_LENGTH}.")
+    history = torch.zeros((1, history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32)
     torch.onnx.export(
-        model,
-        (observation,),
+        DeploymentPolicy(model),
+        (history,),
         args.output,
-        input_names=["observation"],
+        input_names=["history"],
         output_names=["policy_logits", "state_value"],
         # The Flutter runtime always evaluates one game state at a time.
         # Static dimensions avoid plugin-specific handling of symbolic batch
@@ -69,8 +86,10 @@ def main() -> None:
     metadata = {
         "format": CHECKPOINT_FORMAT,
         "actionSize": ACTION_SIZE,
+        "historyLength": history_length,
+        "historyFeatureSize": HISTORY_FEATURE_SIZE,
         "trained": payload.get("training", {}).get("status") == "trained",
-        "description": "Window policy exported from the PyTorch MaskedPPO pipeline.",
+        "description": "Window recurrent policy exported from the PyTorch RecurrentMaskedPPO pipeline.",
     }
     args.output.with_suffix(".metadata.json").write_text(
         json.dumps(metadata, indent=2) + "\n",

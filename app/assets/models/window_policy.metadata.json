@@ -1,6 +1,8 @@
 {
-  "format": 2,
+  "format": 4,
   "actionSize": 301,
-  "trained": true,
-  "description": "Window policy exported from the PyTorch MaskedPPO pipeline."
+  "historyLength": 16,
+  "historyFeatureSize": 130,
+  "trained": false,
+  "description": "Window recurrent policy exported from the PyTorch RecurrentMaskedPPO pipeline."
 }

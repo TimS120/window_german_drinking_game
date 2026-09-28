@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import torch
 
-from .contract import ACTION_SIZE, COLUMNS, FEATURE_SIZE, GUESS_TYPES, ORIENTATIONS, PASS_ACTION_INDEX, ROWS
+from .contract import ACTION_SIZE, ACTION_FEATURE_SIZE, BOARD_FEATURE_SIZE, COLUMNS, FEATURE_SIZE, GUESS_TYPES, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, MAX_HISTORY_LENGTH, ORIENTATIONS, OUTCOME_FEATURE_SIZE, PASS_ACTION_INDEX, PLAYER_COUNT, REMOVED_FEATURE_SIZE, ROWS
 from .environment import CORNERS, HANDLE, LAYOUT
 
 
@@ -21,12 +21,18 @@ HORIZONTAL, VERTICAL = range(2)
 class BatchedWindowEnv:
     """Many independent Window games stored in batched torch tensors."""
 
-    def __init__(self, reward_config: dict, num_envs: int, max_steps: int, device: torch.device, seed: int) -> None:
+    def __init__(self, reward_config: dict, num_envs: int, max_steps: int, device: torch.device, seed: int, history_length: int = HISTORY_LENGTH, player_count: int = 4) -> None:
         if num_envs < 1:
             raise ValueError("num_envs must be at least 1")
+        if not 1 <= history_length <= MAX_HISTORY_LENGTH:
+            raise ValueError(f"history_length must be between 1 and {MAX_HISTORY_LENGTH}")
+        if player_count != PLAYER_COUNT:
+            raise ValueError(f"This training environment is fixed to {PLAYER_COUNT} players.")
         self.device = device
         self.num_envs = int(num_envs)
         self.max_steps = int(max_steps)
+        self.history_length = int(history_length)
+        self.player_count = int(player_count)
         self.correct_reward = float(reward_config["correct_guess"])
         self.wrong_reward = float(reward_config["wrong_drink"])
         self.pass_reward = float(reward_config["pass"])
@@ -51,6 +57,11 @@ class BatchedWindowEnv:
         self.turn_can_end = torch.empty(self.num_envs, dtype=torch.bool, device=device)
         self.steps = torch.empty(self.num_envs, dtype=torch.long, device=device)
         self.drinks = torch.empty(self.num_envs, dtype=torch.long, device=device)
+        self.current_player = torch.empty(self.num_envs, dtype=torch.long, device=device)
+        self.player_drinks = torch.empty((self.num_envs, self.player_count), dtype=torch.long, device=device)
+        self.last_player_rewards = torch.zeros((self.num_envs, self.player_count), dtype=torch.float32, device=device)
+        self.last_actors = torch.zeros(self.num_envs, dtype=torch.long, device=device)
+        self.history = torch.zeros((self.num_envs, self.history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32, device=device)
         self.reset()
 
     def _random_permutations(self, count: int) -> torch.Tensor:
@@ -78,6 +89,11 @@ class BatchedWindowEnv:
         self.turn_can_end[indices] = False
         self.steps[indices] = 0
         self.drinks[indices] = 0
+        self.current_player[indices] = 0
+        self.player_drinks[indices] = 0
+        self.last_player_rewards[indices] = 0
+        self.history[indices] = 0
+        self._append_current_record(indices)
         return self.observation()
 
     def observation(self) -> torch.Tensor:
@@ -94,6 +110,54 @@ class BatchedWindowEnv:
         result = torch.cat((cells, globals_), dim=1)
         assert result.shape == (self.num_envs, FEATURE_SIZE)
         return result
+
+    def _public_cards(self, cards: torch.Tensor | None = None, face_up: torch.Tensor | None = None) -> torch.Tensor:
+        cards = self.cards if cards is None else cards
+        face_up = self.face_up if face_up is None else face_up
+        visible = face_up & self.layout
+        ranks = torch.where(visible, cards.clamp_min(0).div(4, rounding_mode="floor").to(torch.float32).div(8), torch.full_like(cards, -1, dtype=torch.float32))
+        suits = torch.where(visible, cards.clamp_min(0).remainder(4).to(torch.float32).div(3), torch.full_like(cards, -1, dtype=torch.float32))
+        invalid = ~self.layout
+        ranks[:, invalid] = -2
+        suits[:, invalid] = -2
+        return torch.stack((ranks, suits), dim=-1).flatten(1)
+
+    def _append_current_record(self, indices: torch.Tensor | None = None) -> None:
+        if indices is None:
+            indices = torch.arange(self.num_envs, device=self.device)
+        if indices.numel() == 0:
+            return
+        record = torch.zeros((indices.numel(), HISTORY_FEATURE_SIZE), dtype=torch.float32, device=self.device)
+        record[:, :BOARD_FEATURE_SIZE] = self._public_cards()[indices]
+        flags_start = BOARD_FEATURE_SIZE + ACTION_FEATURE_SIZE + OUTCOME_FEATURE_SIZE + REMOVED_FEATURE_SIZE
+        record[:, flags_start] = self.must_select_adjacent[indices].to(torch.float32)
+        record[:, flags_start + 1] = self.turn_can_end[indices].to(torch.float32)
+        self.history[indices, -1] = record
+
+    def history_observation(self) -> torch.Tensor:
+        return self.history
+
+    def _finish_history_event(self, actions: torch.Tensor, correct: torch.Tensor, wrong: torch.Tensor, is_pass: torch.Tensor, removed_cards: torch.Tensor) -> None:
+        action_start = BOARD_FEATURE_SIZE
+        outcome_start = action_start + ACTION_FEATURE_SIZE
+        removed_start = outcome_start + OUTCOME_FEATURE_SIZE
+        encoded = actions.clamp_max(PASS_ACTION_INDEX - 1)
+        guess = encoded.remainder(GUESS_TYPES).to(torch.float32).div(GUESS_TYPES - 1)
+        encoded = encoded.div(GUESS_TYPES, rounding_mode="floor")
+        orientation = encoded.remainder(ORIENTATIONS).to(torch.float32)
+        encoded = encoded.div(ORIENTATIONS, rounding_mode="floor")
+        row = encoded.div(COLUMNS, rounding_mode="floor").to(torch.float32).div(ROWS - 1)
+        column = encoded.remainder(COLUMNS).to(torch.float32).div(COLUMNS - 1)
+        fields = torch.stack(((actions == PASS_ACTION_INDEX).to(torch.float32), row, column, orientation, guess), dim=1)
+        fields[is_pass, 1:] = 0
+        self.history[:, -1, action_start : action_start + ACTION_FEATURE_SIZE] = fields
+        self.history[:, -1, outcome_start] = correct.to(torch.float32)
+        self.history[:, -1, outcome_start + 1] = wrong.to(torch.float32)
+        self.history[:, -1, outcome_start + 2] = is_pass.to(torch.float32)
+        self.history[:, -1, removed_start : removed_start + REMOVED_FEATURE_SIZE] = self._public_cards(removed_cards, removed_cards >= 0)
+        self.history = torch.roll(self.history, shifts=-1, dims=1)
+        self.history[:, -1] = 0
+        self._append_current_record()
 
     @staticmethod
     def _shift(values: torch.Tensor, row_offset: int, column_offset: int) -> torch.Tensor:
@@ -189,12 +253,16 @@ class BatchedWindowEnv:
         if not bool(mask.gather(1, actions[:, None]).all()):
             raise ValueError("Illegal action; callers must apply action_mask().")
         self.steps += 1
+        acting_player = self.current_player.clone()
+        self.last_actors = acting_player
+        self.last_player_rewards.zero_()
         is_pass = actions == PASS_ACTION_INDEX
         reward = torch.full((self.num_envs,), self.pass_reward, dtype=torch.float32, device=self.device)
         reward[~is_pass] = 0.0
         completed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         drinks = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.turn_can_end[is_pass] = False
+        self.current_player[is_pass] = (self.current_player[is_pass] + 1) % self.player_count
 
         card_actions = ~is_pass
         # Pass has no card payload; decode it as a harmless dummy action.
@@ -242,9 +310,18 @@ class BatchedWindowEnv:
         drinks = removed.sum(dim=(1, 2)).to(torch.long)
         reward[wrong] = drinks[wrong].to(torch.float32) * self.wrong_reward
         self.drinks += drinks
+        self.player_drinks[batch, acting_player] += drinks
+        same_correct = correct & (guess == SAME)
+        if self.player_count > 1:
+            other_players = torch.arange(self.player_count, device=self.device)[None, :] != acting_player[:, None]
+            self.player_drinks += (same_correct[:, None] & other_players).to(torch.long)
+            self.last_player_rewards -= (same_correct[:, None] & other_players).to(torch.float32)
+        self.last_player_rewards[batch, acting_player] += reward
         handle_removed = removed[:, HANDLE[0], HANDLE[1]]
         self.must_select_adjacent[wrong] = handle_removed[wrong]
         self.turn_can_end[wrong] = False
+        removed_cards = torch.where(removed, self.cards, -torch.ones((), dtype=torch.long, device=self.device))
         self._shuffle_and_redeal(removed)
         done = completed | (self.steps >= self.max_steps)
+        self._finish_history_event(actions, correct, wrong, is_pass, removed_cards)
         return self.observation(), reward, done, drinks, completed
