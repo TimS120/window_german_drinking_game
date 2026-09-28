@@ -1,66 +1,61 @@
-# Window
+# Window - a German drinking game
 
-Cross-platform implementation of the German Window card game. The Flutter app
-in `app/` is the single player-facing client for Android, iOS, browsers, and
-Windows. It supports complete offline/local games and Firebase-backed online
-rooms and an untrained, on-device best-move proposal pipeline.
+![Window game board](resources/docs/full_game.png)
 
-## Test the game on this PC
+This project's purpose is the:
+- Development of the basic functionality of the German "Window" drinking game
+- The creation of methods to predict the next best move, via
+   - The training of a DRL-Agend
+   - The development of a pure statistical method
 
-Flutter has been installed locally at:
+**Window** is a cross-platform implementation of the German Window drinking
+card game. Play locally on one device, host an online room for friends, or ask
+the app for an advisory next-move proposal. The Flutter app runs on Windows,
+Android, iOS, and the web.
 
-`C:\Users\timss\Documents\Codex\tools\flutter_prebuilt\flutter`
+> Play responsibly, use non-alcoholic alternatives whenever appropriate, and
+> never pressure anyone to drink.
 
-Open PowerShell and run:
+## What you can do
 
-```powershell
-$env:Path = "C:\Users\timss\Documents\Codex\tools\flutter_prebuilt\flutter\bin;$env:Path"
-Set-Location C:\Users\timss\Desktop\window_german_drinking_game\app
+- Start an offline game with any non-empty list of player names.
+- Create or join a Firebase-backed online room with a six-character code.
+- Play the complete Window ruleset: handle moves, passes, redeals, and
+  same-rank confirmations.
+- Use **Propose best move** for an advisory model/heuristic suggestion. It
+  never plays a move automatically.
+- Train and deploy a replacement ONNX policy with the GPU-native RL pipeline.
+
+## Play after cloning
+
+Install the [Flutter SDK](https://docs.flutter.dev/get-started/install) and
+the platform tooling for your target. Then run:
+
+```bash
+cd app
+flutter pub get
 flutter test
 flutter run -d chrome
 ```
 
-The last command opens the game in Chrome on this PC. Enter comma-separated
-player names, start a local game, and play through card guesses, incorrect-guess
-redeals, same-rank penalties, and turn changes.
+The last command starts a local browser game. Other common targets are
+`windows`, a connected Android device/emulator, and (on macOS) `ios`:
 
-To build a browser release instead of launching a development session:
-
-```powershell
-flutter build web
+```bash
+flutter run -d windows
+flutter run -d android
+flutter run -d ios
 ```
 
-The generated Windows, Android, iOS, and web project targets are already in
-`app/`. iOS builds need a Mac with Xcode.
+Use `flutter build web` to create a browser release. The repository already
+contains Windows, Android, iOS, and web Flutter targets; iOS requires macOS
+and Xcode.
 
-## Online rooms (Firebase)
+### Optional: online rooms
 
-Online rooms begin as an open lobby. Player names in **Players** are people
-sharing the host device; other people join independently with the six-character
-room code and a name they choose themselves. The host sees the roster and
-presses **Start game and lock lobby** when everybody is present. After that,
-the roster and turn order are fixed. Each turn can be controlled only by the
-Firebase account that owns that player seat.
-
-This version works on Firebase's free Spark plan. The device that creates a
-room is the **host**: it alone reads the private deck and validates actions
-before publishing the next sanitized board. Other devices can only read the
-public board and submit a seat or move request. Face-down card identities and
-the deck never reach guest devices.
-
-Keep the host game open while people are playing. This is an excellent
-lightweight solution for a friendly drinking game, but it deliberately does
-not claim to be cheat-proof: the host device is trusted instead of a paid
-server runtime.
-
-There is deliberately no static shared password. Enable **Anonymous** sign-in
-in Firebase Authentication. The `firebase-database.rules.json` file lets only
-the room host publish state or read private state; guests can create only
-requests bearing their own Firebase UID.
-
-To connect a build, create a local `firebase-options.json` beside this README
-(it is ignored by Git) with the public Firebase identifiers from the
-`window-game` project:
+Local play needs no Firebase configuration. Online rooms require Firebase
+Anonymous Authentication and Realtime Database in your own project. Create a
+Git-ignored `firebase-options.json` in the repository root:
 
 ```json
 {
@@ -68,60 +63,50 @@ To connect a build, create a local `firebase-options.json` beside this README
   "FIREBASE_WEB_API_KEY": "...",
   "FIREBASE_ANDROID_APP_ID": "...",
   "FIREBASE_WEB_APP_ID": "...",
-  "FIREBASE_PROJECT_ID": "window-game",
-  "FIREBASE_MESSAGING_SENDER_ID": "644351731437",
-  "FIREBASE_DATABASE_URL": "https://window-game-default-rtdb.europe-west1.firebasedatabase.app",
-  "FIREBASE_AUTH_DOMAIN": "window-game.firebaseapp.com"
+  "FIREBASE_PROJECT_ID": "...",
+  "FIREBASE_MESSAGING_SENDER_ID": "...",
+  "FIREBASE_DATABASE_URL": "...",
+  "FIREBASE_AUTH_DOMAIN": "..."
 }
 ```
 
-Use a Web app's configuration for browser builds. Register the Flutter Android
-application id (`com.timss.window.window_game`) and the future iOS bundle id in
-the Firebase console, then use their configuration values for native builds.
-Run the app with:
+Deploy the supplied rules and start the app with that configuration:
 
-```powershell
-flutter run -d chrome --dart-define-from-file=..\firebase-options.json
+```bash
+npx firebase-tools deploy --only database --project YOUR_PROJECT_ID
+cd app
+flutter run -d chrome --dart-define-from-file=../firebase-options.json
 ```
 
-Once, deploy the database rules from the repository root after signing into
-the intended Firebase project:
+The room creator is the trusted host: it validates moves and retains the deck
+and face-down card identities. Guests receive the public board and submit
+requests for their own seat. Keep the host app open during play.
 
-```powershell
-$env:NODE_OPTIONS = "--use-system-ca" # needed on this PC because Avast scans HTTPS
-npx firebase-tools deploy --only database --project window-game
-```
+## Documentation
 
-This deploy uses Realtime Database only; it does **not** need the Blaze plan.
+- [Game rules](GAME_README.md) — setup, valid guesses, redeals, and scoring.
+- [ML development](ML_README.md) — CUDA training, evaluation, export, and
+  deployment.
+- [ML agent specification](ml/ml_move_prediction_plan.txt) — target,
+  information restrictions, contract, and acceptance criteria.
 
-## Repository layout
+## Repository map
 
-- `app/lib/game_engine.dart` — canonical pure-Dart game rules, no UI or network code.
-- `app/lib/main.dart` — responsive local/online Flutter game interface.
-- `app/lib/firebase_room_repository.dart` — authenticated Firebase room
-  transport, host state publisher, and guest-request client.
-- `app/lib/rl_policy.dart` — shared RL observation/action contract, ONNX
-  inference adapter, and safe untrained heuristic fallback.
-- `app/test/game_engine_test.dart` — deterministic rules compatibility tests.
-- `app/test/rl_policy_test.dart` — RL input/action contract tests.
-- `app/assets/cards/` — shared card artwork bundled into all Flutter targets.
-- `ml/` — Flutter-compatible masked-PPO trainer, checkpoint format, and
-  checkpoint-to-ONNX exporter. See [`ml/README.md`](ml/README.md).
+| Location | Purpose |
+| --- | --- |
+| `app/` | Flutter application for all player-facing platforms. |
+| `app/lib/game_engine.dart` | Canonical rules, independent of UI and networking. |
+| `app/lib/main.dart` | Responsive local and online game interface. |
+| `app/lib/firebase_room_repository.dart` | Host-authoritative Firebase room transport. |
+| `app/lib/rl_policy.dart` | ONNX inference, legal-action masking, and fallback suggestions. |
+| `app/assets/` | Card artwork and bundled ONNX policy. |
+| `app/test/` | Game-engine and policy-contract tests. |
+| `ml/` | GPU-native masked-PPO trainer, simulator, and ONNX exporter. |
+| `firebase-database.rules.json` | Firebase Realtime Database access rules. |
+| `resources/docs/` | Documentation imagery. |
 
-## Best-move proposal / future RL model
+## Current model status
 
-The **Propose best move** button is available during an eligible turn. It is
-advisory only: it never plays a card or changes a multiplayer room. Until a
-trained model is exported, it uses a transparent probability-based heuristic
-and says so in the UI.
-
-The RL policy contract is fixed at a 95-float observation and 301 action
-logits. Train and export it on this PC using the instructions in
-[`ml/README.md`](ml/README.md). Exported models belong at
-`app/assets/models/window_policy.onnx`; that directory is bundled for Windows,
-Android, iOS, and web. The runtime then loads the ONNX model automatically and
-masks invalid moves before it proposes the highest-scoring legal action.
-
-`window_policy.onnx` is a deliberately untrained, deterministic test model
-that is shared in Git to exercise the full workflow. Local checkpoints and any
-other exported ONNX artifacts are ignored by Git intentionally.
+`app/assets/models/window_policy.onnx` is deliberately untrained and verifies
+only packaging and inference. Until a trained policy is exported, the app
+labels its proposal accordingly and uses a transparent heuristic fallback.
