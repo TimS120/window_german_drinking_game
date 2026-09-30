@@ -41,6 +41,9 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <!-- flutter_onnxruntime's web implementation uses ONNX Runtime's global
+       `ort` object. It must load before the Flutter application starts. -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
