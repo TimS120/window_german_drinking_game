@@ -20,12 +20,24 @@ Future<void> main() async {
   // Multiplayer uses Firebase's HTTPS APIs. Local play stays available when
   // the public Firebase build configuration was not supplied.
   final bool firebaseEnabled = WindowFirebaseOptions.windowsRestOptions != null;
-  runApp(WindowGameApp(firebaseEnabled: firebaseEnabled));
+  final WindowRlPolicy rlPolicy = WindowRlPolicy();
+  // Start asynchronous ONNX loading before the first frame. The game remains
+  // responsive while assets/runtime initialize, and a proposal shares this
+  // future instead of triggering a second, late load.
+  unawaited(rlPolicy.preload());
+  runApp(
+    WindowGameApp(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy),
+  );
 }
 
 class WindowGameApp extends StatelessWidget {
-  const WindowGameApp({super.key, required this.firebaseEnabled});
+  const WindowGameApp({
+    super.key,
+    required this.firebaseEnabled,
+    required this.rlPolicy,
+  });
   final bool firebaseEnabled;
+  final WindowRlPolicy rlPolicy;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Window',
@@ -39,13 +51,18 @@ class WindowGameApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xFF0F381C),
       useMaterial3: true,
     ),
-    home: GameShell(firebaseEnabled: firebaseEnabled),
+    home: GameShell(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy),
   );
 }
 
 class GameShell extends StatefulWidget {
-  const GameShell({super.key, required this.firebaseEnabled});
+  const GameShell({
+    super.key,
+    required this.firebaseEnabled,
+    required this.rlPolicy,
+  });
   final bool firebaseEnabled;
+  final WindowRlPolicy rlPolicy;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -65,9 +82,22 @@ class _GameShellState extends State<GameShell> {
   OnlineRoom? _room;
   int _hostVersion = 0;
   bool _busy = false;
-  final WindowRlPolicy _rlPolicy = WindowRlPolicy();
+  late final WindowRlPolicy _rlPolicy;
   AiMoveProposal? _proposal;
   bool _proposing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rlPolicy = widget.rlPolicy;
+    // Refresh the advisor subtitle once startup loading has settled.
+    unawaited(_refreshPolicyAvailability());
+  }
+
+  Future<void> _refreshPolicyAvailability() async {
+    await _rlPolicy.preload();
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {

@@ -62,6 +62,15 @@ void main() {
       }
     });
 
+    test('can preload the model before a proposal is requested', () async {
+      final WindowRlPolicy policy = WindowRlPolicy();
+      await policy.preload();
+      expect(
+        policy.availabilityMessage,
+        isNot(contains('will load when you request a proposal')),
+      );
+    });
+
     test('reserves a policy action for ending a legal turn', () {
       const PolicyAction pass = PolicyAction.pass();
       expect(pass.isPass, isTrue);

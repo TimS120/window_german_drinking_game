@@ -2,25 +2,26 @@
   "seed": 42,
   "algorithm": {
     "name": "RecurrentMaskedPPO",
-    "total_timesteps": 67108864,
+    "total_timesteps": 201326592,
     "rollout_steps": 65536,
-    "learning_rate": 0.0003,
-    "final_learning_rate": 0.00003,
+    "learning_rate": 0.0001,
+    "final_learning_rate": 0.00001,
     "gamma": 0.999,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
-    "entropy_coefficient": 0.01,
+    "entropy_coefficient": 0.02,
+    "target_kl": 0.015,
     "value_coefficient": 0.5,
     "max_grad_norm": 0.5,
-    "update_epochs": 4,
-    "minibatch_size": 16384,
-    "hidden_size": 256
+    "update_epochs": 2,
+    "minibatch_size": 2048,
+    "hidden_size": 384
   },
   "environment": {
     "max_steps": 1000,
     "parallel_environments": 4096,
     "player_count": 4,
-    "history_length": 16
+    "history_length": 32
   },
   "reward": {
     "correct_guess": 1.0,
@@ -32,9 +33,13 @@
     "save_every_timesteps": 1048576
   },
   "evaluation": {
-    "episodes": 512,
+    "episodes_per_seed": 256,
+    "seeds": [20260929, 20260930],
     "every_timesteps": 1048576,
     "deterministic": true
+  },
+  "early_stopping": {
+    "patience_evaluations": 20
   },
   "output": {
     "base_dir": "runs"

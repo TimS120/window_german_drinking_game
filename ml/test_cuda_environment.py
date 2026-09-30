@@ -13,6 +13,18 @@ REWARD = {"correct_guess": 1.0, "wrong_drink": -1.0, "pass": 0.0, "complete_game
 
 
 class BatchedWindowEnvTest(unittest.TestCase):
+    def test_configurable_history_window_remains_on_device(self) -> None:
+        env = BatchedWindowEnv(
+            REWARD,
+            num_envs=2,
+            max_steps=100,
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            seed=13,
+            history_length=32,
+        )
+        self.assertEqual(env.history_observation().shape, (2, 32, HISTORY_FEATURE_SIZE))
+        self.assertEqual(env.history_observation().device.type, env.device.type)
+
     def test_competitive_gae_rotates_values_across_a_pass(self) -> None:
         # At t=1, player one receives a drink caused by player zero's action.
         # The pass means head three at t=1 is player zero's physical critic.

@@ -235,9 +235,15 @@ class WindowRlPolicy {
   final OnnxRuntime _runtime;
   OrtSession? _session;
   bool _loadTried = false;
+  Future<void>? _loadFuture;
   bool _modelIsTrained = false;
   int _historyLength = WindowRlContract.defaultHistoryLength;
   String? _inferenceError;
+
+  /// Starts model initialization during app startup. Calls share one future,
+  /// so an early proposal waits for the same loading work instead of falling
+  /// back while a session is still being created.
+  Future<void> preload() => _ensureSession();
 
   Future<AiMoveProposal?> propose(WindowGameEngine game) async {
     final List<PolicyAction> actions = WindowRlCodec.validActions(game);
@@ -310,6 +316,9 @@ class WindowRlPolicy {
     if (!_loadTried) {
       return 'Bundled ONNX test model will load when you request a proposal.';
     }
+    if (_loadFuture != null && _session == null) {
+      return 'Loading bundled ONNX model…';
+    }
     return 'Model unavailable; using the pure-statistics fallback.';
   }
 
@@ -325,8 +334,9 @@ class WindowRlPolicy {
     );
   }
 
-  Future<void> _ensureSession() async {
-    if (_loadTried) return;
+  Future<void> _ensureSession() => _loadFuture ??= _loadSession();
+
+  Future<void> _loadSession() async {
     _loadTried = true;
     try {
       await rootBundle.load(WindowRlContract.modelAsset);
@@ -352,7 +362,9 @@ class WindowRlPolicy {
         _runtime,
         WindowRlContract.modelAsset,
       );
-    } catch (_) {}
+    } catch (error) {
+      _inferenceError = '$error';
+    }
   }
 
   static AiMoveProposal statisticsProposal(

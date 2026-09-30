@@ -15,11 +15,11 @@ from xml.sax.saxutils import escape
 
 
 WIDTH = 1280
-HEIGHT = 980
+HEIGHT = 1170
 LEFT = 90
 RIGHT = 40
-PANEL_HEIGHT = 180
-PANEL_GAP = 35
+PANEL_HEIGHT = 170
+PANEL_GAP = 30
 
 
 def _number(value: str | None) -> float | None:
@@ -137,6 +137,7 @@ def write_learning_curve(metrics_path: Path, output_path: Path, elapsed_seconds:
     evaluation_drinks = points("eval_drinks")
     completion = points("completion_rate", 100.0)
     entropy = points("entropy")
+    approximate_kl = points("approx_kl")
     elapsed = "still running" if elapsed_seconds is None else f"elapsed {elapsed_seconds / 60:.1f} min"
     body = [
         _panel(
@@ -165,6 +166,12 @@ def write_learning_curve(metrics_path: Path, output_path: Path, elapsed_seconds:
             100 + 3 * (PANEL_HEIGHT + PANEL_GAP),
             "Policy entropy — exploration diagnostic",
             [("entropy", "#d97706", entropy, 3.0)],
+            x_max,
+        ),
+        _panel(
+            100 + 4 * (PANEL_HEIGHT + PANEL_GAP),
+            "PPO approximate KL — update stability diagnostic",
+            [("KL", "#7c3aed", approximate_kl, 3.0)],
             x_max,
         ),
     ]

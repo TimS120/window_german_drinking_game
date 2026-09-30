@@ -53,6 +53,7 @@ def write_training_summary(
     total_timesteps: int,
     device: torch.device,
     compiled: bool,
+    stopped_early: bool = False,
 ) -> None:
     """Persist current status and an easily readable elapsed duration."""
     payload = {
@@ -66,6 +67,7 @@ def write_training_summary(
         "progress": timesteps / total_timesteps if total_timesteps else 0.0,
         "device": str(device),
         "torch_compile": compiled,
+        "stopped_early": stopped_early,
         "learning_curve": "learning_curve.svg",
     }
     temporary = path.with_suffix(".json.tmp")
@@ -96,6 +98,22 @@ def evaluate(model: WindowPolicyValueNet, config: dict, episodes: int, seed: int
         env.reset(done.nonzero(as_tuple=False).squeeze(1))
     model.train()
     return {"eval_reward": scalar(rewards.mean()), "eval_drinks": scalar(drinks.mean()), "completion_rate": scalar(completed.float().mean())}
+
+
+def evaluate_held_out(model: WindowPolicyValueNet, config: dict, device: torch.device) -> dict:
+    """Evaluate on the same independent board sets at every checkpoint.
+
+    Fixed held-out seeds make comparisons meaningful: a model is no longer
+    selected merely because it happened to receive easier shuffled decks.
+    """
+    evaluation = config["evaluation"]
+    seeds = [int(seed) for seed in evaluation.get("seeds", [config["seed"]])]
+    episodes = int(evaluation.get("episodes_per_seed", evaluation.get("episodes", 128)))
+    results = [evaluate(model, config, episodes, seed, device) for seed in seeds]
+    return {
+        metric: sum(float(result[metric]) for result in results) / len(results)
+        for metric in results[0]
+    }
 
 
 def save_checkpoint(path: Path, model: WindowPolicyValueNet, config: dict, timesteps: int, device: torch.device) -> None:
@@ -213,6 +231,8 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
     learning_curve_path = run_dir / "learning_curve.svg"
     summary_path = run_dir / "training_summary.json"
     best_selection = (-1.0, float("-inf"))
+    evaluations_without_improvement = 0
+    stopped_early = False
     started_at = datetime.now(timezone.utc).isoformat()
     started_clock = time.perf_counter()
     total_timesteps = int(algo["total_timesteps"])
@@ -228,7 +248,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
     )
 
     with metrics_path.open("w", newline="", encoding="utf-8") as metrics_file:
-        fields = ("timesteps", "learning_rate", "mean_reward", "mean_drinks", "policy_loss", "value_loss", "entropy", "eval_reward", "eval_drinks", "completion_rate")
+        fields = ("timesteps", "learning_rate", "mean_reward", "mean_drinks", "policy_loss", "value_loss", "entropy", "approx_kl", "eval_reward", "eval_drinks", "completion_rate")
         writer = csv.DictWriter(metrics_file, fieldnames=fields)
         writer.writeheader()
         write_learning_curve(metrics_path, learning_curve_path, 0)
@@ -290,14 +310,17 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
             actions_tensor, old_log_probs = torch.stack(actions).flatten(), torch.stack(log_probs).flatten()
             returns_tensor, advantages_tensor = returns.flatten(), advantages.flatten()
             relative_returns_tensor = relative_returns.flatten(0, 1)
-            losses: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+            losses: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = []
+            target_kl = float(algo.get("target_kl", 0.0))
+            stop_update = False
             for _ in range(algo["update_epochs"]):
                 indices = torch.randperm(rollout_steps, device=device)
                 for start in range(0, rollout_steps, algo["minibatch_size"]):
                     index = indices[start : start + algo["minibatch_size"]]
                     logits, value = model(observations_tensor[index])
                     distribution = masked_distribution(logits, masks_tensor[index])
-                    ratio = (distribution.log_prob(actions_tensor[index]) - old_log_probs[index]).exp()
+                    log_ratio = distribution.log_prob(actions_tensor[index]) - old_log_probs[index]
+                    ratio = log_ratio.exp()
                     clipped = ratio.clamp(1 - algo["clip_range"], 1 + algo["clip_range"])
                     policy_loss = -torch.minimum(ratio * advantages_tensor[index], clipped * advantages_tensor[index]).mean()
                     value_loss = nn.functional.smooth_l1_loss(
@@ -310,13 +333,19 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                     loss.backward()
                     nn.utils.clip_grad_norm_(model.parameters(), algo["max_grad_norm"])
                     optimizer.step()
-                    losses.append((policy_loss.detach(), value_loss.detach(), entropy.detach()))
+                    approximate_kl = ((ratio - 1) - log_ratio).mean()
+                    losses.append((policy_loss.detach(), value_loss.detach(), entropy.detach(), approximate_kl.detach()))
+                    if target_kl > 0 and scalar(approximate_kl) > target_kl:
+                        stop_update = True
+                        break
+                if stop_update:
+                    break
             timesteps += rollout_steps
             evaluation = {}
             if timesteps % evaluation_interval == 0 or timesteps == int(algo["total_timesteps"]):
-                evaluation = evaluate(model, config, int(config["evaluation"]["episodes"]), seed + timesteps, device)
+                evaluation = evaluate_held_out(model, config, device)
             loss_values = torch.stack([torch.stack(item) for item in losses]).mean(dim=0)
-            row = {"timesteps": timesteps, "learning_rate": learning_rate, "mean_reward": scalar(torch.stack(rewards).mean()), "mean_drinks": scalar(torch.stack(drink_counts).float().mean()), "policy_loss": scalar(loss_values[0]), "value_loss": scalar(loss_values[1]), "entropy": scalar(loss_values[2]), **evaluation}
+            row = {"timesteps": timesteps, "learning_rate": learning_rate, "mean_reward": scalar(torch.stack(rewards).mean()), "mean_drinks": scalar(torch.stack(drink_counts).float().mean()), "policy_loss": scalar(loss_values[0]), "value_loss": scalar(loss_values[1]), "entropy": scalar(loss_values[2]), "approx_kl": scalar(loss_values[3]), **evaluation}
             writer.writerow(row)
             metrics_file.flush()
             elapsed_seconds = time.perf_counter() - started_clock
@@ -331,7 +360,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                 device=device,
                 compiled=compile_model,
             )
-            progress = "steps={timesteps} device={device} elapsed={elapsed}".format(
+            progress = "steps={timesteps} device={device} elapsed={elapsed} kl={approx_kl:.4f}".format(
                 device=device,
                 elapsed=human_duration(elapsed_seconds),
                 **row,
@@ -348,7 +377,15 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                 selection = (evaluation["completion_rate"], -evaluation["eval_drinks"])
                 if selection > best_selection:
                     best_selection = selection
+                    evaluations_without_improvement = 0
                     save_checkpoint(run_dir / "best_window_policy.pt", model, config, timesteps, device)
+                else:
+                    evaluations_without_improvement += 1
+                patience = int(config.get("early_stopping", {}).get("patience_evaluations", 0))
+                if patience and evaluations_without_improvement >= patience:
+                    stopped_early = True
+                    print(f"Early stopping after {evaluations_without_improvement} held-out evaluations without improvement.")
+                    break
     final = run_dir / "window_policy.pt"
     save_checkpoint(final, model, config, timesteps, device)
     elapsed_seconds = time.perf_counter() - started_clock
@@ -362,6 +399,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
         total_timesteps=total_timesteps,
         device=device,
         compiled=compile_model,
+        stopped_early=stopped_early,
     )
     print(f"Training complete: {final} ({human_duration(elapsed_seconds)})")
 
