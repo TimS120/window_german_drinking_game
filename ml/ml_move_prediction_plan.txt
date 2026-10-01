@@ -15,24 +15,13 @@ shared table total. The first implementation is single-player for simplicity rea
 The agent is advisory only. It may highlight a move but must never execute it,
 bypass a confirmation, alter a turn, or replace the Flutter rules engine.
 
-## Work-Packages scope
-
-The first agent is a feed-forward, current-state policy. It receives neither
-action history nor previous board states. This is deliberate: the deployed
-Flutter/ONNX contract is stateless, and current public information is enough
-for a valid first policy.
-
-History, recurrence, or earlier board states are future work. They require an
-explicit versioned change to the Flutter state model, ONNX interface, trainer,
-exporter, and compatibility tests. Do not add them implicitly.
-
 ## Information boundary
 
 The agent may receive only information directly visible to a player when the
 proposal is made:
 
 - the Window layout and which positions are occupied
-- which cards are face-up and their visible ranks
+- which cards are face-up and their visible ranks (with color if it is interesting)
 - which positions are face-down
 - whether the handle rule restricts selection
 - whether the player may pass
@@ -46,6 +35,7 @@ The agent must not receive, query, or turn into an explicit feature:
 - hidden-card lookup data, or handcrafted probability/statistical features
 - host-only Firebase state
 - future states and actions
+- explicitely calculated statistics which could be helpful for a guess
 
 The network may learn patterns from compliant observations during training.
 That is different from giving it privileged engineered statistics.
