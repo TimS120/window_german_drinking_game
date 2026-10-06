@@ -1,8 +1,13 @@
 {
   "format": 4,
   "actionSize": 301,
-  "historyLength": 32,
+  "historyLength": 16,
   "historyFeatureSize": 130,
   "trained": true,
+  "observationRevision": 2,
+  "trainingRewardScale": 0.01,
+  "stateValueUnits": "unscaled training reward",
+  "localActionHead": true,
+  "trainingPlayerCount": 1,
   "description": "Window recurrent policy exported from the PyTorch RecurrentMaskedPPO pipeline."
 }

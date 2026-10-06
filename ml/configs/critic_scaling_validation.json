@@ -33,7 +33,7 @@
     "complete_game": 0.0
   },
   "checkpoint": {
-    "save_every_timesteps": 524288
+    "save_every_timesteps": 1048576
   },
   "evaluation": {
     "episodes_per_seed": 128,
@@ -48,6 +48,6 @@
     "patience_evaluations": 4
   },
   "output": {
-    "base_dir": "runs"
+    "base_dir": "runs/critic_scaling_validation"
   }
 }

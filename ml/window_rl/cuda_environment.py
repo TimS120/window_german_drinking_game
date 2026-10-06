@@ -26,8 +26,8 @@ class BatchedWindowEnv:
             raise ValueError("num_envs must be at least 1")
         if not 1 <= history_length <= MAX_HISTORY_LENGTH:
             raise ValueError(f"history_length must be between 1 and {MAX_HISTORY_LENGTH}")
-        if player_count != PLAYER_COUNT:
-            raise ValueError(f"This training environment is fixed to {PLAYER_COUNT} players.")
+        if player_count not in (1, PLAYER_COUNT):
+            raise ValueError(f"player_count must be 1 or {PLAYER_COUNT}.")
         self.device = device
         self.num_envs = int(num_envs)
         self.max_steps = int(max_steps)
@@ -59,7 +59,7 @@ class BatchedWindowEnv:
         self.drinks = torch.empty(self.num_envs, dtype=torch.long, device=device)
         self.current_player = torch.empty(self.num_envs, dtype=torch.long, device=device)
         self.player_drinks = torch.empty((self.num_envs, self.player_count), dtype=torch.long, device=device)
-        self.last_player_rewards = torch.zeros((self.num_envs, self.player_count), dtype=torch.float32, device=device)
+        self.last_player_rewards = torch.zeros((self.num_envs, PLAYER_COUNT), dtype=torch.float32, device=device)
         self.last_actors = torch.zeros(self.num_envs, dtype=torch.long, device=device)
         self.history = torch.zeros((self.num_envs, self.history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32, device=device)
         self.reset()
@@ -98,7 +98,7 @@ class BatchedWindowEnv:
 
     def observation(self) -> torch.Tensor:
         shown = self.face_up & self.layout
-        rank = torch.where(shown, self.cards.clamp_min(0).to(torch.float32).div(32.0), -torch.ones((), device=self.device))
+        rank = torch.where(shown, self.cards.clamp_min(0).div(4, rounding_mode="floor").to(torch.float32).div(8.0), -torch.ones((), device=self.device))
         cells = torch.stack((self.layout.expand(self.num_envs, -1, -1).to(torch.float32), shown.to(torch.float32), rank), dim=-1).flatten(1)
         globals_ = torch.stack((
             self.must_select_adjacent.to(torch.float32),
@@ -129,13 +129,21 @@ class BatchedWindowEnv:
             return
         record = torch.zeros((indices.numel(), HISTORY_FEATURE_SIZE), dtype=torch.float32, device=self.device)
         record[:, :BOARD_FEATURE_SIZE] = self._public_cards()[indices]
-        flags_start = BOARD_FEATURE_SIZE + ACTION_FEATURE_SIZE + OUTCOME_FEATURE_SIZE + REMOVED_FEATURE_SIZE
+        removed_start = BOARD_FEATURE_SIZE + ACTION_FEATURE_SIZE + OUTCOME_FEATURE_SIZE
+        # Match Flutter: absent cards use -1 (playable) / -2 (no slot),
+        # including the empty removal board of the current decision record.
+        empty_cards = torch.full_like(self.cards, -1)
+        record[:, removed_start : removed_start + REMOVED_FEATURE_SIZE] = self._public_cards(empty_cards, empty_cards >= 0)[indices]
+        flags_start = removed_start + REMOVED_FEATURE_SIZE
         record[:, flags_start] = self.must_select_adjacent[indices].to(torch.float32)
         record[:, flags_start + 1] = self.turn_can_end[indices].to(torch.float32)
         self.history[indices, -1] = record
 
     def history_observation(self) -> torch.Tensor:
-        return self.history
+        # PPO must retain the pre-action input. Finishing an event and resetting
+        # environments mutate history; a borrowed view leaks action/outcome
+        # labels into the later policy update and breaks its likelihood ratio.
+        return self.history.clone()
 
     def _finish_history_event(self, actions: torch.Tensor, correct: torch.Tensor, wrong: torch.Tensor, is_pass: torch.Tensor, removed_cards: torch.Tensor) -> None:
         action_start = BOARD_FEATURE_SIZE
@@ -315,7 +323,7 @@ class BatchedWindowEnv:
         if self.player_count > 1:
             other_players = torch.arange(self.player_count, device=self.device)[None, :] != acting_player[:, None]
             self.player_drinks += (same_correct[:, None] & other_players).to(torch.long)
-            self.last_player_rewards -= (same_correct[:, None] & other_players).to(torch.float32)
+            self.last_player_rewards += (same_correct[:, None] & other_players).to(torch.float32) * self.wrong_reward
         self.last_player_rewards[batch, acting_player] += reward
         handle_removed = removed[:, HANDLE[0], HANDLE[1]]
         self.must_select_adjacent[wrong] = handle_removed[wrong]

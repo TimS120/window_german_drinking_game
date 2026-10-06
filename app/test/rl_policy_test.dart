@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/game_engine.dart';
 import 'package:window_game/game_state_codec.dart';
@@ -5,6 +8,47 @@ import 'package:window_game/rl_policy.dart';
 
 void main() {
   group('Window RL contract', () {
+    test(
+      'matches Python histories and masks across events, wrapping and reset',
+      () {
+        final List<dynamic> fixtures = jsonDecode(
+          File('../ml/fixtures/recurrent_contract.json').readAsStringSync(),
+        ) as List<dynamic>;
+        for (final dynamic fixture in fixtures) {
+          final WindowGameEngine game = WindowGameEngine.fromState(
+            GameStateCodec.decode(
+              Map<Object?, Object?>.from(fixture['state'] as Map),
+            ),
+          );
+          final List<double> actual = WindowRlCodec.encodeHistory(
+            game,
+            historyLength: fixture['historyLength'] as int,
+          );
+          final List<dynamic> expected = fixture['history'] as List<dynamic>;
+          expect(
+            actual.length,
+            expected.length,
+            reason: fixture['name'] as String,
+          );
+          for (int index = 0; index < actual.length; index++) {
+            expect(
+              actual[index],
+              closeTo((expected[index] as num).toDouble(), 1e-6),
+              reason: '${fixture['name']} feature $index',
+            );
+          }
+          expect(
+            WindowRlCodec.validActions(game)
+                .map((action) => action.index)
+                .toList()
+              ..sort(),
+            fixture['legalActions'],
+            reason: fixture['name'] as String,
+          );
+        }
+      },
+    );
+
     test('encodes the fixed recurrent history size', () {
       final WindowGameEngine game = WindowGameEngine(<String>['Ada'], seed: 1);
       expect(
@@ -35,10 +79,10 @@ void main() {
     });
 
     test('restoring serialized state preserves recurrent public history', () {
-      final WindowGameEngine game = WindowGameEngine(
-        <String>['Ada', 'Ben'],
-        seed: 9,
-      );
+      final WindowGameEngine game = WindowGameEngine(<String>[
+        'Ada',
+        'Ben',
+      ], seed: 9);
       final Position position = game.validSelectablePositions().first;
       final GuessOption option = game.getValidOptionsForCard(position).first;
       game.applyGuess(position, option, option.guesses.first);
@@ -46,8 +90,13 @@ void main() {
       final GameState restoredState = GameStateCodec.decode(
         Map<Object?, Object?>.from(GameStateCodec.encode(game.exportState())),
       );
-      final WindowGameEngine restored = WindowGameEngine.fromState(restoredState);
-      expect(WindowRlCodec.encodeHistory(restored), WindowRlCodec.encodeHistory(game));
+      final WindowGameEngine restored = WindowGameEngine.fromState(
+        restoredState,
+      );
+      expect(
+        WindowRlCodec.encodeHistory(restored),
+        WindowRlCodec.encodeHistory(game),
+      );
     });
 
     test('only emits valid action indices', () {

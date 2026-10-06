@@ -17,21 +17,22 @@ from window_rl.model import WindowPolicyValueNet
 class DeploymentPolicy(nn.Module):
     """Keep the Flutter value output scalar while training uses four critics."""
 
-    def __init__(self, model: WindowPolicyValueNet) -> None:
+    def __init__(self, model: WindowPolicyValueNet, reward_scale: float = 1.0) -> None:
         super().__init__()
         self.model = model
+        self.reward_scale = reward_scale
 
     def forward(self, history: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         logits, relative_values = self.model(history)
         # Head zero is always the player currently making the proposal.
-        return logits, relative_values[:, :1]
+        return logits, relative_values[:, :1] / self.reward_scale
 
 
 def load_checkpoint(path: Path) -> tuple[WindowPolicyValueNet, dict]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
     if payload.get("format") != CHECKPOINT_FORMAT:
         raise ValueError("Unsupported checkpoint format; retrain/export with this pipeline.")
-    model = WindowPolicyValueNet(hidden_size=payload["hidden_size"])
+    model = WindowPolicyValueNet(hidden_size=payload["hidden_size"], local_action_head=bool(payload.get("local_action_head", False)))
     model.load_state_dict(payload["model_state_dict"])
     if model.policy.out_features != ACTION_SIZE:
         raise ValueError(
@@ -58,7 +59,7 @@ def main() -> None:
         raise ValueError(f"Checkpoint history_length must be between 1 and {MAX_HISTORY_LENGTH}.")
     history = torch.zeros((1, history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32)
     torch.onnx.export(
-        DeploymentPolicy(model),
+        DeploymentPolicy(model, payload.get("training", {}).get("reward_scale", 1.0)),
         (history,),
         args.output,
         input_names=["history"],
@@ -73,6 +74,7 @@ def main() -> None:
         dynamo=False,
     )
     exported = onnx.load(args.output)
+    onnx.checker.check_model(exported, full_check=True)
     policy_output = next(
         output for output in exported.graph.output if output.name == "policy_logits"
     )
@@ -89,6 +91,11 @@ def main() -> None:
         "historyLength": history_length,
         "historyFeatureSize": HISTORY_FEATURE_SIZE,
         "trained": payload.get("training", {}).get("status") == "trained",
+        "observationRevision": payload.get("training", {}).get("observation_revision", 1),
+        "trainingRewardScale": payload.get("training", {}).get("reward_scale", 1.0),
+        "stateValueUnits": "unscaled training reward",
+        "localActionHead": bool(payload.get("local_action_head", False)),
+        "trainingPlayerCount": payload.get("training", {}).get("player_count", 4),
         "description": "Window recurrent policy exported from the PyTorch RecurrentMaskedPPO pipeline.",
     }
     args.output.with_suffix(".metadata.json").write_text(

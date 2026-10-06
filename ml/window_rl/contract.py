@@ -19,6 +19,7 @@ HISTORY_FEATURE_SIZE = (
 )
 HISTORY_LENGTH = 16
 MAX_HISTORY_LENGTH = 64
+# Fixed critic-head capacity; single-player training uses physical seat zero.
 PLAYER_COUNT = 4
 # Retained for the readable reference environment during the contract
 # transition; recurrent training consumes HISTORY_* tensors instead.

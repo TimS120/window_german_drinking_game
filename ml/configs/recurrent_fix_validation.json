@@ -6,7 +6,7 @@
     "rollout_steps": 16384,
     "learning_rate": 0.0003,
     "final_learning_rate": 0.0001,
-    "gamma": 0.999,
+    "gamma": 1.0,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
     "entropy_coefficient": 0.01,
@@ -15,10 +15,7 @@
     "max_grad_norm": 0.5,
     "update_epochs": 4,
     "minibatch_size": 1024,
-    "hidden_size": 128,
-    "local_action_head": true,
-    "outcome_coefficient": 0.5,
-    "reward_scale": 0.01
+    "hidden_size": 128
   },
   "environment": {
     "max_steps": 1000,
@@ -33,7 +30,7 @@
     "complete_game": 0.0
   },
   "checkpoint": {
-    "save_every_timesteps": 524288
+    "save_every_timesteps": 1048576
   },
   "evaluation": {
     "episodes_per_seed": 128,
@@ -41,13 +38,13 @@
       20260929,
       20260930
     ],
-    "every_timesteps": 524288,
+    "every_timesteps": 262144,
     "deterministic": true
   },
   "early_stopping": {
-    "patience_evaluations": 4
+    "patience_evaluations": 20
   },
   "output": {
-    "base_dir": "runs"
+    "base_dir": "runs/recurrent_fix_validation"
   }
 }
