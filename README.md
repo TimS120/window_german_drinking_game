@@ -160,6 +160,7 @@ guests still enter their names and explicitly join.
 ## Documentation
 
 - [Game rules](GAME_README.md) — setup, valid guesses, redeals, and scoring.
+- [Statistics adviser](STATISTICS_README.md) — public-history beliefs, bounded simulations, and explanations.
 - [ML development](ML_README.md) — CUDA training, evaluation, export, and
   deployment.
 - [ML agent specification](ml/ml_move_prediction_plan.txt) — target,
@@ -185,4 +186,5 @@ guests still enter their names and explicitly join.
 
 `app/assets/models/window_policy.onnx` is deliberately untrained and verifies
 only packaging and inference. Until a trained policy is exported, the app
-labels its proposal accordingly and uses a transparent heuristic fallback.
+labels its proposal accordingly. Pure statistics is independently selectable
+and also handles unavailable models or inference failures.

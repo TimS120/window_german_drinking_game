@@ -194,7 +194,8 @@ class WindowGameEngine {
     resetGame();
   }
 
-  WindowGameEngine.fromState(GameState state) : _random = Random() {
+  WindowGameEngine.fromState(GameState state, {int? seed})
+    : _random = Random(seed) {
     _players = List<String>.unmodifiable(state.players);
     restore(state);
   }
@@ -254,6 +255,27 @@ class WindowGameEngine {
     _turnStartFaceUp = countFaceUpCards();
     _incrementTurns(currentPlayer);
   }
+
+  /// Player-visible input for advisers. Never copies hidden cards or the deck.
+  GameState publicObservation() => GameState(
+    players: List<String>.from(_players),
+    currentPlayerIndex: _currentPlayerIndex,
+    turnStartFaceUp: _turnStartFaceUp,
+    deck: const <int>[],
+    cardGrid: _publicBoard(),
+    faceUp: _faceUp.map((row) => List<bool>.from(row)).toList(),
+    pendingRemovals: Set<Position>.from(_pendingRemovals),
+    pendingPenalty: _pendingPenalty,
+    mustSelectAdjacentToHandle: _mustSelectAdjacentToHandle,
+    turnCanEnd: _turnCanEnd,
+    pendingSamePosition: _pendingSamePosition,
+    stats: Map<String, PlayerStats>.from(_stats),
+    recentEvents: _recentEvents
+        .skip(max(0, _recentEvents.length - 16))
+        .toList(),
+  );
+
+  Position? get pendingSamePosition => _pendingSamePosition;
 
   GameState exportState() => GameState(
     players: List<String>.from(_players),

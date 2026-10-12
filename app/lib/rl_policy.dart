@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'game_engine.dart';
 import 'onnx_session_loader.dart';
+
+part 'statistics_advisor.dart';
 
 /// Versioned recurrent observation/action contract shared with the trainer.
 class WindowRlContract {
@@ -19,8 +22,11 @@ class WindowRlContract {
   static const int removedFeatureSize = rows * columns * cardFeatures;
   static const int flagFeatureSize = 2;
   static const int historyFeatureSize =
-      boardFeatureSize + actionFeatureSize + outcomeFeatureSize +
-      removedFeatureSize + flagFeatureSize;
+      boardFeatureSize +
+      actionFeatureSize +
+      outcomeFeatureSize +
+      removedFeatureSize +
+      flagFeatureSize;
   static const int defaultHistoryLength = 16;
   static const int maxHistoryLength = maxPublicHistoryEvents + 1;
   static const int orientations = 2;
@@ -82,12 +88,16 @@ class AiMoveProposal {
     required this.confidence,
     required this.source,
     this.valueEstimate,
+    this.explanation,
+    this.expectedDrinks,
   });
 
   final PolicyAction action;
   final double confidence;
   final String source;
   final double? valueEstimate;
+  final String? explanation;
+  final double? expectedDrinks;
 }
 
 class WindowRlCodec {
@@ -158,9 +168,11 @@ class WindowRlCodec {
       for (int column = 0; column < WindowRlContract.columns; column++) {
         final bool slot = windowLayout[row][column];
         final int? card = board[row][column];
-        result.addAll(card == null
-            ? <double>[slot ? -1 : -2, slot ? -1 : -2]
-            : <double>[(card ~/ 4) / 8, (card % 4) / 3]);
+        result.addAll(
+          card == null
+              ? <double>[slot ? -1 : -2, slot ? -1 : -2]
+              : <double>[(card ~/ 4) / 8, (card % 4) / 3],
+        );
       }
     }
     if (actionIndex < 0) {
@@ -190,23 +202,21 @@ class WindowRlCodec {
       for (int column = 0; column < WindowRlContract.columns; column++) {
         final bool slot = windowLayout[row][column];
         final int? card = removed[row][column];
-        result.addAll(card == null
-            ? <double>[slot ? -1 : -2, slot ? -1 : -2]
-            : <double>[(card ~/ 4) / 8, (card % 4) / 3]);
+        result.addAll(
+          card == null
+              ? <double>[slot ? -1 : -2, slot ? -1 : -2]
+              : <double>[(card ~/ 4) / 8, (card % 4) / 3],
+        );
       }
     }
-    result.addAll(<double>[
-      mustSelect ? 1 : 0,
-      canEnd ? 1 : 0,
-    ]);
+    result.addAll(<double>[mustSelect ? 1 : 0, canEnd ? 1 : 0]);
     assert(result.length == WindowRlContract.historyFeatureSize);
     return result;
   }
 
   static List<PolicyAction> validActions(WindowGameEngine game) {
     final List<PolicyAction> actions = <PolicyAction>[];
-    if (game.pendingRemovals.isNotEmpty ||
-        game.exportState().pendingSamePosition != null) {
+    if (game.pendingRemovals.isNotEmpty || game.pendingSamePosition != null) {
       return actions;
     }
     for (final Position position in game.validSelectablePositions()) {
@@ -250,7 +260,7 @@ class WindowRlPolicy {
     if (actions.isEmpty) return null;
     await _ensureSession();
     final OrtSession? session = _session;
-    if (session == null) return statisticsProposal(game, actions: actions);
+    if (session == null) return proposeStatistics(game);
     final OrtValue input = await OrtValue.fromList(
       WindowRlCodec.encodeHistory(game, historyLength: _historyLength),
       <int>[1, _historyLength, WindowRlContract.historyFeatureSize],
@@ -322,15 +332,17 @@ class WindowRlPolicy {
     return 'Model unavailable; using the pure-statistics fallback.';
   }
 
-  AiMoveProposal _statisticsFallback(
+  Future<AiMoveProposal> _statisticsFallback(
     WindowGameEngine game,
     List<PolicyAction> actions,
-  ) {
-    final AiMoveProposal fallback = statisticsProposal(game, actions: actions);
+  ) async {
+    final AiMoveProposal fallback = await proposeStatistics(game);
     return AiMoveProposal(
       action: fallback.action,
       confidence: fallback.confidence,
       source: 'ONNX inference failed → Pure statistics',
+      explanation: fallback.explanation,
+      expectedDrinks: fallback.expectedDrinks,
     );
   }
 
@@ -367,71 +379,30 @@ class WindowRlPolicy {
     }
   }
 
+  static Future<AiMoveProposal> proposeStatistics(WindowGameEngine game) =>
+      compute(_statisticsFromPublicState, game.publicObservation());
+
   static AiMoveProposal statisticsProposal(
     WindowGameEngine game, {
     List<PolicyAction>? actions,
-  }) {
-    final List<PolicyAction> legalActions =
-        actions ?? WindowRlCodec.validActions(game);
-    if (legalActions.isEmpty) {
-      throw StateError('No legal action can be proposed right now.');
-    }
-    final List<double> scores = legalActions
-        .map((PolicyAction action) => _estimatedSuccess(game, action))
-        .toList();
-    int bestIndex = 0;
-    for (int index = 1; index < scores.length; index++) {
-      if (scores[index] > scores[bestIndex]) bestIndex = index;
-    }
-    return AiMoveProposal(
-      action: legalActions[bestIndex],
-      confidence: scores[bestIndex],
-      source: 'Pure statistics',
-    );
-  }
+    int budgetMilliseconds = 180,
+  }) => _StatisticsAdvisor(
+    game.publicObservation(),
+    budgetMilliseconds: budgetMilliseconds,
+  ).propose(actions: actions);
 
-  static double _estimatedSuccess(WindowGameEngine game, PolicyAction action) {
-    // Ending a legal turn cannot add an immediate drink. The future trained
-    // policy will learn the longer-horizon trade-off from game rewards.
-    if (action.isPass) return 1;
-    final List<int> unseen = List<int>.filled(9, 4);
-    for (int row = 0; row < WindowRlContract.rows; row++) {
-      for (int column = 0; column < WindowRlContract.columns; column++) {
-        final Position position = Position(row, column);
-        if (!game.isValidSlot(position) || !game.isFaceUp(position)) continue;
-        final int? card = game.cardAt(position);
-        if (card != null) unseen[card ~/ 4]--;
-      }
-    }
-    final GuessOption option = game
-        .getValidOptionsForCard(action.position!)
-        .firstWhere(
-          (GuessOption value) => value.orientation == action.orientation!,
-        );
-    final int total = math.max(
-      1,
-      unseen.fold<int>(0, (int sum, int count) => sum + count),
-    );
-    int countFor(bool Function(int rank) matches) => List<int>.generate(
-      9,
-      (int rank) => rank,
-    ).where(matches).fold<int>(0, (int sum, int rank) => sum + unseen[rank]);
-    if (option.type == GuessOptionType.higherLower) {
-      final int rank = game.cardAt(option.neighbors.single)! ~/ 4;
-      return switch (action.guess!) {
-        GuessType.higher => countFor((int value) => value > rank) / total,
-        GuessType.same => unseen[rank] / total,
-        GuessType.lower => countFor((int value) => value < rank) / total,
-        _ => 0,
-      };
-    }
-    final int first = game.cardAt(option.neighbors.first)! ~/ 4;
-    final int second = game.cardAt(option.neighbors.last)! ~/ 4;
-    final int low = math.min(first, second);
-    final int high = math.max(first, second);
-    final double between =
-        countFor((int value) => value >= low && value <= high) / total;
-    return action.guess! == GuessType.inBetween ? between : 1 - between;
+  /// Public-history rank marginals for diagnostics; no state is retained.
+  static Map<Position, List<double>> statisticsRankProbabilities(
+    WindowGameEngine game,
+  ) {
+    final public = game.publicObservation();
+    final beliefs = _CardBeliefs(public, math.Random(1701));
+    return {
+      for (int r = 0; r < 5; r++)
+        for (int c = 0; c < 6; c++)
+          if (windowLayout[r][c] && !public.faceUp[r][c])
+            Position(r, c): beliefs.ranksAt(r * 6 + c),
+    };
   }
 
   double _maskedConfidence(

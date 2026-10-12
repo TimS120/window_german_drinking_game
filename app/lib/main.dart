@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart' hide Orientation;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'firebase_options.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
+import 'game_state_codec.dart';
 import 'lobby_players.dart';
 import 'rl_policy.dart';
 
@@ -408,7 +410,7 @@ class _GameShellState extends State<GameShell> {
             leading: const Icon(Icons.query_stats_outlined),
             title: const Text('Pure statistics'),
             subtitle: const Text(
-              'Choose the legal move with the best card-count probability.',
+              'Estimate your future drinks using public card history.',
             ),
             onTap: () => Navigator.pop(context, _AdvisorMethod.statistics),
           ),
@@ -416,12 +418,20 @@ class _GameShellState extends State<GameShell> {
       ),
     );
     if (!mounted || method == null) return;
+    final requestState = jsonEncode(
+      GameStateCodec.encode(game.publicObservation()),
+    );
     setState(() => _proposing = true);
     try {
       final AiMoveProposal? proposal = method == _AdvisorMethod.rlModel
           ? await _rlPolicy.propose(game)
-          : WindowRlPolicy.statisticsProposal(game);
-      if (!mounted) return;
+          : await WindowRlPolicy.proposeStatistics(game);
+      if (!mounted ||
+          !identical(game, _game) ||
+          jsonEncode(GameStateCodec.encode(game.publicObservation())) !=
+              requestState) {
+        return;
+      }
       setState(() {
         _proposal = proposal;
         _message = proposal == null
@@ -1259,10 +1269,12 @@ class _Info extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             Text(
-              '${proposal!.source} · ${proposal!.source.contains('statistics') ? 'estimated success' : 'model confidence'} ${(proposal!.confidence * 100).toStringAsFixed(0)}%'
-              '${proposal!.valueEstimate == null ? '' : ' · value ${proposal!.valueEstimate!.toStringAsFixed(2)}'}',
+              '${proposal!.source} · ${proposal!.action.isPass && proposal!.source.contains('statistics') ? 'no immediate drinks' : '${proposal!.source.contains('statistics') ? 'estimated success' : 'model confidence'} ${(proposal!.confidence * 100).toStringAsFixed(0)}%'}'
+              '${proposal!.valueEstimate == null ? '' : ' · value ${proposal!.valueEstimate!.toStringAsFixed(2)}'}'
+              '${proposal!.expectedDrinks == null ? '' : ' · estimated remaining drinks ${proposal!.expectedDrinks!.toStringAsFixed(1)}'}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (proposal!.explanation != null) Text(proposal!.explanation!),
           ],
           const Divider(height: 30),
           Text('Scoreboard', style: Theme.of(context).textTheme.titleMedium),

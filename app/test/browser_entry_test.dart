@@ -93,4 +93,44 @@ void main() {
     expect(find.text('Create online lobby'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('statistics hint displays future drinks and a short reason', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      WindowGameApp(
+        firebaseEnabled: false,
+        rlPolicy: _TestPolicy(),
+        browserGuest: false,
+      ),
+    );
+    await tester.tap(find.text('Start local game'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Propose best move'));
+    await tester.tap(find.text('Propose best move'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Pure statistics'));
+      final timer = Stopwatch()..start();
+      while (timer.elapsedMilliseconds < 5000) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await tester.pump();
+        if (find
+            .textContaining('estimated remaining drinks')
+            .evaluate()
+            .isNotEmpty) {
+          break;
+        }
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(find.textContaining('estimated remaining drinks'), findsOneWidget);
+    expect(find.textContaining('Suggestion:'), findsOneWidget);
+    expect(find.textContaining('estimated success'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 }
