@@ -5,6 +5,19 @@ import 'package:flutter/foundation.dart';
 ///
 /// Example: --dart-define=FIREBASE_API_KEY=... (see README).
 class WindowFirebaseOptions {
+  static const String _projectId = String.fromEnvironment(
+    'FIREBASE_PROJECT_ID',
+  );
+  static const String _browserUrl = String.fromEnvironment(
+    'WINDOW_BROWSER_URL',
+  );
+
+  /// Firebase Hosting's default address; custom hosting sites can override it.
+  static String? get browserUrl {
+    if (_browserUrl.isNotEmpty) return _browserUrl;
+    return _projectId.isEmpty ? null : 'https://$_projectId.web.app';
+  }
+
   static const String _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
   static const String _webApiKey = String.fromEnvironment(
     'FIREBASE_WEB_API_KEY',
@@ -19,7 +32,7 @@ class WindowFirebaseOptions {
   static WindowFirebaseRestOptions? get windowsRestOptions {
     final String apiKey = kIsWeb && _webApiKey.isNotEmpty
         ? _webApiKey
-        : _apiKey;
+        : (_apiKey.isNotEmpty ? _apiKey : _webApiKey);
     if (apiKey.isEmpty || _databaseUrl.isEmpty) return null;
     return WindowFirebaseRestOptions(apiKey: apiKey, databaseUrl: _databaseUrl);
   }

@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.6.0
+  web: ^1.1.1
   flutter_onnxruntime: ^1.8.5
 
 

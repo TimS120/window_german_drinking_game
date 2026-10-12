@@ -5,25 +5,31 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 import 'firebase_options.dart';
+import 'firebase_events.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
 import 'game_state_codec.dart';
 
-/// Firebase Auth and Realtime Database transport for native Windows.
+/// Firebase HTTPS transport shared by installed apps and browser guests.
 ///
 /// It deliberately uses Firebase's documented HTTPS endpoints rather than
 /// the FlutterFire Windows plugins. This avoids their platform-thread
 /// callbacks while retaining anonymous auth and the existing database rules.
 class WindowsFirebaseRestRoomRepository {
-  WindowsFirebaseRestRoomRepository({WindowFirebaseRestOptions? options})
-    : _options = options ?? WindowFirebaseOptions.windowsRestOptions!,
-      _client = http.Client();
+  WindowsFirebaseRestRoomRepository({
+    WindowFirebaseRestOptions? options,
+    http.Client? client,
+    this.eventOpener,
+  }) : _options = options ?? WindowFirebaseOptions.windowsRestOptions!,
+       _client = client ?? http.Client();
 
   final WindowFirebaseRestOptions _options;
   final http.Client _client;
+  final FirebaseEventOpener? eventOpener;
   final Random _random = Random.secure();
   String? _uid;
   String? _idToken;
+  String? _refreshToken;
 
   String get uid {
     final String? currentUid = _uid;
@@ -48,15 +54,24 @@ class WindowsFirebaseRestRoomRepository {
     final Map<String, dynamic> result = Map<String, dynamic>.from(response);
     _uid = result['localId'] as String?;
     _idToken = result['idToken'] as String?;
+    _refreshToken = result['refreshToken'] as String?;
     if (_uid == null || _idToken == null) {
       throw StateError('Firebase did not return an anonymous identity.');
     }
     return _uid!;
   }
 
-  Stream<OnlineRoom?> observeRoom(
-    String roomCode,
-  ) => _poll<OnlineRoom?>(() async {
+  Stream<OnlineRoom?> observeRoom(String roomCode) =>
+      _watch('rooms/${roomCode.toUpperCase()}/public').map(
+        (value) => value is Map
+            ? OnlineRoom.fromJson(
+                roomCode.toUpperCase(),
+                Map<String, dynamic>.from(value),
+              )
+            : null,
+      );
+
+  Future<OnlineRoom?> loadRoom(String roomCode) async {
     final Object? value = await _read('rooms/${roomCode.toUpperCase()}/public');
     return value is Map
         ? OnlineRoom.fromJson(
@@ -64,50 +79,23 @@ class WindowsFirebaseRestRoomRepository {
             Map<String, dynamic>.from(value),
           )
         : null;
-  }, (OnlineRoom? room) => room == null ? 'null' : jsonEncode(room.toJson()));
+  }
 
   Stream<RoomRequest> observeRequests(String roomCode) {
-    final Set<String> emitted = <String>{};
-    late StreamController<RoomRequest> controller;
-    Timer? timer;
-    var running = false;
-    Future<void> poll() async {
-      if (running || controller.isClosed) return;
-      running = true;
-      try {
-        final Object? value = await _read(
-          'rooms/${roomCode.toUpperCase()}/requests',
-        );
-        if (value is Map) {
-          for (final MapEntry<dynamic, dynamic> entry in value.entries) {
-            final String id = '${entry.key}';
-            if (!emitted.add(id) || entry.value is! Map) continue;
-            controller.add(
-              RoomRequest.fromJson(
-                id,
-                Map<String, dynamic>.from(entry.value as Map),
-              ),
-            );
-          }
-        }
-      } catch (error, stackTrace) {
-        controller.addError(error, stackTrace);
-      } finally {
-        running = false;
-      }
-    }
-
-    controller = StreamController<RoomRequest>(
-      onListen: () {
-        unawaited(poll());
-        timer = Timer.periodic(
-          const Duration(milliseconds: 700),
-          (_) => unawaited(poll()),
-        );
-      },
-      onCancel: () => timer?.cancel(),
-    );
-    return controller.stream;
+    final emitted = <String>{};
+    return _watch('rooms/${roomCode.toUpperCase()}/requests').expand((value) {
+      if (value is! Map) return <RoomRequest>[];
+      emitted.removeWhere((id) => !value.containsKey(id));
+      return value.entries
+          .where((entry) => entry.value is Map && emitted.add('${entry.key}'))
+          .map(
+            (entry) => RoomRequest.fromJson(
+              '${entry.key}',
+              Map<String, dynamic>.from(entry.value as Map),
+            ),
+          )
+          .toList();
+    });
   }
 
   Future<GameState?> loadPrivateState(String roomCode) async {
@@ -153,10 +141,12 @@ class WindowsFirebaseRestRoomRepository {
   Future<void> requestLobbyJoin({
     required String roomCode,
     required String seatName,
+    List<String> seatNames = const <String>[],
   }) => _addRequest(roomCode, <String, dynamic>{
     'uid': uid,
     'type': 'joinLobby',
     'seatName': seatName,
+    if (seatNames.isNotEmpty) 'seatNames': seatNames,
     'expectedVersion': -1,
     'createdAt': <String, String>{'.sv': 'timestamp'},
   });
@@ -182,18 +172,16 @@ class WindowsFirebaseRestRoomRepository {
     required bool started,
   }) async {
     final String code = roomCode.toUpperCase();
-    await _write('PUT', 'rooms/$code/private', GameStateCodec.encode(state));
-    await _write(
-      'PUT',
-      'rooms/$code/public',
-      _publicRoom(
+    await _write('PATCH', 'rooms/$code', <String, dynamic>{
+      'private': GameStateCodec.encode(state),
+      'public': _publicRoom(
         hostUid: hostUid,
         version: version,
         seats: seats,
         state: state,
         started: started,
       ),
-    );
+    });
   }
 
   Future<void> deleteRequest(String roomCode, String requestId) => _write(
@@ -202,42 +190,28 @@ class WindowsFirebaseRestRoomRepository {
     null,
   );
 
-  Stream<T> _poll<T>(
-    Future<T> Function() load,
-    String Function(T) fingerprint,
-  ) {
-    late StreamController<T> controller;
-    Timer? timer;
-    var running = false;
-    String? previous;
-    Future<void> poll() async {
-      if (running || controller.isClosed) return;
-      running = true;
-      try {
-        final T value = await load();
-        final String current = fingerprint(value);
-        if (current != previous) {
-          previous = current;
-          controller.add(value);
-        }
-      } catch (error, stackTrace) {
-        controller.addError(error, stackTrace);
-      } finally {
-        running = false;
-      }
-    }
+  Stream<Object?> _watch(String path) => watchFirebase(
+    () => _databaseUri(path),
+    open: eventOpener,
+    refreshAuth: _refreshAuth,
+  );
 
-    controller = StreamController<T>(
-      onListen: () {
-        unawaited(poll());
-        timer = Timer.periodic(
-          const Duration(milliseconds: 700),
-          (_) => unawaited(poll()),
-        );
-      },
-      onCancel: () => timer?.cancel(),
+  Future<void> _refreshAuth() async {
+    if (_refreshToken == null) {
+      throw StateError('Please rejoin the room.');
+    }
+    final response = await _client.post(
+      Uri.https('securetoken.googleapis.com', '/v1/token', {
+        'key': _options.apiKey,
+      }),
+      body: {'grant_type': 'refresh_token', 'refresh_token': _refreshToken!},
     );
-    return controller.stream;
+    if (response.statusCode != 200) {
+      throw StateError('Firebase sign-in expired. Please rejoin.');
+    }
+    final value = jsonDecode(response.body) as Map<String, dynamic>;
+    _idToken = value['id_token'] as String;
+    _refreshToken = value['refresh_token'] as String;
   }
 
   Future<void> _addRequest(String roomCode, Map<String, dynamic> value) async {
@@ -317,6 +291,7 @@ class WindowsFirebaseRestRoomRepository {
     'version': version,
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
     'started': started,
+    'deckSize': state.deck.length,
     'state': _publicState(state),
   };
 

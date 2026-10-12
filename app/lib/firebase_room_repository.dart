@@ -29,6 +29,7 @@ class OnlineRoom {
     required this.state,
     required this.seats,
     required this.started,
+    this.deckSize,
   });
 
   final String code;
@@ -37,6 +38,9 @@ class OnlineRoom {
   final GameState state;
   final List<RoomSeat> seats;
   final bool started;
+
+  /// Public count only; guests never receive the cards remaining in the deck.
+  final int? deckSize;
 
   factory OnlineRoom.fromJson(String code, Map<String, dynamic> raw) {
     final Object? rawSeats = raw['seats'];
@@ -58,6 +62,7 @@ class OnlineRoom {
       ),
       seats: seats,
       started: raw['started'] != false,
+      deckSize: (raw['deckSize'] as num?)?.toInt(),
     );
   }
 
@@ -68,6 +73,7 @@ class OnlineRoom {
     'state': GameStateCodec.encode(state),
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
     'started': started,
+    'deckSize': deckSize,
   };
 }
 
@@ -79,6 +85,7 @@ class RoomRequest {
     required this.action,
     required this.expectedVersion,
     this.seatName,
+    this.seatNames = const <String>[],
   });
 
   final String id;
@@ -87,6 +94,11 @@ class RoomRequest {
   final Map<String, dynamic> action;
   final int expectedVersion;
   final String? seatName;
+  final List<String> seatNames;
+
+  List<String> get requestedNames => seatNames.isNotEmpty
+      ? seatNames
+      : <String>[if (seatName != null) seatName!.trim()];
 
   factory RoomRequest.fromJson(String id, Map<String, dynamic> raw) {
     final Object? rawAction = raw['action'];
@@ -101,6 +113,9 @@ class RoomRequest {
           : <String, dynamic>{},
       expectedVersion: (raw['expectedVersion'] as num?)?.toInt() ?? -1,
       seatName: raw['seatName'] as String?,
+      seatNames:
+          (raw['seatNames'] as List?)?.whereType<String>().toList() ??
+          const <String>[],
     );
   }
 }
@@ -117,6 +132,7 @@ class FirebaseRoomRepository {
   String get uid => _rest.uid;
   Stream<OnlineRoom?> observeRoom(String roomCode) =>
       _rest.observeRoom(roomCode);
+  Future<OnlineRoom?> loadRoom(String roomCode) => _rest.loadRoom(roomCode);
   Stream<RoomRequest> observeRequests(String roomCode) =>
       _rest.observeRequests(roomCode);
   Future<GameState?> loadPrivateState(String roomCode) =>
@@ -128,7 +144,12 @@ class FirebaseRoomRepository {
   Future<void> requestLobbyJoin({
     required String roomCode,
     required String seatName,
-  }) => _rest.requestLobbyJoin(roomCode: roomCode, seatName: seatName);
+    List<String> seatNames = const <String>[],
+  }) => _rest.requestLobbyJoin(
+    roomCode: roomCode,
+    seatName: seatName,
+    seatNames: seatNames,
+  );
   Future<void> requestAction({
     required String roomCode,
     required int expectedVersion,

@@ -2,10 +2,13 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide Orientation;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import 'firebase_options.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
+import 'lobby_players.dart';
 import 'rl_policy.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
@@ -25,9 +28,7 @@ Future<void> main() async {
   // responsive while assets/runtime initialize, and a proposal shares this
   // future instead of triggering a second, late load.
   unawaited(rlPolicy.preload());
-  runApp(
-    WindowGameApp(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy),
-  );
+  runApp(WindowGameApp(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy));
 }
 
 class WindowGameApp extends StatelessWidget {
@@ -35,9 +36,11 @@ class WindowGameApp extends StatelessWidget {
     super.key,
     required this.firebaseEnabled,
     required this.rlPolicy,
+    this.browserGuest = kIsWeb,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
+  final bool browserGuest;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Window',
@@ -51,7 +54,11 @@ class WindowGameApp extends StatelessWidget {
       scaffoldBackgroundColor: const Color(0xFF0F381C),
       useMaterial3: true,
     ),
-    home: GameShell(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy),
+    home: GameShell(
+      firebaseEnabled: firebaseEnabled,
+      rlPolicy: rlPolicy,
+      browserGuest: browserGuest,
+    ),
   );
 }
 
@@ -60,9 +67,13 @@ class GameShell extends StatefulWidget {
     super.key,
     required this.firebaseEnabled,
     required this.rlPolicy,
+    this.browserGuest = kIsWeb,
+    this.initialRoomCode,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
+  final bool browserGuest;
+  final String? initialRoomCode;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -85,11 +96,21 @@ class _GameShellState extends State<GameShell> {
   late final WindowRlPolicy _rlPolicy;
   AiMoveProposal? _proposal;
   bool _proposing = false;
+  Future<void> _hostRequestQueue = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
     _rlPolicy = widget.rlPolicy;
+    if (widget.browserGuest) {
+      _roomCode.text =
+          (widget.initialRoomCode ?? Uri.base.queryParameters['room'] ?? '')
+              .trim()
+              .toUpperCase();
+      _message = widget.firebaseEnabled
+          ? 'Enter the room code shared by your host and your player names.'
+          : 'Browser joining is unavailable: this build has no Firebase configuration.';
+    }
     // Refresh the advisor subtitle once startup loading has settled.
     unawaited(_refreshPolicyAvailability());
   }
@@ -110,6 +131,7 @@ class _GameShellState extends State<GameShell> {
   }
 
   void _start() {
+    if (widget.browserGuest) return;
     final List<String> names = _players.text
         .split(',')
         .map((String name) => name.trim())
@@ -130,6 +152,7 @@ class _GameShellState extends State<GameShell> {
       .toList();
 
   Future<void> _createRoom() async {
+    if (widget.browserGuest) return;
     if (!widget.firebaseEnabled) {
       setState(
         () => _message = 'Firebase is not configured for this build yet.',
@@ -179,27 +202,66 @@ class _GameShellState extends State<GameShell> {
     }
     try {
       setState(() => _busy = true);
+      final String code = _roomCode.text.trim().toUpperCase();
+      if (!RegExp(r'^[A-HJ-NP-Z2-9]{6}$').hasMatch(code)) {
+        throw StateError(
+          'Enter the six-character room code shared by your host.',
+        );
+      }
+      final List<String> names = parseLobbyPlayers(_seatName.text);
       final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
       await rooms.signInAnonymously();
-      final String code = _roomCode.text.trim().toUpperCase();
-      final String seatName = _seatName.text.trim();
-      if (code.isEmpty || seatName.isEmpty) {
-        setState(() {
-          _busy = false;
-          _message = 'Enter both the room code and your player name.';
-        });
-        return;
+      final OnlineRoom? lobby = await rooms.loadRoom(code);
+      if (!mounted) return;
+      if (lobby == null) {
+        throw StateError('Room not found. Check the room code.');
+      }
+      final bool alreadyJoined = lobby.seats.any(
+        (RoomSeat seat) => seat.ownerUid == rooms.uid,
+      );
+      if (!alreadyJoined) {
+        addLobbyPlayers(lobby, rooms.uid, names);
+        await rooms.requestLobbyJoin(
+          roomCode: code,
+          seatName: names.first,
+          seatNames: names,
+        );
+        if (!mounted) return;
+        setState(
+          () => _message = 'Waiting for the host to accept your player names…',
+        );
+        await rooms
+            .observeRoom(code)
+            .timeout(
+              const Duration(seconds: 20),
+              onTimeout: (sink) {
+                sink.addError(
+                  StateError(
+                    'The host did not respond. Ask them to keep the lobby open, then try again.',
+                  ),
+                );
+                sink.close();
+              },
+            )
+            .firstWhere((current) {
+              if (current == null) {
+                throw StateError('This room is no longer available.');
+              }
+              if (current.seats.any((seat) => seat.ownerUid == rooms.uid)) {
+                return true;
+              }
+              addLobbyPlayers(current, rooms.uid, names);
+              return false;
+            });
+        if (!mounted) return;
       }
       await _watchRoom(code);
-      await rooms.requestLobbyJoin(roomCode: code, seatName: seatName);
-      if (mounted) {
-        setState(() => _message = 'Join request sent. Waiting for the lobby.');
-      }
     } catch (error) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message = 'Could not join room: $error';
+          _message =
+              'Could not join room: ${error is StateError ? error.message : error}';
         });
       }
     }
@@ -213,6 +275,7 @@ class _GameShellState extends State<GameShell> {
           (OnlineRoom? room) {
             if (!mounted || room == null) return;
             final bool isHost = room.hostUid == _rooms?.uid;
+            if (isHost && room.version < _hostVersion) return;
             setState(() {
               _room = room;
               _hostVersion = isHost
@@ -252,7 +315,9 @@ class _GameShellState extends State<GameShell> {
       _requestRoomCode = null;
       _hostVersion = 0;
       _busy = false;
-      _message = 'Choose player names to begin a local game.';
+      _message = widget.browserGuest
+          ? 'Enter a room code and your player names to join.'
+          : 'Choose player names to begin a local game.';
     });
   }
 
@@ -301,7 +366,7 @@ class _GameShellState extends State<GameShell> {
         _message = 'Submitting move…';
       });
       if (_isHost) {
-        await _applyHostAction(action);
+        await _queueHostOperation(() => _applyHostAction(action));
       } else {
         await _rooms!.requestAction(
           roomCode: room.code,
@@ -390,6 +455,16 @@ class _GameShellState extends State<GameShell> {
     }
   }
 
+  Future<void> _queueHostOperation(Future<void> Function() action) {
+    final Future<void> operation = _hostRequestQueue.then((_) => action());
+    _hostRequestQueue = operation.catchError((Object error) {
+      if (mounted) {
+        setState(() => _message = 'Room request failed: $error');
+      }
+    });
+    return operation;
+  }
+
   void _watchRequests(String code) {
     if (_requestRoomCode == code && _requestSubscription != null) return;
     _requestSubscription?.cancel();
@@ -397,7 +472,12 @@ class _GameShellState extends State<GameShell> {
     _requestSubscription = _rooms!
         .observeRequests(code)
         .listen(
-          _processHostRequest,
+          (RoomRequest request) {
+            unawaited(
+              _queueHostOperation(() => _processHostRequest(request))
+                  .catchError((Object _) {}),
+            );
+          },
           onError: (Object error) {
             if (mounted) {
               setState(() => _message = 'Room host request error: $error');
@@ -412,24 +492,12 @@ class _GameShellState extends State<GameShell> {
     if (!_isHost || room == null || game == null) return;
     try {
       if (request.type == 'joinLobby' && !room.started) {
-        final String name = request.seatName?.trim() ?? '';
-        final bool nameTaken = room.seats.any(
-          (RoomSeat seat) => seat.name.toLowerCase() == name.toLowerCase(),
+        final List<RoomSeat> seats = addLobbyPlayers(
+          room,
+          request.uid,
+          request.requestedNames.map((String name) => name.trim()).toList(),
         );
-        final bool alreadyJoined = room.seats.any(
-          (RoomSeat seat) => seat.ownerUid == request.uid,
-        );
-        if (name.isNotEmpty && !nameTaken && !alreadyJoined) {
-          final List<RoomSeat> seats = <RoomSeat>[
-            ...room.seats,
-            RoomSeat(
-              index: room.seats.length,
-              name: name,
-              ownerUid: request.uid,
-            ),
-          ];
-          await _publishHostState(seats: seats);
-        }
+        await _publishHostState(seats: seats);
       } else if (room.started &&
           request.type == 'action' &&
           request.expectedVersion == _hostVersion &&
@@ -517,6 +585,15 @@ class _GameShellState extends State<GameShell> {
     }
     if (mounted) {
       setState(() {
+        _room = OnlineRoom(
+          code: room.code,
+          version: nextVersion,
+          hostUid: room.hostUid,
+          state: _game!.exportState(),
+          seats: seats ?? room.seats,
+          started: started ?? room.started,
+          deckSize: _game!.exportState().deck.length,
+        );
         _busy = false;
         _message = '${_game!.currentPlayer}\'s turn.';
       });
@@ -681,12 +758,10 @@ class _GameShellState extends State<GameShell> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final WindowGameEngine? game = _game;
-    if (game == null) {
-      return Scaffold(
-        body: Center(
+  Widget _buildBrowserEntry() => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
             child: Card(
@@ -698,63 +773,145 @@ class _GameShellState extends State<GameShell> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      'Window',
-                      style: Theme.of(context).textTheme.displaySmall,
+                      'Join Window',
+                      style: Theme.of(context).textTheme.headlineLarge,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     const Text(
-                      'A local, cross-platform edition of the German card game.',
+                      'Play with friends, directly in your browser. No installation required.',
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Ask your host to create a lobby in the smartphone or PC/laptop app and share its room code.',
                     ),
                     const SizedBox(height: 24),
                     TextField(
-                      controller: _players,
+                      controller: _roomCode,
+                      enabled: widget.firebaseEnabled && !_busy,
+                      textCapitalization: TextCapitalization.characters,
+                      autocorrect: false,
                       decoration: const InputDecoration(
-                        labelText: 'Players',
-                        hintText: 'Anna, Ben, Carla',
+                        labelText: 'Room code',
+                        hintText: 'ABC234',
                       ),
-                      onSubmitted: (_) => _start(),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _seatName,
+                      enabled: widget.firebaseEnabled && !_busy,
+                      decoration: const InputDecoration(
+                        labelText: 'Players on this device',
+                        hintText: 'Anna, Ben',
+                        helperText: 'One or more names, separated by commas.',
+                      ),
+                      onSubmitted: (_) {
+                        if (widget.firebaseEnabled && !_busy) _joinRoom();
+                      },
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       _message,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 20),
                     FilledButton.icon(
-                      onPressed: _start,
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('Start local game'),
-                    ),
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _createRoom,
-                      icon: const Icon(Icons.group),
-                      label: Text(
-                        widget.firebaseEnabled
-                            ? 'Create online lobby'
-                            : 'Online rooms need Firebase setup',
-                      ),
-                    ),
-                    const Divider(height: 32),
-                    TextField(
-                      controller: _roomCode,
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(labelText: 'Room code'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _seatName,
-                      decoration: const InputDecoration(
-                        labelText: 'Your player name',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: _busy ? null : _joinRoom,
+                      onPressed: widget.firebaseEnabled && !_busy
+                          ? _joinRoom
+                          : null,
                       icon: const Icon(Icons.login),
-                      label: const Text('Join online room'),
+                      label: Text(_busy ? 'Joining…' : 'Join online room'),
                     ),
                   ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final WindowGameEngine? game = _game;
+    if (game == null && widget.browserGuest) return _buildBrowserEntry();
+    if (game == null) {
+      return Scaffold(
+        body: Center(
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Card(
+                margin: const EdgeInsets.all(24),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        'Window',
+                        style: Theme.of(context).textTheme.displaySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'A local, cross-platform edition of the German card game.',
+                      ),
+                      const SizedBox(height: 24),
+                      TextField(
+                        controller: _players,
+                        decoration: const InputDecoration(
+                          labelText: 'Players',
+                          hintText: 'Anna, Ben, Carla',
+                        ),
+                        onSubmitted: (_) => _start(),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _message,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: _start,
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('Start local game'),
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: _busy ? null : _createRoom,
+                        icon: const Icon(Icons.group),
+                        label: Text(
+                          widget.firebaseEnabled
+                              ? 'Create online lobby'
+                              : 'Online rooms need Firebase setup',
+                        ),
+                      ),
+                      const Divider(height: 32),
+                      TextField(
+                        controller: _roomCode,
+                        textCapitalization: TextCapitalization.characters,
+                        decoration: const InputDecoration(
+                          labelText: 'Room code',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _seatName,
+                        decoration: const InputDecoration(
+                          labelText: 'Players on this device',
+                          hintText: 'Anna, Ben',
+                          helperText: 'Separate names with commas.',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _joinRoom,
+                        icon: const Icon(Icons.login),
+                        label: const Text('Join online room'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -777,58 +934,96 @@ class _GameShellState extends State<GameShell> {
         ),
         body: SafeArea(
           child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Card(
-                margin: const EdgeInsets.all(24),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      Text(
-                        'Room ${room.code}',
-                        style: Theme.of(context).textTheme.headlineSmall,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _isHost
-                            ? 'Share this code. Players may join until you start the game.'
-                            : 'You are in the lobby. Waiting for the host to start.',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Players (${room.seats.length})',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      ...room.seats.map(
-                        (RoomSeat seat) => ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.person),
-                          title: Text(seat.name),
-                          trailing: seat.ownerUid == room.hostUid
-                              ? const Text('Host')
-                              : null,
+            child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Card(
+                  margin: const EdgeInsets.all(24),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Text(
+                          'Room ${room.code}',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                          textAlign: TextAlign.center,
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _message,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      if (_isHost) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Text(
+                          _isHost
+                              ? 'Share this code. Players may join until you start the game.'
+                              : 'You are in the lobby. Waiting for the host to start.',
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_isHost &&
+                            WindowFirebaseOptions.browserUrl !=
+                                null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Friends can join in the app with this room code, or in their browser at:',
+                          ),
+                          SelectableText(WindowFirebaseOptions.browserUrl!),
+                          const Text(
+                            'Browser players enter the room code above. No installation required.',
+                          ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                ClipboardData(
+                                  text: WindowFirebaseOptions.browserUrl!,
+                                ),
+                              );
+                              if (mounted) {
+                                setState(
+                                  () => _message =
+                                      'Browser address copied. Share it together with room ${room.code}.',
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.copy),
+                            label: const Text('Copy browser address'),
+                          ),
+                        ],
                         const SizedBox(height: 20),
-                        FilledButton.icon(
-                          onPressed: _busy ? null : _startLobbyGame,
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('Start game and lock lobby'),
+                        Text(
+                          'Players (${room.seats.length})',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
+                        const SizedBox(height: 8),
+                        ...room.seats.map(
+                          (RoomSeat seat) => ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.person),
+                            title: Text(seat.name),
+                            trailing: seat.ownerUid == room.hostUid
+                                ? const Text('Host')
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _message,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (_isHost) ...<Widget>[
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    unawaited(
+                                      _queueHostOperation(_startLobbyGame)
+                                          .catchError((Object _) {}),
+                                    );
+                                  },
+                            icon: const Icon(Icons.play_arrow),
+                            label: const Text('Start game and lock lobby'),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -843,6 +1038,7 @@ class _GameShellState extends State<GameShell> {
       snapshot: snapshot,
       message: _message,
       roomCode: _room?.code,
+      deckSize: _isOnline && !_isHost ? _room!.deckSize : snapshot.deckSize,
       busy: _busy,
       canControl: _canControlCurrentTurn,
       onEndTurn: () {
@@ -940,6 +1136,7 @@ class _Info extends StatelessWidget {
     required this.snapshot,
     required this.message,
     required this.roomCode,
+    required this.deckSize,
     required this.busy,
     required this.canControl,
     required this.onEndTurn,
@@ -955,6 +1152,7 @@ class _Info extends StatelessWidget {
   final GameSnapshot snapshot;
   final String message;
   final String? roomCode;
+  final int? deckSize;
   final bool busy;
   final bool canControl;
   final VoidCallback onEndTurn;
@@ -1008,7 +1206,11 @@ class _Info extends StatelessWidget {
               ),
             ),
           const Divider(height: 30),
-          Text('Deck: ${snapshot.deckSize} cards'),
+          Text(
+            deckSize == null
+                ? 'Deck: managed by host'
+                : 'Deck: $deckSize cards',
+          ),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: snapshot.turnCanEnd && canControl && !busy

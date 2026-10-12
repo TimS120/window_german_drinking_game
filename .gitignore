@@ -26,6 +26,8 @@ app/android/local.properties
 # Firebase local project configuration
 .firebaserc
 firebase-options.json
+.firebase/
+firebase-debug.log
 
 # IDE / OS
 .idea/
