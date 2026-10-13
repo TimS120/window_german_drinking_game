@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/main.dart';
+import 'package:window_game/localization.dart';
 import 'package:window_game/rl_policy.dart';
 
 class _TestPolicy extends WindowRlPolicy {
   @override
   Future<void> preload() async {}
+}
+
+class _Preferences implements LanguagePreferenceStore {
+  @override
+  Future<String?> read() async => null;
+  @override
+  Future<void> write(String language) async {}
 }
 
 void main() {
@@ -45,6 +53,10 @@ void main() {
     (WidgetTester tester) async {
       await tester.pumpWidget(
         WindowGameApp(
+          languageController: LanguageController(
+            store: _Preferences(),
+            initialLocale: const Locale('en'),
+          ),
           firebaseEnabled: false,
           rlPolicy: _TestPolicy(),
           browserGuest: true,
@@ -65,12 +77,17 @@ void main() {
   ) async {
     await tester.pumpWidget(
       WindowGameApp(
+        languageController: LanguageController(
+          store: _Preferences(),
+          initialLocale: const Locale('en'),
+        ),
         firebaseEnabled: true,
         rlPolicy: _TestPolicy(),
         browserGuest: true,
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Join online room'));
     await tester.tap(find.text('Join online room'));
     await tester.pumpAndSettle();
     expect(find.textContaining('six-character room code'), findsOneWidget);
@@ -83,6 +100,10 @@ void main() {
   ) async {
     await tester.pumpWidget(
       WindowGameApp(
+        languageController: LanguageController(
+          store: _Preferences(),
+          initialLocale: const Locale('en'),
+        ),
         firebaseEnabled: true,
         rlPolicy: _TestPolicy(),
         browserGuest: false,
@@ -102,11 +123,16 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       WindowGameApp(
+        languageController: LanguageController(
+          store: _Preferences(),
+          initialLocale: const Locale('en'),
+        ),
         firebaseEnabled: false,
         rlPolicy: _TestPolicy(),
         browserGuest: false,
       ),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start local game'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Propose best move'));

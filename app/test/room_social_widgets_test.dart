@@ -11,6 +11,10 @@ import 'package:window_game/firebase_options.dart';
 import 'package:window_game/firebase_room_repository.dart';
 import 'package:window_game/game_engine.dart';
 import 'package:window_game/main.dart';
+import 'package:window_game/localization.dart';
+
+import 'localization_test.dart' show MemoryLanguages, chooseLanguage;
+
 import 'package:window_game/rl_policy.dart';
 import 'package:window_game/room_social.dart';
 import 'package:window_game/room_social_widgets.dart';
@@ -37,7 +41,7 @@ class _Policy extends WindowRlPolicy {
 }
 
 class _Rooms extends FirebaseRoomRepository {
-  _Rooms(this.identity)
+  _Rooms(this.identity, {this.started = true})
     : super(
         transport: WindowsFirebaseRestRoomRepository(
           options: const WindowFirebaseRestOptions(
@@ -47,6 +51,7 @@ class _Rooms extends FirebaseRoomRepository {
         ),
       );
   final String identity;
+  final bool started;
   WindowGameEngine game = WindowGameEngine([
     'Max',
     'Heiko',
@@ -68,7 +73,7 @@ class _Rooms extends FirebaseRoomRepository {
     version: version,
     hostUid: 'host',
     state: game.publicObservation(),
-    started: true,
+    started: started,
     seats: const [
       RoomSeat(index: 0, name: 'Max', ownerUid: 'host'),
       RoomSeat(index: 1, name: 'Heiko', ownerUid: 'host'),
@@ -320,7 +325,12 @@ Future<void> _preview(WidgetTester tester, String name) async {
   });
 }
 
-Future<void> _joinTest(WidgetTester tester, _Rooms rooms, Size size) async {
+Future<void> _joinTest(
+  WidgetTester tester,
+  _Rooms rooms,
+  Size size, {
+  LanguageController? language,
+}) async {
   const previewFont = String.fromEnvironment('UI_PREVIEW_FONT');
   const previewEmojiFont = String.fromEnvironment('UI_PREVIEW_EMOJI_FONT');
   if (previewFont.isNotEmpty) {
@@ -349,28 +359,39 @@ Future<void> _joinTest(WidgetTester tester, _Rooms rooms, Size size) async {
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(rooms.close);
+  Widget app() => MaterialApp(
+    locale: language?.locale,
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    theme: ThemeData.dark().copyWith(
+      textTheme: ThemeData.dark().textTheme.apply(
+        fontFamily: previewFont.isEmpty ? null : 'PreviewFont',
+        fontFamilyFallback: previewEmojiFont.isEmpty ? null : ['PreviewEmoji'],
+      ),
+    ),
+    home: GameShell(
+      firebaseEnabled: true,
+      browserGuest: true,
+      initialRoomCode: 'ABC234',
+      rlPolicy: _Policy(),
+      repository: rooms,
+    ),
+  );
   await tester.pumpWidget(
     RepaintBoundary(
       key: _previewKey,
-      child: MaterialApp(
-        theme: ThemeData.dark().copyWith(
-          textTheme: ThemeData.dark().textTheme.apply(
-            fontFamily: previewFont.isEmpty ? null : 'PreviewFont',
-            fontFamilyFallback: previewEmojiFont.isEmpty
-                ? null
-                : ['PreviewEmoji'],
-          ),
-        ),
-        home: GameShell(
-          firebaseEnabled: true,
-          browserGuest: true,
-          initialRoomCode: 'ABC234',
-          rlPolicy: _Policy(),
-          repository: rooms,
-        ),
-      ),
+      child: language == null
+          ? app()
+          : LanguageScope(
+              controller: language,
+              child: AnimatedBuilder(
+                animation: language,
+                builder: (context, _) => app(),
+              ),
+            ),
     ),
   );
+  await tester.pumpAndSettle();
   await tester.enterText(
     find.widgetWithText(TextField, 'Players on this device'),
     'Anna',
@@ -389,6 +410,111 @@ Future<void> _joinTest(WidgetTester tester, _Rooms rooms, Size size) async {
 }
 
 void main() {
+  testWidgets(
+    'accepted lobby exposes the language selector without rejoining',
+    (tester) async {
+      final rooms = _Rooms('guest', started: false);
+      final language = LanguageController(
+        store: MemoryLanguages(),
+        initialLocale: const Locale('en'),
+      );
+      addTearDown(language.dispose);
+      await _joinTest(
+        tester,
+        rooms,
+        const Size(1400, 1000),
+        language: language,
+      );
+      expect(find.text('Window lobby'), findsOneWidget);
+      await chooseLanguage(tester, 'Choose language', 'Deutsch');
+      expect(find.text('Window-Lobby'), findsOneWidget);
+      expect(find.text('Raum ABC234'), findsOneWidget);
+      expect(find.textContaining('Lobby ABC234: Warte'), findsOneWidget);
+      expect(find.text('Max'), findsOneWidget);
+      expect(rooms.calls, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final size in [const Size(1400, 1000), const Size(390, 844)]) {
+    testWidgets(
+      'shared view changes language locally and preserves chat at $size',
+      (tester) async {
+        final rooms = _Rooms('guest');
+        rooms.social['messages'] = {
+          'existing': {
+            'uid': 'host',
+            'sender': 'Device 1 (Max, Heiko, Tom)',
+            'text': 'Higher, hello!',
+            'createdAt': DateTime.now().millisecondsSinceEpoch,
+          },
+        };
+        final language = LanguageController(
+          store: MemoryLanguages(),
+          initialLocale: const Locale('en'),
+        );
+        addTearDown(language.dispose);
+        await _joinTest(tester, rooms, size, language: language);
+        final position = rooms.game.snapshot().validSelectable.first;
+        final option = rooms.game.getValidOptionsForCard(position).first;
+        rooms.share({
+          'stage': 'guess',
+          'row': position.row,
+          'column': position.column,
+          'orientation': option.orientation.name,
+          'proposal': encodeSharedProposal(
+            AiMoveProposal(
+              action: PolicyAction.guess(
+                position: position,
+                orientation: option.orientation,
+                guess: option.guesses.first,
+              ),
+              confidence: 0.75,
+              source: 'Pure statistics',
+              expectedDrinks: 1.5,
+              explanation: 'Low risk, small penalty',
+            ),
+          ),
+        });
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Message everyone…'),
+          'Untranslated draft 🍻',
+        );
+        await chooseLanguage(tester, 'Choose language', 'Deutsch');
+        expect(find.text('Dein Tipp'), findsOneWidget);
+        expect(
+          find.textContaining('Gerät 1 (Max, Heiko, Tom): Higher, hello!'),
+          findsOneWidget,
+        );
+        expect(find.text('Zugansicht von Max'), findsOneWidget);
+        expect(
+          find.text('Geringes Risiko, wenige Strafschlucke'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('geschätzte verbleibende Schlucke 1,5'),
+          findsOneWidget,
+        );
+        expect(find.text('Untranslated draft 🍻'), findsOneWidget);
+        expect(rooms.calls, isEmpty);
+        expect(rooms.version, 7);
+        await _preview(tester, 'german-${size.width.toInt()}');
+        await tester.tap(find.byTooltip('Chat minimieren'));
+        await tester.pumpAndSettle();
+        await chooseLanguage(tester, 'Sprache wählen', 'English');
+        expect(find.byType(RoomChatPanel), findsNothing);
+        expect(find.text('Your guess'), findsOneWidget);
+        await tester.tap(find.byTooltip('Open chat'));
+        await tester.pumpAndSettle();
+        expect(find.text('Untranslated draft 🍻'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
   testWidgets('narrow desktop windows keep chat at the right', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);

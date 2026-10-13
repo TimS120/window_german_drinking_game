@@ -1,0 +1,510 @@
+{
+  "@@locale": "en",
+  "appTitle": "Window",
+  "language": "Language",
+  "chooseLanguage": "Choose language",
+  "choosePlayers": "Choose player names to begin a local game.",
+  "browserJoinInstructions": "Enter the room code shared by your host and your player names.",
+  "browserUnavailable": "Browser joining is unavailable: this build has no Firebase configuration.",
+  "firebaseUnavailable": "Firebase is not configured for this build yet.",
+  "enterPlayer": "Enter at least one player on this device.",
+  "uniquePlayers": "Every player sharing this device needs a unique name.",
+  "validRoomCode": "Enter the six-character room code shared by your host.",
+  "roomNotFound": "Room not found. Check the room code.",
+  "waitingAcceptance": "Waiting for the host to accept your player names…",
+  "hostTimeout": "The host did not respond. Ask them to keep the lobby open, then try again.",
+  "roomUnavailable": "This room is no longer available.",
+  "joinInstructions": "Enter a room code and your player names to join.",
+  "chatReconnecting": "Room chat is reconnecting…",
+  "sharingUnavailable": "Turn sharing is temporarily unavailable. Gameplay remains available.",
+  "openChat": "Open chat",
+  "minimizeChat": "Minimize chat",
+  "chooseComparison": "Choose the comparison",
+  "horizontalCards": "Horizontal cards",
+  "verticalCards": "Vertical cards",
+  "betweenOutside": "In-between or outside",
+  "higherSameLower": "Higher, same, or lower",
+  "yourGuess": "Your guess",
+  "higher": "Higher",
+  "same": "Same",
+  "lower": "Lower",
+  "inBetween": "In-between",
+  "outside": "Outside",
+  "bestMovePrediction": "Best-move prediction",
+  "rlModel": "RL model",
+  "pureStatistics": "Pure statistics",
+  "statisticsDescription": "Estimate your future drinks using public card history.",
+  "findingMove": "Finding best move…",
+  "submittingMove": "Submitting move…",
+  "moveSent": "Move request sent to host.",
+  "finishPendingProposal": "Finish the pending action before requesting a proposal.",
+  "startingGame": "Starting game…",
+  "cardUnavailable": "That card cannot be selected yet.",
+  "sameCorrect": "Correct: same rank!",
+  "continueGame": "Continue",
+  "windowComplete": "The window is complete!",
+  "correctContinue": "Correct. You may guess again or end your turn.",
+  "wrongRedeal": "Wrong guess. The revealed card and every card with a red border will be redealt.",
+  "wrongGuess": "Wrong guess",
+  "redealCards": "Redeal cards",
+  "joinWindow": "Join Window",
+  "browserDescription": "Play with friends, directly in your browser. No installation required.",
+  "askHost": "Ask your host to create a lobby in the smartphone or PC/laptop app and share its room code.",
+  "roomCode": "Room code",
+  "devicePlayers": "Players on this device",
+  "namesHelper": "One or more names, separated by commas.",
+  "separateNames": "Separate names with commas.",
+  "joining": "Joining…",
+  "joinOnline": "Join online room",
+  "localDescription": "A local, cross-platform edition of the German card game.",
+  "players": "Players",
+  "startLocal": "Start local game",
+  "createLobby": "Create online lobby",
+  "firebaseSetupNeeded": "Online rooms need Firebase setup",
+  "windowLobby": "Window lobby",
+  "leaveLobby": "Leave lobby and return to menu",
+  "shareCode": "Share this code. Players may join until you start the game.",
+  "waitingStart": "You are in the lobby. Waiting for the host to start.",
+  "friendsJoin": "Friends can join in the app with this room code, or in their browser at:",
+  "browserCodeHelp": "Browser players enter the room code above. No installation required.",
+  "copyBrowser": "Copy browser address",
+  "host": "Host",
+  "startLockLobby": "Start game and lock lobby",
+  "leaveRoom": "Leave room and return to menu",
+  "returnMenu": "Return to menu",
+  "currentPlayer": "Current player",
+  "newLocal": "New local game",
+  "waitingPlayer": "Waiting for the player who owns this seat.",
+  "handleRule": "Handle rule: choose a card directly beside the handle.",
+  "hostDeck": "Deck: managed by host",
+  "endTurn": "End turn",
+  "endTurnSuggested": "End turn · suggested",
+  "confirmSame": "Confirm same-rank penalty",
+  "redealMarked": "Redeal marked cards",
+  "proposeMove": "Propose best move",
+  "scoreboard": "Scoreboard",
+  "player": "Player",
+  "drinks": "Drinks",
+  "correct": "Correct",
+  "wrong": "Wrong",
+  "ratio": "C/W ratio",
+  "changed": "Changed",
+  "turns": "Turns",
+  "total": "Total",
+  "sayHello": "Say hello to your room!",
+  "enableReactions": "Enable flying reactions",
+  "reduceReactions": "Reduce reaction animations",
+  "collapseHistory": "Collapse chat history",
+  "expandHistory": "Expand chat history",
+  "messageHint": "Message everyone…",
+  "sendMessage": "Send message",
+  "waitMessage": "Please wait a moment before sending another message.",
+  "messageFailed": "Message could not be sent. Please retry.",
+  "reactionFailed": "Reaction could not be sent. Please retry.",
+  "modelLoaded": "ONNX policy loaded.",
+  "testModelLoaded": "ONNX test model loaded.",
+  "modelWillLoad": "Bundled ONNX test model will load when you request a proposal.",
+  "modelLoading": "Loading bundled ONNX model…",
+  "modelUnavailable": "Model unavailable; using the pure-statistics fallback.",
+  "modelSource": "ONNX policy",
+  "testModelSource": "ONNX test model (untrained)",
+  "fallbackSource": "ONNX inference failed → Pure statistics",
+  "passAction": "end turn (pass)",
+  "horizontal": "horizontal",
+  "vertical": "vertical",
+  "noImmediateDrinks": "no immediate drinks",
+  "estimatedSuccess": "estimated success",
+  "modelConfidence": "model confidence",
+  "passExplanation": "Pass to avoid more risk",
+  "certainExplanation": "Certain guess, no immediate drinks",
+  "smallPenaltyExplanation": "Low risk, small penalty",
+  "futureDrinksExplanation": "Lower expected future drinks",
+  "strongOddsExplanation": "Strong odds, lower future risk",
+  "pendingAction": "Finish the pending action first.",
+  "invalidSelection": "Invalid card selection.",
+  "invalidGuess": "Invalid guess.",
+  "noSamePending": "No same guess is pending.",
+  "enterName": "Enter at least one player name.",
+  "uniqueDeviceNames": "Every player on this device needs a unique name.",
+  "gameAlreadyStarted": "This game has already started. Ask the host for a new lobby.",
+  "deviceAlreadyJoined": "This device has already joined the lobby.",
+  "uniqueLobbyNames": "Player names must be unique in the lobby. Choose other names.",
+  "rejoinRoom": "Please rejoin the room.",
+  "signInExpired": "Firebase sign-in expired. Please rejoin.",
+  "reserveRoomFailed": "Could not reserve a room code. Please try again.",
+  "playerStarts": "{player} starts. Select a card next to the handle.",
+  "@playerStarts": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "roomTurn": "Room {code}: {player}'s turn.",
+  "@roomTurn": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "playerTurn": "{player}'s turn.",
+  "@playerTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "lobbyWaiting": "Lobby {code}: waiting for the host to start.",
+  "@lobbyWaiting": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "restoringHost": "Restoring host state for room {code}…",
+  "@restoringHost": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "createFailed": "Could not create room: {error}",
+  "@createFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "joinFailed": "Could not join room: {error}",
+  "@joinFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionFailed": "Room connection failed: {error}",
+  "@connectionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "restoreFailed": "The host state could not be restored: {error}",
+  "@restoreFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "moveRejected": "Move rejected: {error}",
+  "@moveRejected": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "predictionFailed": "Prediction failed: {error}",
+  "@predictionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "startFailed": "Could not start the lobby: {error}",
+  "@startFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "requestFailed": "Room request failed: {error}",
+  "@requestFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "hostRequestFailed": "Room host request error: {error}",
+  "@hostRequestFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invalidRequest": "Ignored invalid room request: {error}",
+  "@invalidRequest": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "suggestedMove": "Suggested move: {move}.",
+  "@suggestedMove": {
+    "placeholders": {
+      "move": {
+        "type": "String"
+      }
+    }
+  },
+  "suggestedGuess": "{guess} · suggested",
+  "@suggestedGuess": {
+    "placeholders": {
+      "guess": {
+        "type": "String"
+      }
+    }
+  },
+  "watchingPlayer": "Watching {player}",
+  "@watchingPlayer": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "samePenalty": "Every other player takes one swallow. {player} can continue after confirming.",
+  "@samePenalty": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "wrongPenalty": "{player} takes {penalty, plural, =1{one swallow} other{{penalty} swallows}}. {cards, plural, =1{One card will be removed and redealt.} other{{cards} cards will be removed and redealt.}}",
+  "@wrongPenalty": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      },
+      "penalty": {
+        "type": "int"
+      },
+      "cards": {
+        "type": "int"
+      }
+    }
+  },
+  "keepsTurn": "{player} keeps the turn after a wrong guess.",
+  "@keepsTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "newGameStarts": "{player} starts a new game.",
+  "@newGameStarts": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "roomTitle": "Room {code}",
+  "@roomTitle": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "browserCopied": "Browser address copied. Share it together with room {code}.",
+  "@browserCopied": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "playerCount": "Players ({count})",
+  "@playerCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "onlineRoom": "Online room: {code}",
+  "@onlineRoom": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "deckCards": "Deck: {count, plural, =1{one card} other{{count} cards}}",
+  "@deckCards": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "suggestion": "Suggestion: {move}",
+  "@suggestion": {
+    "placeholders": {
+      "move": {
+        "type": "String"
+      }
+    }
+  },
+  "valueEstimate": "value {value}",
+  "@valueEstimate": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "remainingDrinks": "estimated remaining drinks {value}",
+  "@remainingDrinks": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "changedTotal": "{count} of 17",
+  "@changedTotal": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatTitle": "Room chat · {sender}",
+  "@chatTitle": {
+    "placeholders": {
+      "sender": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseEmoji": "Release {emoji} for everyone",
+  "@releaseEmoji": {
+    "placeholders": {
+      "emoji": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceLabel": "Device {number} ({names})",
+  "@deviceLabel": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      },
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "actionLabel": "row {row}, column {column}: {orientation} {guess}",
+  "@actionLabel": {
+    "placeholders": {
+      "row": {
+        "type": "int"
+      },
+      "column": {
+        "type": "int"
+      },
+      "orientation": {
+        "type": "String"
+      },
+      "guess": {
+        "type": "String"
+      }
+    }
+  },
+  "currentBoardOnly": "{explanation} (current board only)",
+  "@currentBoardOnly": {
+    "placeholders": {
+      "explanation": {
+        "type": "String"
+      }
+    }
+  },
+  "inferenceFailed": "ONNX inference failed; using pure statistics. {error}",
+  "@inferenceFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "cleanupFailed": "Room request cleanup failed; gameplay remains available.",
+  "handleCard": "Handle card",
+  "faceDown": "Face-down card",
+  "selectableSuffix": ", selectable",
+  "suggestedSuffix": ", suggested",
+  "selectedSuffix": ", selected",
+  "faceUp": "Face-up {card}",
+  "cardSemantics": "{face}, row {row}, column {column}{legal}{proposed}{selected}",
+  "@faceUp": {
+    "placeholders": {
+      "card": {
+        "type": "String"
+      }
+    }
+  },
+  "@cardSemantics": {
+    "placeholders": {
+      "face": {
+        "type": "String"
+      },
+      "row": {
+        "type": "int"
+      },
+      "column": {
+        "type": "int"
+      },
+      "legal": {
+        "type": "String"
+      },
+      "proposed": {
+        "type": "String"
+      },
+      "selected": {
+        "type": "String"
+      }
+    }
+  },
+  "defaultPlayer": "Player 1",
+  "firebaseRequestFailed": "Firebase request failed ({status}): {details}",
+  "@firebaseRequestFailed": {
+    "placeholders": {
+      "status": {
+        "type": "int"
+      },
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "@higher": {
+    "description": "Guess that the hidden card has a higher rank."
+  },
+  "@same": {
+    "description": "Guess that the hidden card has the same rank."
+  },
+  "@inBetween": {
+    "description": "Guess that the hidden rank lies strictly between the two visible ranks."
+  }
+}

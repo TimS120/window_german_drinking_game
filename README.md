@@ -125,6 +125,20 @@ Chat can be minimized with the minus button in its header and reopened with the
 chat button in the app bar. The board and statistics reclaim the freed space;
 unsent drafts and incoming messages are retained while chat is minimized.
 
+English and German are available from the flag selector on the join/menu screen
+and beside the chat/home controls in the lobby and game. The app initially uses
+the device language (English for unsupported languages), then remembers the
+selected language on that device. Switching languages preserves the game,
+shared turn view, player names, messages, and chat draft.
+
+Translations use Flutter's official `gen-l10n` workflow: edit
+`app/lib/l10n/app_en.arb` and `app/lib/l10n/app_de.arb`, then run
+`flutter gen-l10n` from `app/`. Generated files in `lib/l10n/generated/` should
+not be edited manually. ARB placeholders and plural rules handle variable game
+text; display numbers use the selected locale. The resource-coverage test
+checks that both languages contain every key. Shared game enum values and
+existing host proposal descriptions remain compatible across languages.
+
 From the repository root, build and deploy the browser client:
 
 ```bash

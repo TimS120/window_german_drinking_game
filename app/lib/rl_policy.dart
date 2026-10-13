@@ -239,6 +239,15 @@ class WindowRlCodec {
 
 /// Loads an exported policy/value ONNX model when one is bundled. Until then,
 /// a probability-based fallback keeps the feature useful and testable.
+enum PolicyAvailability {
+  ready,
+  testReady,
+  deferred,
+  loading,
+  unavailable,
+  inferenceFailed,
+}
+
 class WindowRlPolicy {
   WindowRlPolicy({OnnxRuntime? runtime}) : _runtime = runtime ?? OnnxRuntime();
 
@@ -312,6 +321,19 @@ class WindowRlPolicy {
         await output.dispose();
       }
     }
+  }
+
+  String? get inferenceError => _inferenceError;
+  PolicyAvailability get availability {
+    if (_inferenceError != null) return PolicyAvailability.inferenceFailed;
+    if (_session != null) {
+      return _modelIsTrained
+          ? PolicyAvailability.ready
+          : PolicyAvailability.testReady;
+    }
+    if (!_loadTried) return PolicyAvailability.deferred;
+    if (_loadFuture != null) return PolicyAvailability.loading;
+    return PolicyAvailability.unavailable;
   }
 
   String get availabilityMessage {

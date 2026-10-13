@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'room_social.dart';
+import 'localization.dart';
 
 class RoomChatPanel extends StatefulWidget {
   const RoomChatPanel({
@@ -37,7 +38,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
   bool _sending = false;
   DateTime? _lastReaction;
   DateTime? _lastMessage;
-  String? _error;
+  LocalizedMessage? _error;
 
   @override
   void didUpdateWidget(RoomChatPanel oldWidget) {
@@ -64,9 +65,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
     if (_sending || text.isEmpty) return;
     if (_lastMessage != null &&
         DateTime.now().difference(_lastMessage!).inMilliseconds < 550) {
-      setState(
-        () => _error = 'Please wait a moment before sending another message.',
-      );
+      setState(() => _error = (l) => l.waitMessage);
       return;
     }
     setState(() {
@@ -79,7 +78,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
       if (mounted && _text.text.trim() == text) _text.clear();
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'Message could not be sent. Please retry.');
+        setState(() => _error = (l) => l.messageFailed);
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -98,15 +97,15 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
       if (mounted) setState(() => _error = null);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'Reaction could not be sent. Please retry.');
+        setState(() => _error = (l) => l.reactionFailed);
       }
     }
   }
 
   Widget _history() => widget.messages.isEmpty
-      ? const Align(
+      ? Align(
           alignment: Alignment.centerLeft,
-          child: Text('Say hello to your room!'),
+          child: Text(tr(context).sayHello),
         )
       : ListView.builder(
           controller: _scroll,
@@ -157,7 +156,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Room chat · ${widget.sender}',
+                      tr(context).chatTitle(widget.sender),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -165,8 +164,8 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     tooltip: widget.reducedMotion
-                        ? 'Enable flying reactions'
-                        : 'Reduce reaction animations',
+                        ? tr(context).enableReactions
+                        : tr(context).reduceReactions,
                     onPressed: () =>
                         widget.onReducedMotion(!widget.reducedMotion),
                     icon: Icon(
@@ -179,7 +178,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   if (widget.onMinimize != null)
                     IconButton(
                       visualDensity: VisualDensity.compact,
-                      tooltip: 'Minimize chat',
+                      tooltip: tr(context).minimizeChat,
                       onPressed: widget.onMinimize,
                       icon: const Icon(Icons.remove),
                     ),
@@ -187,8 +186,8 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       tooltip: _expanded
-                          ? 'Collapse chat history'
-                          : 'Expand chat history',
+                          ? tr(context).collapseHistory
+                          : tr(context).expandHistory,
                       onPressed: () => setState(() => _expanded = !_expanded),
                       icon: Icon(
                         _expanded ? Icons.expand_more : Icons.expand_less,
@@ -204,7 +203,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    _error ?? widget.status!,
+                    _error?.call(tr(context)) ?? widget.status!,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.error,
                       fontSize: 12,
@@ -221,8 +220,8 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                       maxLines: 2,
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Message everyone…',
+                      decoration: InputDecoration(
+                        hintText: tr(context).messageHint,
                         counterText: '',
                         isDense: true,
                         border: OutlineInputBorder(),
@@ -230,7 +229,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Send message',
+                    tooltip: tr(context).sendMessage,
                     onPressed: _sending ? null : _send,
                     icon: const Icon(Icons.send),
                   ),
@@ -243,7 +242,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   children: [
                     for (final emoji in roomEmojis)
                       Tooltip(
-                        message: 'Release $emoji for everyone',
+                        message: tr(context).releaseEmoji(emoji),
                         child: TextButton(
                           style: TextButton.styleFrom(
                             minimumSize: const Size(42, 32),

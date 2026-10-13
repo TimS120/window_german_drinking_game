@@ -8,7 +8,11 @@ import 'rl_policy.dart';
 const roomEmojis = ['😂', '🎉', '❤️', '👍', '😮', '😭', '🍻', '🔥'];
 
 /// Names come from accepted seats, never from an untrusted message sender.
-String roomDeviceLabel(List<RoomSeat> seats, String uid) {
+String roomDeviceLabel(
+  List<RoomSeat> seats,
+  String uid, {
+  String Function(int number, String names)? format,
+}) {
   final owners = seats
       .map((s) => s.ownerUid)
       .whereType<String>()
@@ -19,7 +23,9 @@ String roomDeviceLabel(List<RoomSeat> seats, String uid) {
       .map((s) => s.name)
       .toList();
   if (names.length == 1) return names.single;
-  return 'Device ${owners.indexOf(uid) + 1} (${names.join(', ')})';
+  final number = owners.indexOf(uid) + 1;
+  final joinedNames = names.join(', ');
+  return format?.call(number, joinedNames) ?? 'Device $number ($joinedNames)';
 }
 
 Map<String, dynamic> socialMap(Object? value) =>

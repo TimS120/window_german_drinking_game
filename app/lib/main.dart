@@ -16,6 +16,7 @@ import 'lobby_players.dart';
 import 'rl_policy.dart';
 import 'room_social.dart';
 import 'room_social_widgets.dart';
+import 'localization.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
@@ -34,36 +35,77 @@ Future<void> main() async {
   // responsive while assets/runtime initialize, and a proposal shares this
   // future instead of triggering a second, late load.
   unawaited(rlPolicy.preload());
-  runApp(WindowGameApp(firebaseEnabled: firebaseEnabled, rlPolicy: rlPolicy));
+  final language = LanguageController();
+  await language.load();
+  runApp(
+    WindowGameApp(
+      firebaseEnabled: firebaseEnabled,
+      rlPolicy: rlPolicy,
+      languageController: language,
+    ),
+  );
 }
 
-class WindowGameApp extends StatelessWidget {
+class WindowGameApp extends StatefulWidget {
   const WindowGameApp({
     super.key,
     required this.firebaseEnabled,
     required this.rlPolicy,
     this.browserGuest = kIsWeb,
+    this.languageController,
+    this.repository,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
   final bool browserGuest;
+  final LanguageController? languageController;
+  final FirebaseRoomRepository? repository;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Window',
-    navigatorKey: navigatorKey,
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xffd4a72c),
-        brightness: Brightness.dark,
+  State<WindowGameApp> createState() => _WindowGameAppState();
+}
+
+class _WindowGameAppState extends State<WindowGameApp> {
+  late final LanguageController _language;
+  @override
+  void initState() {
+    super.initState();
+    _language = widget.languageController ?? LanguageController();
+    if (widget.languageController == null) unawaited(_language.load());
+  }
+
+  @override
+  void dispose() {
+    if (widget.languageController == null) _language.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LanguageScope(
+    controller: _language,
+    child: AnimatedBuilder(
+      animation: _language,
+      builder: (context, _) => MaterialApp(
+        title: 'Window',
+        navigatorKey: navigatorKey,
+        locale: _language.locale,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xffd4a72c),
+            brightness: Brightness.dark,
+          ),
+          scaffoldBackgroundColor: const Color(0xFF0F381C),
+          useMaterial3: true,
+        ),
+        home: GameShell(
+          firebaseEnabled: widget.firebaseEnabled,
+          rlPolicy: widget.rlPolicy,
+          browserGuest: widget.browserGuest,
+          repository: widget.repository,
+        ),
       ),
-      scaffoldBackgroundColor: const Color(0xFF0F381C),
-      useMaterial3: true,
-    ),
-    home: GameShell(
-      firebaseEnabled: firebaseEnabled,
-      rlPolicy: rlPolicy,
-      browserGuest: browserGuest,
     ),
   );
 }
@@ -87,13 +129,24 @@ class GameShell extends StatefulWidget {
 }
 
 class _GameShellState extends State<GameShell> {
-  final TextEditingController _players = TextEditingController(
-    text: 'Player 1',
-  );
+  AppLocalizations get _l => tr(context);
+  String _guessLabel(GuessType guess) => guessLabel(_l, guess);
+  final TextEditingController _players = TextEditingController();
+  bool _defaultNamesInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_defaultNamesInitialized) {
+      _players.text = _l.defaultPlayer;
+      _defaultNamesInitialized = true;
+    }
+  }
+
   final TextEditingController _roomCode = TextEditingController();
   final TextEditingController _seatName = TextEditingController();
   WindowGameEngine? _game;
-  String _message = 'Choose player names to begin a local game.';
+  LocalizedMessage _message = (l) => l.choosePlayers;
   FirebaseRoomRepository? _rooms;
   StreamSubscription<OnlineRoom?>? _roomSubscription;
   StreamSubscription<RoomRequest>? _requestSubscription;
@@ -127,7 +180,7 @@ class _GameShellState extends State<GameShell> {
   final List<Map<String, dynamic>> _flyingReactions = [];
   final List<Timer> _reactionTimers = [];
   Timer? _activityTimer;
-  String? _socialStatus;
+  LocalizedMessage? _socialStatus;
   bool _reducedMotion = false;
   String? _pressedTarget;
 
@@ -141,9 +194,9 @@ class _GameShellState extends State<GameShell> {
           (widget.initialRoomCode ?? Uri.base.queryParameters['room'] ?? '')
               .trim()
               .toUpperCase();
-      _message = widget.firebaseEnabled
-          ? 'Enter the room code shared by your host and your player names.'
-          : 'Browser joining is unavailable: this build has no Firebase configuration.';
+      _message = (l) => widget.firebaseEnabled
+          ? l.browserJoinInstructions
+          : l.browserUnavailable;
     }
     // Refresh the advisor subtitle once startup loading has settled.
     unawaited(_refreshPolicyAvailability());
@@ -179,8 +232,7 @@ class _GameShellState extends State<GameShell> {
     setState(() {
       _game = WindowGameEngine(names);
       _proposal = null;
-      _message =
-          '${_game!.currentPlayer} starts. Select a card next to the handle.';
+      _message = (l) => l.playerStarts(_game!.currentPlayer);
     });
   }
 
@@ -193,21 +245,16 @@ class _GameShellState extends State<GameShell> {
   Future<void> _createRoom() async {
     if (widget.browserGuest) return;
     if (!widget.firebaseEnabled) {
-      setState(
-        () => _message = 'Firebase is not configured for this build yet.',
-      );
+      setState(() => _message = (l) => l.firebaseUnavailable);
       return;
     }
     final List<String> local = _names(_players);
     if (local.isEmpty) {
-      setState(() => _message = 'Enter at least one player on this device.');
+      setState(() => _message = (l) => l.enterPlayer);
       return;
     }
     if (local.toSet().length != local.length) {
-      setState(
-        () =>
-            _message = 'Every player sharing this device needs a unique name.',
-      );
+      setState(() => _message = (l) => l.uniquePlayers);
       return;
     }
     try {
@@ -226,7 +273,7 @@ class _GameShellState extends State<GameShell> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message = 'Could not create room: $error';
+          _message = (l) => l.createFailed(localizedError(l, error));
         });
       }
     }
@@ -234,18 +281,14 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _joinRoom() async {
     if (!widget.firebaseEnabled) {
-      setState(
-        () => _message = 'Firebase is not configured for this build yet.',
-      );
+      setState(() => _message = (l) => l.firebaseUnavailable);
       return;
     }
     try {
       setState(() => _busy = true);
       final String code = _roomCode.text.trim().toUpperCase();
       if (!RegExp(r'^[A-HJ-NP-Z2-9]{6}$').hasMatch(code)) {
-        throw StateError(
-          'Enter the six-character room code shared by your host.',
-        );
+        throw LocalizedFailure((l) => l.validRoomCode);
       }
       final List<String> names = parseLobbyPlayers(_seatName.text);
       final FirebaseRoomRepository rooms = _rooms ??= FirebaseRoomRepository();
@@ -253,7 +296,7 @@ class _GameShellState extends State<GameShell> {
       final OnlineRoom? lobby = await rooms.loadRoom(code);
       if (!mounted) return;
       if (lobby == null) {
-        throw StateError('Room not found. Check the room code.');
+        throw LocalizedFailure((l) => l.roomNotFound);
       }
       final bool alreadyJoined = lobby.seats.any(
         (RoomSeat seat) => seat.ownerUid == rooms.uid,
@@ -266,25 +309,19 @@ class _GameShellState extends State<GameShell> {
           seatNames: names,
         );
         if (!mounted) return;
-        setState(
-          () => _message = 'Waiting for the host to accept your player names…',
-        );
+        setState(() => _message = (l) => l.waitingAcceptance);
         await rooms
             .observeRoom(code)
             .timeout(
               const Duration(seconds: 20),
               onTimeout: (sink) {
-                sink.addError(
-                  StateError(
-                    'The host did not respond. Ask them to keep the lobby open, then try again.',
-                  ),
-                );
+                sink.addError(LocalizedFailure((l) => l.hostTimeout));
                 sink.close();
               },
             )
             .firstWhere((current) {
               if (current == null) {
-                throw StateError('This room is no longer available.');
+                throw LocalizedFailure((l) => l.roomUnavailable);
               }
               if (current.seats.any((seat) => seat.ownerUid == rooms.uid)) {
                 return true;
@@ -299,8 +336,7 @@ class _GameShellState extends State<GameShell> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message =
-              'Could not join room: ${error is StateError ? error.message : error}';
+          _message = (l) => l.joinFailed(localizedError(l, error));
         });
       }
     }
@@ -327,11 +363,11 @@ class _GameShellState extends State<GameShell> {
                   : room.version;
               if (!isHost) _game = WindowGameEngine.fromState(room.state);
               _busy = false;
-              _message = !room.started
-                  ? 'Lobby ${room.code}: waiting for the host to start.'
+              _message = (l) => !room.started
+                  ? l.lobbyWaiting(room.code)
                   : _game == null
-                  ? 'Restoring host state for room ${room.code}…'
-                  : 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+                  ? l.restoringHost(room.code)
+                  : l.roomTurn(room.code, _game!.currentPlayer);
             });
             if (isHost) {
               _watchRequests(room.code);
@@ -345,7 +381,7 @@ class _GameShellState extends State<GameShell> {
             if (mounted) {
               setState(() {
                 _busy = false;
-                _message = 'Room connection failed: $error';
+                _message = (l) => l.connectionFailed(localizedError(l, error));
               });
             }
           },
@@ -385,9 +421,8 @@ class _GameShellState extends State<GameShell> {
       _chatSideExtent = 0;
       _chatMinimized = false;
       _hostSocialRoomCode = null;
-      _message = widget.browserGuest
-          ? 'Enter a room code and your player names to join.'
-          : 'Choose player names to begin a local game.';
+      _message = (l) =>
+          widget.browserGuest ? l.joinInstructions : l.choosePlayers;
     });
   }
 
@@ -398,7 +433,7 @@ class _GameShellState extends State<GameShell> {
       if (!mounted || privateState == null || !_isHost) return;
       setState(() {
         _game = WindowGameEngine.fromState(privateState);
-        _message = 'Room ${room.code}: ${_game!.currentPlayer}\'s turn.';
+        _message = (l) => l.roomTurn(room.code, _game!.currentPlayer);
       });
       await _requestSubscription?.cancel();
       _requestSubscription = null;
@@ -407,7 +442,7 @@ class _GameShellState extends State<GameShell> {
     } catch (error) {
       if (mounted) {
         setState(
-          () => _message = 'The host state could not be restored: $error',
+          () => _message = (l) => l.restoreFailed(localizedError(l, error)),
         );
       }
     }
@@ -437,8 +472,8 @@ class _GameShellState extends State<GameShell> {
             setState(() {
               _social = snapshot;
               _socialStatus = null;
-              for (final raw in snapshot.reactions.values) {
-                final reaction = socialMap(raw);
+              for (final entry in snapshot.reactions.entries) {
+                final reaction = {...socialMap(entry.value), 'uid': entry.key};
                 final id = reaction['id'] as String?;
                 if (id == null || !_seenReactions.add(id)) continue;
                 final age =
@@ -487,7 +522,7 @@ class _GameShellState extends State<GameShell> {
           },
           onError: (Object error) {
             if (mounted) {
-              setState(() => _socialStatus = 'Room chat is reconnecting…');
+              setState(() => _socialStatus = (l) => l.chatReconnecting);
             }
           },
         );
@@ -569,9 +604,7 @@ class _GameShellState extends State<GameShell> {
           if (mounted &&
               _room?.code == code &&
               _room?.version == ui['version']) {
-            setState(
-              () => _socialStatus = 'Turn sharing is temporarily unavailable. Gameplay remains available.',
-            );
+            setState(() => _socialStatus = (l) => l.sharingUnavailable);
           }
         }
       }
@@ -593,13 +626,25 @@ class _GameShellState extends State<GameShell> {
       FocusScope.of(context).unfocus();
       setState(() => _chatMinimized = true);
     },
-    sender: roomDeviceLabel(_room!.seats, _rooms!.uid),
-    messages: _social.messages,
+    sender: roomDeviceLabel(_room!.seats, _rooms!.uid, format: _l.deviceLabel),
+    messages: _social.messages
+        .map(
+          (message) => {
+            ...message,
+            if (message['uid'] is String)
+              'sender': roomDeviceLabel(
+                _room!.seats,
+                message['uid'] as String,
+                format: _l.deviceLabel,
+              ),
+          },
+        )
+        .toList(),
     onSend: (text) => _sendSocial('chat', {'text': text}),
     onReact: (emoji) => _sendSocial('reaction', {'emoji': emoji}),
     reducedMotion: _reducedMotion,
     onReducedMotion: (value) => setState(() => _reducedMotion = value),
-    status: _socialStatus,
+    status: _socialStatus?.call(_l),
   );
 
   Widget _onlineFrame(Widget child) {
@@ -657,7 +702,19 @@ class _GameShellState extends State<GameShell> {
             Positioned.fill(
               bottom: MediaQuery.viewInsetsOf(context).bottom,
               child: RoomReactionLayer(
-                reactions: _flyingReactions,
+                reactions: _flyingReactions
+                    .map(
+                      (reaction) => {
+                        ...reaction,
+                        if (reaction['uid'] is String)
+                          'sender': roomDeviceLabel(
+                            _room!.seats,
+                            reaction['uid'] as String,
+                            format: _l.deviceLabel,
+                          ),
+                      },
+                    )
+                    .toList(),
                 reducedMotion: _reducedMotion,
               ),
             ),
@@ -732,7 +789,7 @@ class _GameShellState extends State<GameShell> {
   }
 
   Widget get _reopenChat => IconButton(
-    tooltip: 'Open chat',
+    tooltip: tr(context).openChat,
     icon: const Icon(Icons.chat_bubble_outline),
     onPressed: () => setState(() => _chatMinimized = false),
   );
@@ -836,7 +893,7 @@ class _GameShellState extends State<GameShell> {
     final widgets = <Widget>[];
     String? title;
     if (stage == 'comparison' && position != null) {
-      title = 'Choose the comparison';
+      title = tr(context).chooseComparison;
       for (final option in options) {
         final selected = position;
         final suggested =
@@ -846,13 +903,13 @@ class _GameShellState extends State<GameShell> {
           ListTile(
             title: Text(
               option.orientation == Orientation.horizontal
-                  ? 'Horizontal cards'
-                  : 'Vertical cards',
+                  ? tr(context).horizontalCards
+                  : tr(context).verticalCards,
             ),
             subtitle: Text(
               option.type == GuessOptionType.inBetween
-                  ? 'In-between or outside'
-                  : 'Higher, same, or lower',
+                  ? tr(context).betweenOutside
+                  : tr(context).higherSameLower,
             ),
             tileColor: suggested
                 ? Colors.lightBlue.withValues(alpha: 0.25)
@@ -873,7 +930,7 @@ class _GameShellState extends State<GameShell> {
         );
       }
     } else if (stage == 'guess' && position != null) {
-      title = 'Your guess';
+      title = tr(context).yourGuess;
       final option = options
           .where((o) => o.orientation.name == ui['orientation'])
           .firstOrNull;
@@ -885,19 +942,21 @@ class _GameShellState extends State<GameShell> {
         widgets.add(
           button(
             guess.name,
-            '${_guessLabel(guess)}${suggested ? ' · suggested' : ''}',
+            suggested
+                ? tr(context).suggestedGuess(_guessLabel(guess))
+                : _guessLabel(guess),
             () => _chooseSharedGuess(guess),
             suggested: suggested,
           ),
         );
       }
     } else if (stage == 'adviser') {
-      title = 'Best-move prediction';
+      title = tr(context).bestMovePrediction;
       widgets.add(
         ListTile(
           leading: const Icon(Icons.psychology_outlined),
-          title: const Text('RL model'),
-          subtitle: Text(_rlPolicy.availabilityMessage),
+          title: Text(tr(context).rlModel),
+          subtitle: Text(localizedPolicyStatus(tr(context), _rlPolicy)),
           onTap: active
               ? () => _calculateProposal(_AdvisorMethod.rlModel)
               : null,
@@ -906,19 +965,21 @@ class _GameShellState extends State<GameShell> {
       widgets.add(
         ListTile(
           leading: const Icon(Icons.query_stats_outlined),
-          title: const Text('Pure statistics'),
-          subtitle: const Text(
-            'Estimate your future drinks using public card history.',
-          ),
+          title: Text(tr(context).pureStatistics),
+          subtitle: Text(tr(context).statisticsDescription),
           onTap: active
               ? () => _calculateProposal(_AdvisorMethod.statistics)
               : null,
         ),
       );
     } else if (stage == 'calculating') {
-      title = 'Finding best move…';
+      title = tr(context).findingMove;
       widgets.add(
-        Text(ui['method'] == 'statistics' ? 'Pure statistics' : 'RL model'),
+        Text(
+          ui['method'] == 'statistics'
+              ? tr(context).pureStatistics
+              : tr(context).rlModel,
+        ),
       );
     }
     if (title == null) return null;
@@ -933,7 +994,7 @@ class _GameShellState extends State<GameShell> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Watching ${_game!.currentPlayer}',
+                tr(context).watchingPlayer(_game!.currentPlayer),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -966,7 +1027,7 @@ class _GameShellState extends State<GameShell> {
       setState(() {
         _busy = true;
         _proposal = null;
-        _message = 'Submitting move…';
+        _message = (l) => l.submittingMove;
       });
       if (_isHost) {
         await _queueHostOperation(() => _applyHostAction(action));
@@ -979,7 +1040,7 @@ class _GameShellState extends State<GameShell> {
         if (mounted) {
           setState(() {
             _busy = false;
-            _message = 'Move request sent to host.';
+            _message = (l) => l.moveSent;
           });
         }
       }
@@ -987,7 +1048,7 @@ class _GameShellState extends State<GameShell> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message = 'Move rejected: $error';
+          _message = (l) => l.moveRejected(localizedError(l, error));
         });
       }
     }
@@ -1005,22 +1066,20 @@ class _GameShellState extends State<GameShell> {
       return;
     }
     final _AdvisorMethod? method = await _showMovableGameDialog<_AdvisorMethod>(
-      title: 'Best-move prediction',
+      title: tr(context).bestMovePrediction,
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           ListTile(
             leading: const Icon(Icons.psychology_outlined),
-            title: const Text('RL model'),
-            subtitle: Text(_rlPolicy.availabilityMessage),
+            title: Text(tr(context).rlModel),
+            subtitle: Text(localizedPolicyStatus(tr(context), _rlPolicy)),
             onTap: () => Navigator.pop(context, _AdvisorMethod.rlModel),
           ),
           ListTile(
             leading: const Icon(Icons.query_stats_outlined),
-            title: const Text('Pure statistics'),
-            subtitle: const Text(
-              'Estimate your future drinks using public card history.',
-            ),
+            title: Text(tr(context).pureStatistics),
+            subtitle: Text(tr(context).statisticsDescription),
             onTap: () => Navigator.pop(context, _AdvisorMethod.statistics),
           ),
         ],
@@ -1042,7 +1101,7 @@ class _GameShellState extends State<GameShell> {
       method: method,
       clicked: method.name,
       label:
-          'selected ${method == _AdvisorMethod.statistics ? 'Pure statistics' : 'RL model'}',
+          'selected ${method == _AdvisorMethod.statistics ? tr(context).pureStatistics : tr(context).rlModel}',
     );
     try {
       final AiMoveProposal? proposal = method == _AdvisorMethod.rlModel
@@ -1056,14 +1115,16 @@ class _GameShellState extends State<GameShell> {
       }
       setState(() {
         _proposal = proposal;
-        _message = proposal == null
-            ? 'Finish the pending action before requesting a proposal.'
-            : 'Suggested move: ${proposal.action.label}.';
+        _message = (l) => proposal == null
+            ? l.finishPendingProposal
+            : l.suggestedMove(actionLabel(l, proposal.action));
       });
       _shareUi('suggestion', method: method, clearProposal: proposal == null);
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'Prediction failed: $error');
+        setState(
+          () => _message = (l) => l.predictionFailed(localizedError(l, error)),
+        );
         _shareUi('idle');
       }
     } finally {
@@ -1077,7 +1138,7 @@ class _GameShellState extends State<GameShell> {
     try {
       setState(() {
         _busy = true;
-        _message = 'Starting game…';
+        _message = (l) => l.startingGame;
         _game = WindowGameEngine(
           room.seats.map((RoomSeat seat) => seat.name).toList(),
         );
@@ -1087,7 +1148,7 @@ class _GameShellState extends State<GameShell> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _message = 'Could not start the lobby: $error';
+          _message = (l) => l.startFailed(localizedError(l, error));
         });
       }
     }
@@ -1097,7 +1158,9 @@ class _GameShellState extends State<GameShell> {
     final Future<void> operation = _hostRequestQueue.then((_) => action());
     _hostRequestQueue = operation.catchError((Object error) {
       if (mounted) {
-        setState(() => _message = 'Room request failed: $error');
+        setState(
+          () => _message = (l) => l.requestFailed(localizedError(l, error)),
+        );
       }
     });
     return operation;
@@ -1130,7 +1193,11 @@ class _GameShellState extends State<GameShell> {
           },
           onError: (Object error) {
             if (mounted) {
-              setState(() => _message = 'Room host request error: $error');
+              setState(
+                () =>
+                    _message = (l) =>
+                        l.hostRequestFailed(localizedError(l, error)),
+              );
             }
           },
         );
@@ -1172,16 +1239,15 @@ class _GameShellState extends State<GameShell> {
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'Ignored invalid room request: $error');
+        setState(
+          () => _message = (l) => l.invalidRequest(localizedError(l, error)),
+        );
       }
     } finally {
       unawaited(
         _rooms!.deleteRequest(room.code, request.id).catchError((Object _) {
           if (mounted && _room?.code == room.code) {
-            setState(
-              () => _socialStatus =
-                  'Room request cleanup failed; gameplay remains available.',
-            );
+            setState(() => _socialStatus = (l) => l.cleanupFailed);
           }
         }),
       );
@@ -1270,7 +1336,7 @@ class _GameShellState extends State<GameShell> {
           deckSize: _game!.exportState().deck.length,
         );
         _busy = false;
-        _message = '${_game!.currentPlayer}\'s turn.';
+        _message = (l) => l.playerTurn(_game!.currentPlayer);
       });
     }
   }
@@ -1280,7 +1346,7 @@ class _GameShellState extends State<GameShell> {
     final PolicyAction? suggestedAction = _proposal?.action;
     final List<GuessOption> options = game.getValidOptionsForCard(position);
     if (options.isEmpty) {
-      setState(() => _message = 'That card cannot be selected yet.');
+      setState(() => _message = (l) => l.cardUnavailable);
       return;
     }
     if (_isOnline) {
@@ -1298,7 +1364,7 @@ class _GameShellState extends State<GameShell> {
     final GuessOption? option = options.length == 1
         ? options.single
         : await _showMovableGameDialog<GuessOption>(
-            title: 'Choose the comparison',
+            title: tr(context).chooseComparison,
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: options
@@ -1306,13 +1372,13 @@ class _GameShellState extends State<GameShell> {
                     (GuessOption value) => ListTile(
                       title: Text(
                         value.orientation == Orientation.horizontal
-                            ? 'Horizontal cards'
-                            : 'Vertical cards',
+                            ? tr(context).horizontalCards
+                            : tr(context).verticalCards,
                       ),
                       subtitle: Text(
                         value.type == GuessOptionType.inBetween
-                            ? 'In-between or outside'
-                            : 'Higher, same, or lower',
+                            ? tr(context).betweenOutside
+                            : tr(context).higherSameLower,
                       ),
                       tileColor:
                           suggestedAction?.position == position &&
@@ -1335,7 +1401,7 @@ class _GameShellState extends State<GameShell> {
           );
     if (!mounted || option == null) return;
     final GuessType? guess = await _showMovableGameDialog<GuessType>(
-      title: 'Your guess',
+      title: tr(context).yourGuess,
       content: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -1356,7 +1422,7 @@ class _GameShellState extends State<GameShell> {
                   suggestedAction?.position == position &&
                           suggestedAction?.orientation == option.orientation &&
                           suggestedAction?.guess == value
-                      ? '${_guessLabel(value)} · suggested'
+                      ? tr(context).suggestedGuess(_guessLabel(value))
                       : _guessLabel(value),
                 ),
               ),
@@ -1383,65 +1449,60 @@ class _GameShellState extends State<GameShell> {
   Future<void> _handle(GuessResult result) async {
     final WindowGameEngine game = _game!;
     if (result.invalidReason != null) {
-      setState(() => _message = result.invalidReason!);
+      setState(
+        () => _message = (l) => localizedDomainText(l, result.invalidReason!),
+      );
       return;
     }
     if (result.requiresSameConfirmation) {
       await _showMovableGameDialog<void>(
-        title: 'Correct: same rank!',
+        title: tr(context).sameCorrect,
         barrierDismissible: false,
-        content: Text(
-          'Every other player takes one swallow. ${game.currentPlayer} can continue after confirming.',
-        ),
+        content: Text(tr(context).samePenalty(game.currentPlayer)),
         actions: <Widget>[
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Continue'),
+            child: Text(tr(context).continueGame),
           ),
         ],
       );
       if (!mounted) return;
       final GuessResult confirmed = game.confirmSameGuess();
       setState(
-        () => _message = confirmed.gameEnded
-            ? 'The window is complete!'
-            : 'Correct. You may guess again or end your turn.',
+        () =>
+            _message = (l) =>
+                confirmed.gameEnded ? l.windowComplete : l.correctContinue,
       );
       return;
     }
     if (result.requiresRemovalConfirmation) {
       final int penalty = game.pendingPenalty;
       final int removed = game.pendingRemovals.length;
-      setState(
-        () => _message = 'Wrong guess. The revealed card and every card with a red border will be redealt.',
-      );
+      setState(() => _message = (l) => l.wrongRedeal);
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
       await _showMovableGameDialog<void>(
-        title: 'Wrong guess',
+        title: tr(context).wrongGuess,
         barrierDismissible: false,
         content: Text(
-          '${game.currentPlayer} takes $penalty swallow${penalty == 1 ? '' : 's'}. $removed card${removed == 1 ? '' : 's'} will be removed and redealt.',
+          tr(context).wrongPenalty(game.currentPlayer, penalty, removed),
         ),
         actions: <Widget>[
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Redeal cards'),
+            child: Text(tr(context).redealCards),
           ),
         ],
       );
       if (!mounted) return;
       game.confirmRemovals();
-      setState(
-        () => _message =
-            '${game.currentPlayer} keeps the turn after a wrong guess.',
-      );
+      setState(() => _message = (l) => l.keepsTurn(game.currentPlayer));
       return;
     }
     setState(
-      () => _message = result.gameEnded
-          ? 'The window is complete!'
-          : 'Correct. You may guess again or end your turn.',
+      () =>
+          _message = (l) =>
+              result.gameEnded ? l.windowComplete : l.correctContinue,
     );
   }
 
@@ -1459,26 +1520,26 @@ class _GameShellState extends State<GameShell> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
+                    const Align(
+                      alignment: Alignment.centerRight,
+                      child: LanguagePicker(showName: true),
+                    ),
                     Text(
-                      'Join Window',
+                      tr(context).joinWindow,
                       style: Theme.of(context).textTheme.headlineLarge,
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Play with friends, directly in your browser. No installation required.',
-                    ),
+                    Text(tr(context).browserDescription),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Ask your host to create a lobby in the smartphone or PC/laptop app and share its room code.',
-                    ),
+                    Text(tr(context).askHost),
                     const SizedBox(height: 24),
                     TextField(
                       controller: _roomCode,
                       enabled: widget.firebaseEnabled && !_busy,
                       textCapitalization: TextCapitalization.characters,
                       autocorrect: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Room code',
+                      decoration: InputDecoration(
+                        labelText: tr(context).roomCode,
                         hintText: 'ABC234',
                       ),
                     ),
@@ -1486,10 +1547,10 @@ class _GameShellState extends State<GameShell> {
                     TextField(
                       controller: _seatName,
                       enabled: widget.firebaseEnabled && !_busy,
-                      decoration: const InputDecoration(
-                        labelText: 'Players on this device',
+                      decoration: InputDecoration(
+                        labelText: tr(context).devicePlayers,
                         hintText: 'Anna, Ben',
-                        helperText: 'One or more names, separated by commas.',
+                        helperText: tr(context).namesHelper,
                       ),
                       onSubmitted: (_) {
                         if (widget.firebaseEnabled && !_busy) _joinRoom();
@@ -1497,7 +1558,7 @@ class _GameShellState extends State<GameShell> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      _message,
+                      _message(_l),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 20),
@@ -1506,7 +1567,9 @@ class _GameShellState extends State<GameShell> {
                           ? _joinRoom
                           : null,
                       icon: const Icon(Icons.login),
-                      label: Text(_busy ? 'Joining…' : 'Join online room'),
+                      label: Text(
+                        _busy ? tr(context).joining : tr(context).joinOnline,
+                      ),
                     ),
                   ],
                 ),
@@ -1536,33 +1599,35 @@ class _GameShellState extends State<GameShell> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
+                      const Align(
+                        alignment: Alignment.centerRight,
+                        child: LanguagePicker(showName: true),
+                      ),
                       Text(
-                        'Window',
+                        tr(context).appTitle,
                         style: Theme.of(context).textTheme.displaySmall,
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'A local, cross-platform edition of the German card game.',
-                      ),
+                      Text(tr(context).localDescription),
                       const SizedBox(height: 24),
                       TextField(
                         controller: _players,
-                        decoration: const InputDecoration(
-                          labelText: 'Players',
+                        decoration: InputDecoration(
+                          labelText: tr(context).players,
                           hintText: 'Anna, Ben, Carla',
                         ),
                         onSubmitted: (_) => _start(),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _message,
+                        _message(_l),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 20),
                       FilledButton.icon(
                         onPressed: _start,
                         icon: const Icon(Icons.play_arrow),
-                        label: const Text('Start local game'),
+                        label: Text(tr(context).startLocal),
                       ),
                       const SizedBox(height: 10),
                       FilledButton.icon(
@@ -1570,32 +1635,32 @@ class _GameShellState extends State<GameShell> {
                         icon: const Icon(Icons.group),
                         label: Text(
                           widget.firebaseEnabled
-                              ? 'Create online lobby'
-                              : 'Online rooms need Firebase setup',
+                              ? tr(context).createLobby
+                              : tr(context).firebaseSetupNeeded,
                         ),
                       ),
                       const Divider(height: 32),
                       TextField(
                         controller: _roomCode,
                         textCapitalization: TextCapitalization.characters,
-                        decoration: const InputDecoration(
-                          labelText: 'Room code',
+                        decoration: InputDecoration(
+                          labelText: tr(context).roomCode,
                         ),
                       ),
                       const SizedBox(height: 8),
                       TextField(
                         controller: _seatName,
-                        decoration: const InputDecoration(
-                          labelText: 'Players on this device',
+                        decoration: InputDecoration(
+                          labelText: tr(context).devicePlayers,
                           hintText: 'Anna, Ben',
-                          helperText: 'Separate names with commas.',
+                          helperText: tr(context).separateNames,
                         ),
                       ),
                       const SizedBox(height: 10),
                       OutlinedButton.icon(
                         onPressed: _busy ? null : _joinRoom,
                         icon: const Icon(Icons.login),
-                        label: const Text('Join online room'),
+                        label: Text(tr(context).joinOnline),
                       ),
                     ],
                   ),
@@ -1612,11 +1677,12 @@ class _GameShellState extends State<GameShell> {
         Scaffold(
           bottomNavigationBar: _chatBelow ? _roomFooter() : null,
           appBar: AppBar(
-            title: const Text('Window lobby'),
+            title: Text(tr(context).windowLobby),
             actions: <Widget>[
+              const LanguagePicker(),
               if (_isOnline && _chatMinimized) _reopenChat,
               IconButton(
-                tooltip: 'Leave lobby and return to menu',
+                tooltip: tr(context).leaveLobby,
                 icon: const Icon(Icons.home_outlined),
                 onPressed: _returnToMenu,
               ),
@@ -1637,28 +1703,24 @@ class _GameShellState extends State<GameShell> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
                             Text(
-                              'Room ${room.code}',
+                              tr(context).roomTitle(room.code),
                               style: Theme.of(context).textTheme.headlineSmall,
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               _isHost
-                                  ? 'Share this code. Players may join until you start the game.'
-                                  : 'You are in the lobby. Waiting for the host to start.',
+                                  ? tr(context).shareCode
+                                  : tr(context).waitingStart,
                               textAlign: TextAlign.center,
                             ),
                             if (_isHost &&
                                 WindowFirebaseOptions.browserUrl !=
                                     null) ...<Widget>[
                               const SizedBox(height: 12),
-                              const Text(
-                                'Friends can join in the app with this room code, or in their browser at:',
-                              ),
+                              Text(tr(context).friendsJoin),
                               SelectableText(WindowFirebaseOptions.browserUrl!),
-                              const Text(
-                                'Browser players enter the room code above. No installation required.',
-                              ),
+                              Text(tr(context).browserCodeHelp),
                               TextButton.icon(
                                 onPressed: () async {
                                   await Clipboard.setData(
@@ -1668,18 +1730,19 @@ class _GameShellState extends State<GameShell> {
                                   );
                                   if (mounted) {
                                     setState(
-                                      () => _message =
-                                          'Browser address copied. Share it together with room ${room.code}.',
+                                      () =>
+                                          _message = (l) =>
+                                              l.browserCopied(room.code),
                                     );
                                   }
                                 },
                                 icon: const Icon(Icons.copy),
-                                label: const Text('Copy browser address'),
+                                label: Text(tr(context).copyBrowser),
                               ),
                             ],
                             const SizedBox(height: 20),
                             Text(
-                              'Players (${room.seats.length})',
+                              tr(context).playerCount(room.seats.length),
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                             const SizedBox(height: 8),
@@ -1689,13 +1752,13 @@ class _GameShellState extends State<GameShell> {
                                 leading: const Icon(Icons.person),
                                 title: Text(seat.name),
                                 trailing: seat.ownerUid == room.hostUid
-                                    ? const Text('Host')
+                                    ? Text(tr(context).host)
                                     : null,
                               ),
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              _message,
+                              _message(_l),
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                             if (_isHost) ...<Widget>[
@@ -1710,7 +1773,7 @@ class _GameShellState extends State<GameShell> {
                                         );
                                       },
                                 icon: const Icon(Icons.play_arrow),
-                                label: const Text('Start game and lock lobby'),
+                                label: Text(tr(context).startLockLobby),
                               ),
                             ],
                           ],
@@ -1729,7 +1792,7 @@ class _GameShellState extends State<GameShell> {
     final Widget info = _Info(
       game: game,
       snapshot: snapshot,
-      message: _message,
+      message: _message(_l),
       roomCode: _room?.code,
       deckSize: _isOnline && !_isHost ? _room!.deckSize : snapshot.deckSize,
       busy: _busy,
@@ -1741,14 +1804,14 @@ class _GameShellState extends State<GameShell> {
           game.endTurn();
           setState(() {
             _proposal = null;
-            _message = '${game.currentPlayer}\'s turn.';
+            _message = (l) => l.playerTurn(game.currentPlayer);
           });
         }
       },
       onReset: () {
         if (!_isOnline) {
           game.resetGame();
-          setState(() => _message = '${game.currentPlayer} starts a new game.');
+          setState(() => _message = (l) => l.newGameStarts(game.currentPlayer));
         }
       },
       onConfirmSame: () => _turnAction(<String, dynamic>{
@@ -1760,7 +1823,7 @@ class _GameShellState extends State<GameShell> {
       proposal: _visibleProposal,
       pressedTarget: _pressedTarget,
       proposing: _proposing || _turnUi['stage'] == 'calculating',
-      policyStatus: _rlPolicy.availabilityMessage,
+      policyStatus: localizedPolicyStatus(tr(context), _rlPolicy),
       onPropose: _proposeMove,
     );
     final Widget board = _Board(
@@ -1777,13 +1840,12 @@ class _GameShellState extends State<GameShell> {
     final scaffold = Scaffold(
       bottomNavigationBar: _isOnline && _chatBelow ? _roomFooter() : null,
       appBar: AppBar(
-        title: const Text('Window'),
+        title: Text(tr(context).appTitle),
         actions: <Widget>[
+          const LanguagePicker(),
           if (_isOnline && _chatMinimized) _reopenChat,
           IconButton(
-            tooltip: _isOnline
-                ? 'Leave room and return to menu'
-                : 'Return to menu',
+            tooltip: _isOnline ? tr(context).leaveRoom : tr(context).returnMenu,
             icon: const Icon(Icons.home_outlined),
             onPressed: _returnToMenu,
           ),
@@ -1885,14 +1947,14 @@ class _Info extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  'Current player',
+                  tr(context).currentPlayer,
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
               if (roomCode == null)
                 IconButton(
                   onPressed: onReset,
-                  tooltip: 'New local game',
+                  tooltip: tr(context).newLocal,
                   icon: const Icon(Icons.refresh),
                 ),
             ],
@@ -1905,22 +1967,19 @@ class _Info extends StatelessWidget {
           Text(message),
           if (roomCode != null) ...<Widget>[
             const SizedBox(height: 8),
-            SelectableText('Online room: $roomCode'),
-            if (!canControl)
-              const Text('Waiting for the player who owns this seat.'),
+            SelectableText(tr(context).onlineRoom(roomCode!)),
+            if (!canControl) Text(tr(context).waitingPlayer),
           ],
           if (snapshot.mustSelectAdjacentToHandle)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'Handle rule: choose a card directly beside the handle.',
-              ),
+              child: Text(tr(context).handleRule),
             ),
           const Divider(height: 30),
           Text(
             deckSize == null
-                ? 'Deck: managed by host'
-                : 'Deck: $deckSize cards',
+                ? tr(context).hostDeck
+                : tr(context).deckCards(deckSize!),
           ),
           const SizedBox(height: 12),
           FilledButton(
@@ -1941,8 +2000,8 @@ class _Info extends StatelessWidget {
                 : null,
             child: Text(
               proposal?.action.isPass == true
-                  ? 'End turn · suggested'
-                  : 'End turn',
+                  ? tr(context).endTurnSuggested
+                  : tr(context).endTurn,
             ),
           ),
           if (roomCode != null &&
@@ -1950,7 +2009,7 @@ class _Info extends StatelessWidget {
             const SizedBox(height: 8),
             FilledButton.tonal(
               onPressed: canControl && !busy ? onConfirmSame : null,
-              child: const Text('Confirm same-rank penalty'),
+              child: Text(tr(context).confirmSame),
             ),
           ],
           if (roomCode != null &&
@@ -1958,33 +2017,38 @@ class _Info extends StatelessWidget {
             const SizedBox(height: 8),
             FilledButton.tonal(
               onPressed: canControl && !busy ? onConfirmRemovals : null,
-              child: const Text('Redeal marked cards'),
+              child: Text(tr(context).redealMarked),
             ),
           ],
           const Divider(height: 30),
           OutlinedButton.icon(
             onPressed: canControl && !busy && !proposing ? onPropose : null,
             icon: const Icon(Icons.psychology_outlined),
-            label: Text(proposing ? 'Finding best move…' : 'Propose best move'),
+            label: Text(
+              proposing ? tr(context).findingMove : tr(context).proposeMove,
+            ),
           ),
           const SizedBox(height: 8),
           Text(policyStatus, style: Theme.of(context).textTheme.bodySmall),
           if (proposal != null) ...<Widget>[
             const SizedBox(height: 8),
             Text(
-              'Suggestion: ${proposal!.action.label}',
+              tr(context)
+                  .suggestion(actionLabel(tr(context), proposal!.action)),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             Text(
-              '${proposal!.source} · ${proposal!.action.isPass && proposal!.source.contains('statistics') ? 'no immediate drinks' : '${proposal!.source.contains('statistics') ? 'estimated success' : 'model confidence'} ${(proposal!.confidence * 100).toStringAsFixed(0)}%'}'
-              '${proposal!.valueEstimate == null ? '' : ' · value ${proposal!.valueEstimate!.toStringAsFixed(2)}'}'
-              '${proposal!.expectedDrinks == null ? '' : ' · estimated remaining drinks ${proposal!.expectedDrinks!.toStringAsFixed(1)}'}',
+              proposalDetails(tr(context), proposal!),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (proposal!.explanation != null) Text(proposal!.explanation!),
+            if (proposal!.explanation != null)
+              Text(localizedDomainText(tr(context), proposal!.explanation!)),
           ],
           const Divider(height: 30),
-          Text('Scoreboard', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            tr(context).scoreboard,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 8),
           _Scoreboard(
             players: game.players,
@@ -2132,9 +2196,38 @@ class _Scoreboard extends StatelessWidget {
                   .reduce((double total, double value) => total + value) /
               playerStats.length;
 
+    final headers = [
+      tr(context).player,
+      tr(context).drinks,
+      tr(context).correct,
+      tr(context).wrong,
+      tr(context).ratio,
+      tr(context).changed,
+      tr(context).turns,
+    ];
+    const weights = [1.5, 1.0, 1.0, 1.0, 1.25, 1.2, 1.0];
+    final totalWeight = weights.reduce((a, b) => a + b);
+    var minimumWidth = 520.0;
+    for (var index = 0; index < headers.length; index++) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: headers[index],
+          style: DefaultTextStyle.of(context).style
+              .copyWith(fontWeight: FontWeight.bold),
+        ),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      minimumWidth = math.max(
+        minimumWidth,
+        (painter.width + 12) * totalWeight / weights[index],
+      );
+      painter.dispose();
+    }
+
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final bool compact = constraints.maxWidth < 520;
+        final bool compact = constraints.maxWidth < minimumWidth;
         final Widget table = Table(
           border: TableBorder.all(color: Theme.of(context).dividerColor),
           columnWidths: const <int, TableColumnWidth>{
@@ -2148,32 +2241,28 @@ class _Scoreboard extends StatelessWidget {
           },
           defaultVerticalAlignment: TableCellVerticalAlignment.middle,
           children: <TableRow>[
-            _tableRow(const <String>[
-              'Player',
-              'Drinks',
-              'Correct',
-              'Wrong',
-              'C/W ratio',
-              'Changed',
-              'Turns',
-            ], bold: true),
+            _tableRow(headers, bold: true),
             for (final String player in players)
               _tableRow(<String>[
                 player,
                 '${stats[player]!.drinks}',
                 '${stats[player]!.correct}',
                 '${stats[player]!.wrong}',
-                _correctWrongRatio(stats[player]!).toStringAsFixed(2),
+                localizedNumber(
+                  tr(context),
+                  _correctWrongRatio(stats[player]!),
+                  2,
+                ),
                 '${stats[player]!.changedCards}',
                 '${stats[player]!.turns}',
               ], bold: player == currentPlayer),
             _tableRow(<String>[
-              'Total',
+              tr(context).total,
               '$totalDrinks',
               '$totalCorrect',
               '$totalWrong',
-              averageRatio.toStringAsFixed(2),
-              '$totalChanged of 17',
+              localizedNumber(tr(context), averageRatio, 2),
+              tr(context).changedTotal(totalChanged),
               '$totalTurns',
             ], bold: true),
           ],
@@ -2181,7 +2270,7 @@ class _Scoreboard extends StatelessWidget {
         if (!compact) return table;
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: SizedBox(width: 520, child: table),
+          child: SizedBox(width: minimumWidth, child: table),
         );
       },
     );
@@ -2275,10 +2364,17 @@ class _Board extends StatelessWidget {
     return Semantics(
       button: selectable,
       label: position == handlePosition
-          ? 'Handle card'
-          : '${faceUp ? 'Face-up ${game.cardLabel(card!)}' : 'Face-down card'}, '
-                'row ${position.row + 1}, column ${position.column + 1}'
-                '${legal ? ', selectable' : ''}${proposed ? ', suggested' : ''}${selected ? ', selected' : ''}',
+          ? tr(context).handleCard
+          : tr(context).cardSemantics(
+              faceUp
+                  ? tr(context).faceUp(game.cardLabel(card!))
+                  : tr(context).faceDown,
+              position.row + 1,
+              position.column + 1,
+              legal ? tr(context).selectableSuffix : '',
+              proposed ? tr(context).suggestedSuffix : '',
+              selected ? tr(context).selectedSuffix : '',
+            ),
       child: InkWell(
         key: ValueKey('card:${position.row}:${position.column}'),
         onTap: selectable ? () => onSelect(position) : null,
@@ -2330,11 +2426,3 @@ class _Board extends StatelessWidget {
     );
   }
 }
-
-String _guessLabel(GuessType guess) => switch (guess) {
-  GuessType.higher => 'Higher',
-  GuessType.same => 'Same',
-  GuessType.lower => 'Lower',
-  GuessType.inBetween => 'In-between',
-  GuessType.outside => 'Outside',
-};
