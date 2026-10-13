@@ -33,7 +33,7 @@ def main():
         # Flutter ships sizable WASM assets; avoid saturating slower uplinks.
         env.setdefault("FIREBASE_HOSTING_UPLOAD_CONCURRENCY", "4")
         subprocess.run(
-            ["npx", "--yes", "firebase-tools", "deploy", "--only", "hosting",
+            ["npx", "--yes", "firebase-tools", "deploy", "--only", "database,hosting",
              "--project", config["FIREBASE_PROJECT_ID"], "--non-interactive"],
             cwd=root, check=True, env=env,
         )

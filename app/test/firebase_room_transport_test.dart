@@ -11,8 +11,167 @@ import 'package:window_game/firebase_room_repository.dart';
 import 'package:window_game/game_engine.dart';
 import 'package:window_game/game_state_codec.dart';
 import 'package:window_game/windows_firebase_rest.dart';
+import 'package:window_game/room_social.dart';
 
 void main() {
+  test(
+    'view sharing uses its own HTTP client and never queues a move behind it',
+    () async {
+      final gate = Completer<http.Response>();
+      final uiCalls = <http.Request>[];
+      final gameCalls = <http.Request>[];
+      final rooms = WindowsFirebaseRestRoomRepository(
+        options: const WindowFirebaseRestOptions(
+          apiKey: 'key',
+          databaseUrl: 'https://test.invalid',
+        ),
+        client: MockClient((request) async {
+          gameCalls.add(request);
+          return http.Response(
+            request.url.host == 'identitytoolkit.googleapis.com'
+                ? '{"localId":"guest","idToken":"token"}'
+                : '{"name":"move"}',
+            200,
+          );
+        }),
+        uiClient: MockClient((request) {
+          uiCalls.add(request);
+          return gate.future;
+        }),
+      );
+      await rooms.signInAnonymously();
+      final sharing = rooms.publishTurnUi('abc234', {
+        'version': 7,
+        'playerIndex': 0,
+        'stage': 'guess',
+        'eventId': 'guest:1',
+        'row': 2,
+        'column': 4,
+        'orientation': 'horizontal',
+      });
+      await rooms.requestAction(
+        roomCode: 'abc234',
+        expectedVersion: 7,
+        action: {'type': 'endTurn'},
+      );
+      expect(gate.isCompleted, isFalse);
+      expect(gameCalls.last.url.path, '/rooms/ABC234/requests.json');
+      expect(
+        uiCalls.single.url.path,
+        '/rooms/ABC234/social/turnViews/guest.json',
+      );
+      expect(uiCalls.single.method, 'PUT');
+      expect(jsonDecode(uiCalls.single.body)['createdAt'], {
+        '.sv': 'timestamp',
+      });
+      expect(jsonDecode(uiCalls.single.body)['uid'], 'guest');
+      gate.complete(http.Response('null', 200));
+      await sharing;
+    },
+  );
+  test(
+    'social stream distinguishes reconnect snapshots from live deltas',
+    () async {
+      final events = StreamController<FirebaseEvent>();
+      final reconnected = StreamController<FirebaseEvent>();
+      final reopened = Completer<void>();
+      var opens = 0;
+      final rooms = WindowsFirebaseRestRoomRepository(
+        options: const WindowFirebaseRestOptions(
+          apiKey: 'key',
+          databaseUrl: 'https://test.invalid',
+        ),
+        client: MockClient(
+          (_) async =>
+              http.Response('{"localId":"host","idToken":"token"}', 200),
+        ),
+        eventOpener: (uri) {
+          expect(uri.path, '/rooms/ABC234/social.json');
+          if (opens++ == 0) return events.stream;
+          reopened.complete();
+          return reconnected.stream;
+        },
+      );
+      await rooms.signInAnonymously();
+      final received = <RoomSocialSnapshot>[];
+      final listener = rooms.observeSocial('abc234').listen(received.add);
+      for (final event in [
+        {
+          'path': '/',
+          'data': {
+            'reactions': {
+              'guest': {'id': 'old'},
+            },
+          },
+        },
+        {
+          'path': '/reactions/guest',
+          'data': {'id': 'new'},
+        },
+        {
+          'path': '/',
+          'data': {
+            'reactions': {
+              'guest': {'id': 'missed'},
+            },
+          },
+        },
+      ]) {
+        events.add(FirebaseEvent('put', jsonEncode(event)));
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(received.map((s) => s.isFullSnapshot), [true, false, false]);
+      expect(received[1].reactions['guest']['id'], 'new');
+      await events.close();
+      await reopened.future.timeout(const Duration(seconds: 2));
+      reconnected.add(
+        FirebaseEvent('put', jsonEncode({'path': '/', 'data': null})),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(received.last.isFullSnapshot, isTrue);
+      await listener.cancel();
+      await reconnected.close();
+    },
+  );
+
+  test(
+    'social requests use server timestamps and host publishes only a delta',
+    () async {
+      final calls = <http.Request>[];
+      final rooms = WindowsFirebaseRestRoomRepository(
+        options: const WindowFirebaseRestOptions(
+          apiKey: 'key',
+          databaseUrl: 'https://test.invalid',
+        ),
+        client: MockClient((request) async {
+          calls.add(request);
+          return http.Response(
+            request.url.host == 'identitytoolkit.googleapis.com'
+                ? '{"localId":"guest","idToken":"token"}'
+                : 'null',
+            200,
+          );
+        }),
+      );
+      await rooms.signInAnonymously();
+      await rooms.requestSocial(
+        roomCode: 'abc234',
+        type: 'chat',
+        action: {'text': 'Hello 😂'},
+      );
+      final request = jsonDecode(calls.last.body);
+      expect(calls.last.url.path, '/rooms/ABC234/requests.json');
+      expect(request['uid'], 'guest');
+      expect(request['createdAt'], {'.sv': 'timestamp'});
+      await rooms.publishSocial('abc234', {
+        'messages/new': {'text': 'Hello'},
+        'messages/old': null,
+      });
+      expect(calls.last.method, 'PATCH');
+      expect(calls.last.url.path, '/rooms/ABC234/social.json');
+      expect(jsonDecode(calls.last.body).length, 2);
+    },
+  );
   test(
     'requests arrive live, are deduplicated across reconnect snapshots',
     () async {
@@ -99,6 +258,10 @@ void main() {
     expect(body['public']['version'], 2);
     expect(body['public']['state']['deck'], isEmpty);
     expect(body['private']['deck'], isNotEmpty);
+    // Optional social features must not make a board/lobby update require
+    // permissions outside the original public/private paths.
+    expect(body.keys.toSet(), {'public', 'private'});
+    expect(body['public']['members'], {'host': true});
   });
 
   test(

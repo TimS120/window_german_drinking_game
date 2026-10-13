@@ -9,6 +9,7 @@ import 'firebase_events.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
 import 'game_state_codec.dart';
+import 'room_social.dart';
 
 /// Firebase HTTPS transport shared by installed apps and browser guests.
 ///
@@ -19,9 +20,13 @@ class WindowsFirebaseRestRoomRepository {
   WindowsFirebaseRestRoomRepository({
     WindowFirebaseRestOptions? options,
     http.Client? client,
+    http.Client? uiClient,
     this.eventOpener,
   }) : _options = options ?? WindowFirebaseOptions.windowsRestOptions!,
-       _client = client ?? http.Client();
+       _client = client ?? http.Client(),
+       _uiClient = uiClient ?? client ?? http.Client();
+
+  final http.Client _uiClient;
 
   final WindowFirebaseRestOptions _options;
   final http.Client _client;
@@ -70,6 +75,51 @@ class WindowsFirebaseRestRoomRepository {
               )
             : null,
       );
+
+  Stream<RoomSocialSnapshot> observeSocial(String code) =>
+      _watch('rooms/${code.toUpperCase()}/social', includeMetadata: true).map((
+        value,
+      ) {
+        final snapshot = value as FirebaseSnapshot;
+        return RoomSocialSnapshot(
+          snapshot.value,
+          isFullSnapshot: snapshot.complete,
+        );
+      });
+
+  Future<RoomSocialSnapshot> loadSocial(String code) async =>
+      RoomSocialSnapshot(await _read('rooms/${code.toUpperCase()}/social'));
+
+  Future<void> publishSocial(String code, Map<String, dynamic> patch) =>
+      _write('PATCH', 'rooms/${code.toUpperCase()}/social', patch);
+
+  /// Ephemeral presentation goes straight to spectators, without the host's
+  /// game-request queue or the gameplay HTTP client's connection pool.
+  Future<void> publishTurnUi(String code, Map<String, dynamic> ui) async {
+    await _jsonRequest(
+      method: 'PUT',
+      uri: _databaseUri('rooms/${code.toUpperCase()}/social/turnViews/$uid'),
+      body: {
+        ...ui,
+        'uid': uid,
+        'createdAt': {'.sv': 'timestamp'},
+      },
+      client: _uiClient,
+    );
+  }
+
+  Future<void> requestSocial({
+    required String roomCode,
+    required String type,
+    required Map<String, dynamic> action,
+    int expectedVersion = -1,
+  }) => _addRequest(roomCode, {
+    'uid': uid,
+    'type': type,
+    'action': action,
+    'expectedVersion': expectedVersion,
+    'createdAt': {'.sv': 'timestamp'},
+  });
 
   Future<OnlineRoom?> loadRoom(String roomCode) async {
     final Object? value = await _read('rooms/${roomCode.toUpperCase()}/public');
@@ -190,11 +240,13 @@ class WindowsFirebaseRestRoomRepository {
     null,
   );
 
-  Stream<Object?> _watch(String path) => watchFirebase(
-    () => _databaseUri(path),
-    open: eventOpener,
-    refreshAuth: _refreshAuth,
-  );
+  Stream<Object?> _watch(String path, {bool includeMetadata = false}) =>
+      watchFirebase(
+        () => _databaseUri(path),
+        open: eventOpener,
+        refreshAuth: _refreshAuth,
+        includeMetadata: includeMetadata,
+      );
 
   Future<void> _refreshAuth() async {
     if (_refreshToken == null) {
@@ -255,13 +307,16 @@ class WindowsFirebaseRestRoomRepository {
     required String method,
     required Uri uri,
     Object? body,
+    http.Client? client,
   }) async {
     final http.Request request = http.Request(method, uri);
     if (body != null) {
       request.headers['content-type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    final http.StreamedResponse response = await _client.send(request);
+    final http.StreamedResponse response = await (client ?? _client).send(
+      request,
+    );
     final String text = await response.stream.bytesToString();
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
@@ -290,6 +345,10 @@ class WindowsFirebaseRestRoomRepository {
     'hostUid': hostUid,
     'version': version,
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
+    'members': {
+      for (final seat in seats)
+        if (seat.ownerUid != null) seat.ownerUid!: true,
+    },
     'started': started,
     'deckSize': state.deck.length,
     'state': _publicState(state),

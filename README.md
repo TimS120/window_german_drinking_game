@@ -115,7 +115,15 @@ timers; the host still validates each move. Private and public state publish
 together in one atomic update. Connections retry after interruptions and refresh
 expired sign-in credentials. Network latency still affects delivery. Keep the
 host app open during a game, especially on a smartphone. Cursor sharing is not
-included.
+included. Online rooms include chat below the game on phones and in a right-hand column
+on tablets and desktops, flying emoji reactions, and
+a shared view of the active player's selections, comparison/guess panels, and
+adviser suggestions. Spectators see legal-card highlights and advice without
+gaining permission to play the turn.
+
+Chat can be minimized with the minus button in its header and reopened with the
+chat button in the app bar. The board and statistics reclaim the freed space;
+unsent drafts and incoming messages are retained while chat is minimized.
 
 From the repository root, build and deploy the browser client:
 
@@ -124,7 +132,7 @@ python3 tools/browser.py deploy
 ```
 
 The helper reads the local Firebase configuration, builds the Flutter guest
-client, and deploys **only Hosting** to that project. A Firebase CLI login,
+client, and deploys **Database rules and Hosting** to that project. A Firebase CLI login,
 Node.js/npm, Python 3, and Flutter are required. Build without publishing with:
 
 ```bash
@@ -135,6 +143,53 @@ After a successful deployment, the browser client is available at
 `https://YOUR_PROJECT_ID.web.app` (also `https://YOUR_PROJECT_ID.firebaseapp.com`).
 Rebuild and publish it when updating the game. The browser interface only
 joins rooms; local play and lobby creation belong to the installed apps.
+
+For chat and the shared turn view, update the installed host app as well as the
+browser client, deploy the new rules, and create a new room. Older hosts do not
+relay social events or publish room membership for the new social access rules.
+Board/lobby updates use only the original public/private paths, so optional
+social permissions cannot block core gameplay. The new rules also preserve
+move requests for older hosts that do not yet publish a membership map.
+
+### Chat, reactions, and watching a turn
+
+Chat is available in the lobby, during play, and after the game finishes while
+the host remains connected. The panel stays at the bottom; on small screens,
+expand its history using the arrow. Messages include a sender and local time;
+the room retains its latest 100 messages, with a maximum of 500 characters each.
+One-player devices use the player's name. Shared devices use labels such as
+`Device 1 (Max, Heiko, Tom)`; numbering follows the order devices joined.
+
+Tap an emoji below the composer to release a short burst on every connected
+device. A burst carries one event, and all animation runs locally. Reactions
+have a one-second device cooldown, at most five bursts appear at once, and the
+motion button reduces the effect to a stationary reaction. System reduced-motion
+preferences are also respected. Reconnection restores chat and turn panels
+without replaying reactions or clicks from the reconnect snapshot.
+
+Yellow card borders show legal choices to everyone; blue marks the suggested
+card. Selecting a card also thickens its border. The original movable dialogs
+show comparison and guess choices and adviser selection/calculation to everyone;
+spectator controls are read-only. Chat stays usable below the dialog. Dialogs
+can be moved locally, and the active player can dismiss them with the backdrop,
+Escape, or Android Back. Advice details and blue suggested-button highlights
+are shared too. Dialogs adapt to each screen instead of streaming pixels.
+
+The host validates and relays chat and reaction requests in a separate queue
+from gameplay. Messages publish as individual deltas; only the latest reaction
+and turn view per device are stored. The active player publishes its turn view
+directly to Firebase through a separate HTTP client. Rules check seat ownership
+and the board version. View uploads run in the background and coalesce pending
+changes; selecting a card, choosing a guess, and submitting a move never await
+them. Host moves apply directly, and request cleanup also runs in the background.
+The host loads chat history once and keeps its relay cache current. Guests
+use two database streams (board and social); hosts also watch move requests.
+As with gameplay, keep the host app open and connected.
+
+Run Flutter's headless tests from `app/` with `flutter test`. Firebase access
+rules also have an isolated emulator suite in `tools/firebase-tests/`: with
+Node.js 24.12+ and Java 21+ available, run `npm install` followed by `npm test`
+there. It uses a local demo project and does not access the deployed database.
 
 ### Host and guest flow
 

@@ -28,6 +28,8 @@ app/android/local.properties
 firebase-options.json
 .firebase/
 firebase-debug.log
+database-debug.log
+node_modules/
 
 # IDE / OS
 .idea/

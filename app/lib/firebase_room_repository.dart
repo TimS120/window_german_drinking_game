@@ -1,6 +1,7 @@
 import 'game_engine.dart';
 import 'game_state_codec.dart';
 import 'windows_firebase_rest.dart';
+import 'room_social.dart';
 
 class RoomSeat {
   const RoomSeat({required this.index, required this.name, this.ownerUid});
@@ -86,6 +87,7 @@ class RoomRequest {
     required this.expectedVersion,
     this.seatName,
     this.seatNames = const <String>[],
+    this.createdAt,
   });
 
   final String id;
@@ -95,6 +97,7 @@ class RoomRequest {
   final int expectedVersion;
   final String? seatName;
   final List<String> seatNames;
+  final int? createdAt;
 
   List<String> get requestedNames => seatNames.isNotEmpty
       ? seatNames
@@ -112,6 +115,7 @@ class RoomRequest {
             )
           : <String, dynamic>{},
       expectedVersion: (raw['expectedVersion'] as num?)?.toInt() ?? -1,
+      createdAt: (raw['createdAt'] as num?)?.toInt(),
       seatName: raw['seatName'] as String?,
       seatNames:
           (raw['seatNames'] as List?)?.whereType<String>().toList() ??
@@ -124,11 +128,31 @@ class RoomRequest {
 /// This avoids the unstable native Firebase Windows plugin while retaining
 /// Firebase's existing security rules and host-authoritative room model.
 class FirebaseRoomRepository {
-  FirebaseRoomRepository() : _rest = WindowsFirebaseRestRoomRepository();
+  FirebaseRoomRepository({WindowsFirebaseRestRoomRepository? transport})
+    : _rest = transport ?? WindowsFirebaseRestRoomRepository();
 
   final WindowsFirebaseRestRoomRepository _rest;
 
+  Future<void> publishTurnUi(String code, Map<String, dynamic> ui) =>
+      _rest.publishTurnUi(code, ui);
+
   Future<String> signInAnonymously() => _rest.signInAnonymously();
+  Stream<RoomSocialSnapshot> observeSocial(String code) =>
+      _rest.observeSocial(code);
+  Future<RoomSocialSnapshot> loadSocial(String code) => _rest.loadSocial(code);
+  Future<void> publishSocial(String code, Map<String, dynamic> patch) =>
+      _rest.publishSocial(code, patch);
+  Future<void> requestSocial({
+    required String roomCode,
+    required String type,
+    required Map<String, dynamic> action,
+    int expectedVersion = -1,
+  }) => _rest.requestSocial(
+    roomCode: roomCode,
+    type: type,
+    action: action,
+    expectedVersion: expectedVersion,
+  );
   String get uid => _rest.uid;
   Stream<OnlineRoom?> observeRoom(String roomCode) =>
       _rest.observeRoom(roomCode);

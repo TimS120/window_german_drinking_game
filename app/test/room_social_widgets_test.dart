@@ -1,0 +1,785 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart' hide Orientation;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:window_game/firebase_options.dart';
+import 'package:window_game/firebase_room_repository.dart';
+import 'package:window_game/game_engine.dart';
+import 'package:window_game/main.dart';
+import 'package:window_game/rl_policy.dart';
+import 'package:window_game/room_social.dart';
+import 'package:window_game/room_social_widgets.dart';
+import 'package:window_game/windows_firebase_rest.dart';
+
+class _Policy extends WindowRlPolicy {
+  @override
+  Future<void> preload() async {}
+  @override
+  Future<AiMoveProposal?> propose(WindowGameEngine game) async {
+    final position = game.snapshot().validSelectable.first;
+    final option = game.getValidOptionsForCard(position).first;
+    return AiMoveProposal(
+      action: PolicyAction.guess(
+        position: position,
+        orientation: option.orientation,
+        guess: option.guesses.first,
+      ),
+      confidence: 0.75,
+      source: 'Test model',
+      explanation: 'Shared model explanation',
+    );
+  }
+}
+
+class _Rooms extends FirebaseRoomRepository {
+  _Rooms(this.identity)
+    : super(
+        transport: WindowsFirebaseRestRoomRepository(
+          options: const WindowFirebaseRestOptions(
+            apiKey: 'unused',
+            databaseUrl: 'https://test.invalid',
+          ),
+        ),
+      );
+  final String identity;
+  WindowGameEngine game = WindowGameEngine([
+    'Max',
+    'Heiko',
+    'Tom',
+    'Anna',
+  ], seed: 1);
+  final roomEvents = StreamController<OnlineRoom>.broadcast();
+  final socialEvents = StreamController<RoomSocialSnapshot>.broadcast();
+  final calls = <Map<String, dynamic>>[];
+  Map<String, dynamic> social = {};
+  int version = 7;
+  Completer<void>? uiGate;
+  @override
+  String get uid => identity;
+  @override
+  Future<String> signInAnonymously() async => uid;
+  OnlineRoom get room => OnlineRoom(
+    code: 'ABC234',
+    version: version,
+    hostUid: 'host',
+    state: game.publicObservation(),
+    started: true,
+    seats: const [
+      RoomSeat(index: 0, name: 'Max', ownerUid: 'host'),
+      RoomSeat(index: 1, name: 'Heiko', ownerUid: 'host'),
+      RoomSeat(index: 2, name: 'Tom', ownerUid: 'host'),
+      RoomSeat(index: 3, name: 'Anna', ownerUid: 'guest'),
+    ],
+  );
+  @override
+  Future<OnlineRoom?> loadRoom(String code) async => room;
+  @override
+  Future<GameState?> loadPrivateState(String code) async => game.exportState();
+  @override
+  Stream<RoomRequest> observeRequests(String code) => const Stream.empty();
+  @override
+  Stream<OnlineRoom?> observeRoom(String code) async* {
+    yield room;
+    yield* roomEvents.stream;
+  }
+
+  @override
+  Stream<RoomSocialSnapshot> observeSocial(String code) async* {
+    yield RoomSocialSnapshot(social);
+    yield* socialEvents.stream;
+  }
+
+  void share(Map<String, dynamic> turn) {
+    social['turn'] = {'uid': 'host', 'version': version, ...turn};
+    socialEvents.add(RoomSocialSnapshot({...social}));
+  }
+
+  @override
+  Future<void> publishTurnUi(String code, Map<String, dynamic> turn) async {
+    calls.add({'type': 'turnUiDirect', ...turn});
+    if (uiGate != null) await uiGate!.future;
+    social['turnViews'] = {
+      ...socialMap(social['turnViews']),
+      uid: {
+        ...turn,
+        'uid': uid,
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    };
+    socialEvents.add(RoomSocialSnapshot({...social}));
+  }
+
+  void react(String id) {
+    social['reactions'] = {
+      'host': {
+        'id': id,
+        'emoji': '🎉',
+        'sender': 'Device 1 (Max, Heiko, Tom)',
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    };
+    socialEvents.add(RoomSocialSnapshot({...social}));
+  }
+
+  @override
+  Future<void> requestSocial({
+    required String roomCode,
+    required String type,
+    required Map<String, dynamic> action,
+    int expectedVersion = -1,
+  }) async {
+    calls.add({'type': type, ...action});
+    if (type == 'turnUi') share(action);
+    if (type == 'chat') {
+      social['messages'] = {
+        'message': {
+          'sender': roomDeviceLabel(room.seats, uid),
+          'text': action['text'],
+          'createdAt': DateTime.now().millisecondsSinceEpoch,
+        },
+      };
+      socialEvents.add(RoomSocialSnapshot({...social}));
+    }
+    if (type == 'reaction') react('sent');
+  }
+
+  @override
+  Future<void> requestAction({
+    required String roomCode,
+    required int expectedVersion,
+    required Map<String, dynamic> action,
+  }) async {
+    calls.add(action);
+    if (action['type'] == 'guess') {
+      final position = Position(action['position'][0], action['position'][1]);
+      final option = game
+          .getValidOptionsForCard(position)
+          .firstWhere((o) => o.orientation.name == action['orientation']);
+      game.applyGuess(
+        position,
+        option,
+        GuessType.values.byName(action['guess']),
+      );
+      version++;
+      social.remove('turn');
+      roomEvents.add(room);
+      socialEvents.add(RoomSocialSnapshot({...social}));
+    }
+  }
+
+  Future<void> close() async {
+    if (uiGate != null && !uiGate!.isCompleted) uiGate!.complete();
+    await roomEvents.close();
+    await socialEvents.close();
+  }
+}
+
+/// Uses the real GameShell host queue rather than simulating host acceptance.
+class _HostRooms extends _Rooms {
+  _HostRooms() : super('host');
+  final requests = StreamController<RoomRequest>.broadcast();
+  int loads = 0;
+  final publishedVersions = <int>[];
+  Completer<void>? chatGate;
+  Completer<void>? cleanupGate;
+  @override
+  Stream<RoomRequest> observeRequests(String code) => requests.stream;
+
+  @override
+  Future<RoomSocialSnapshot> loadSocial(String code) async {
+    loads++;
+    if (chatGate != null) await chatGate!.future;
+    return RoomSocialSnapshot({...social});
+  }
+
+  @override
+  Future<void> publishSocial(String code, Map<String, dynamic> patch) async {
+    social = RoomSocialSnapshot(social).updated(patch).data;
+    socialEvents.add(RoomSocialSnapshot({...social}));
+  }
+
+  @override
+  Future<void> requestSocial({
+    required String roomCode,
+    required String type,
+    required Map<String, dynamic> action,
+    int expectedVersion = -1,
+  }) async {
+    calls.add({'type': type, ...action});
+    requests.add(
+      RoomRequest(
+        id: 'request${calls.length}',
+        uid: uid,
+        type: type,
+        action: action,
+        expectedVersion: expectedVersion,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+  }
+
+  @override
+  Future<void> deleteRequest(String roomCode, String requestId) async {
+    if (cleanupGate != null) await cleanupGate!.future;
+  }
+
+  @override
+  Future<void> requestAction({
+    required String roomCode,
+    required int expectedVersion,
+    required Map<String, dynamic> action,
+  }) async {
+    calls.add(action);
+    requests.add(
+      RoomRequest(
+        id: 'request${calls.length}',
+        uid: uid,
+        type: 'action',
+        action: action,
+        expectedVersion: expectedVersion,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+  }
+
+  @override
+  Future<void> publishState({
+    required String roomCode,
+    required String hostUid,
+    required int version,
+    required List<RoomSeat> seats,
+    required GameState state,
+    required bool started,
+  }) async {
+    this.version = version;
+    publishedVersions.add(version);
+    game = WindowGameEngine.fromState(state);
+    social.remove('turn');
+    roomEvents.add(room);
+    socialEvents.add(RoomSocialSnapshot({...social}));
+  }
+
+  @override
+  Future<void> close() async {
+    if (chatGate != null && !chatGate!.isCompleted) chatGate!.complete();
+    if (cleanupGate != null && !cleanupGate!.isCompleted) {
+      cleanupGate!.complete();
+    }
+    await requests.close();
+    await super.close();
+  }
+}
+
+class _GuestTurnRooms extends _Rooms {
+  _GuestTurnRooms() : super('guest');
+  @override
+  OnlineRoom get room {
+    final base = super.room;
+    return OnlineRoom(
+      code: base.code,
+      version: base.version,
+      hostUid: base.hostUid,
+      state: base.state,
+      started: base.started,
+      seats: [
+        for (final seat in base.seats)
+          RoomSeat(
+            index: seat.index,
+            name: seat.name,
+            ownerUid: seat.index == 0 ? 'guest' : seat.ownerUid,
+          ),
+      ],
+    );
+  }
+}
+
+final _previewKey = GlobalKey();
+Future<void> _preview(WidgetTester tester, String name) async {
+  const directory = String.fromEnvironment('UI_PREVIEW_DIR');
+  if (directory.isEmpty) return;
+  await tester.runAsync(() async {
+    for (final element in find.byType(Image).evaluate()) {
+      await precacheImage((element.widget as Image).image, element);
+    }
+  });
+  await tester.pump();
+  await tester.runAsync(() async {
+    final boundary =
+        _previewKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    final image = await boundary.toImage();
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    await Directory(directory).create(recursive: true);
+    await File('$directory/$name.png')
+        .writeAsBytes(bytes!.buffer.asUint8List());
+    image.dispose();
+  });
+}
+
+Future<void> _joinTest(WidgetTester tester, _Rooms rooms, Size size) async {
+  const previewFont = String.fromEnvironment('UI_PREVIEW_FONT');
+  const previewEmojiFont = String.fromEnvironment('UI_PREVIEW_EMOJI_FONT');
+  if (previewFont.isNotEmpty) {
+    await tester.runAsync(() async {
+      final loader = FontLoader('PreviewFont')
+        ..addFont(
+          File(previewFont).readAsBytes().then((b) => ByteData.sublistView(b)),
+        );
+      await loader.load();
+      final icons = FontLoader('MaterialIcons')
+        ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+      await icons.load();
+      if (previewEmojiFont.isNotEmpty) {
+        final emojis = FontLoader('PreviewEmoji')
+          ..addFont(
+            File(previewEmojiFont)
+                .readAsBytes()
+                .then((b) => ByteData.sublistView(b)),
+          );
+        await emojis.load();
+      }
+    });
+  }
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(rooms.close);
+  await tester.pumpWidget(
+    RepaintBoundary(
+      key: _previewKey,
+      child: MaterialApp(
+        theme: ThemeData.dark().copyWith(
+          textTheme: ThemeData.dark().textTheme.apply(
+            fontFamily: previewFont.isEmpty ? null : 'PreviewFont',
+            fontFamilyFallback: previewEmojiFont.isEmpty
+                ? null
+                : ['PreviewEmoji'],
+          ),
+        ),
+        home: GameShell(
+          firebaseEnabled: true,
+          browserGuest: true,
+          initialRoomCode: 'ABC234',
+          rlPolicy: _Policy(),
+          repository: rooms,
+        ),
+      ),
+    ),
+  );
+  await tester.enterText(
+    find.widgetWithText(TextField, 'Players on this device'),
+    'Anna',
+  );
+  await tester.ensureVisible(find.text('Join online room'));
+  await tester.tap(find.text('Join online room'));
+  await tester.pumpAndSettle();
+  if (rooms is _HostRooms) {
+    // Let the broadcast subscription cancellation finish outside FakeAsync,
+    // then pump the continuation that restores the host's request listener.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+  }
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets('narrow desktop windows keep chat at the right', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await _joinTest(tester, _Rooms('guest'), const Size(500, 800));
+    final chat = find.byType(RoomChatPanel);
+    expect(tester.getRect(chat).right, 500);
+    expect(tester.getRect(chat).top, lessThan(100));
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Minimize chat'));
+    await tester.pumpAndSettle();
+    expect(chat, findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  for (final size in [
+    const Size(1400, 1000),
+    const Size(768, 1024),
+    const Size(390, 844),
+    const Size(844, 390),
+  ]) {
+    testWidgets('chat layout and minimizing reclaim game space at $size', (
+      tester,
+    ) async {
+      final rooms = _Rooms('guest');
+      await _joinTest(tester, rooms, size);
+      final chat = find.byType(RoomChatPanel);
+      final card = find.byKey(const ValueKey('card:0:0'));
+      final stats = find.text('Current player');
+      final phone = size.shortestSide < 600;
+      final chatRect = tester.getRect(chat);
+      if (phone) {
+        expect(chatRect.top, greaterThan(tester.getRect(stats).bottom));
+      } else {
+        expect(
+          tester.getRect(card).right,
+          lessThan(tester.getRect(stats).left),
+        );
+        expect(tester.getRect(stats).right, lessThan(chatRect.left));
+        expect(chatRect.height, greaterThan(size.height * 0.7));
+      }
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Message everyone…'),
+        'Saved draft',
+      );
+      final gameArea = tester.getRect(find.byType(SafeArea).first);
+      await tester.tap(find.byTooltip('Minimize chat'));
+      await tester.pumpAndSettle();
+      expect(chat, findsNothing);
+      expect(find.byTooltip('Open chat'), findsOneWidget);
+      final largerArea = tester.getRect(find.byType(SafeArea).first);
+      expect(
+        phone ? largerArea.height : largerArea.width,
+        greaterThan(phone ? gameArea.height : gameArea.width),
+      );
+      // Messages keep arriving while the panel is hidden.
+      await rooms.requestSocial(
+        roomCode: 'ABC234',
+        type: 'chat',
+        action: {'text': 'While minimized'},
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Open chat'));
+      await tester.pumpAndSettle();
+      expect(chat, findsOneWidget);
+      expect(find.text('Saved draft'), findsOneWidget);
+      expect(find.textContaining('While minimized'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _preview(
+        tester,
+        'chat-layout-${size.width.toInt()}x${size.height.toInt()}',
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets(
+    'a stalled view upload cannot delay a guest selecting or submitting a guess',
+    (tester) async {
+      final rooms = _GuestTurnRooms();
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      rooms.uiGate = Completer<void>();
+      final position = rooms.game.snapshot().validSelectable.first;
+      await tester.tap(
+        find.byKey(ValueKey('card:${position.row}:${position.column}')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Your guess'), findsOneWidget);
+      final beforeDrag = tester.getCenter(find.text('Your guess'));
+      await tester.drag(find.text('Your guess'), const Offset(30, 15));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getCenter(find.text('Your guess')).dx,
+        greaterThan(beforeDrag.dx),
+      );
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(rooms.uiGate!.isCompleted, isFalse);
+      await tester.tap(find.text('Higher'));
+      await tester.pumpAndSettle();
+      expect(rooms.calls.where((c) => c['type'] == 'guess').length, 1);
+      expect(rooms.calls.where((c) => c['type'] == 'turnUi'), isEmpty);
+      expect(rooms.version, 8);
+      expect(rooms.uiGate!.isCompleted, isFalse);
+      expect(find.text('Your guess'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'stalled chat relay and cleanup cannot block successive gameplay requests',
+    (tester) async {
+      final rooms = _HostRooms();
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      rooms.chatGate = Completer<void>();
+      rooms.cleanupGate = Completer<void>();
+      rooms.requests.add(
+        RoomRequest(
+          id: 'slow-chat',
+          uid: 'guest',
+          type: 'chat',
+          action: {'text': 'Hello'},
+          expectedVersion: 7,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(rooms.loads, 1);
+      final position = rooms.game.snapshot().validSelectable.first;
+      final option = rooms.game.getValidOptionsForCard(position).first;
+      rooms.requests.add(
+        RoomRequest(
+          id: 'first-move',
+          uid: 'host',
+          type: 'action',
+          action: {
+            'type': 'guess',
+            'position': [position.row, position.column],
+            'orientation': option.orientation.name,
+            'guess': option.guesses.first.name,
+          },
+          expectedVersion: 7,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(rooms.publishedVersions, [8]);
+      final next = rooms.game.pendingRemovals.isNotEmpty
+          ? 'confirmRemovals'
+          : rooms.game.snapshot().pendingSamePosition != null
+          ? 'confirmSame'
+          : 'endTurn';
+      rooms.requests.add(
+        RoomRequest(
+          id: 'second-move',
+          uid: 'host',
+          type: 'action',
+          action: {'type': next},
+          expectedVersion: 8,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(rooms.publishedVersions, [8, 9]);
+      expect(rooms.chatGate!.isCompleted, isFalse);
+      expect(rooms.cleanupGate!.isCompleted, isFalse);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'floating emojis and sender names have no fallback underline outside a Scaffold',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RoomReactionLayer(
+            reactions: [
+              {'id': 'test', 'emoji': '😂', 'sender': 'Anna'},
+            ],
+            reducedMotion: false,
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      for (final finder in [find.text('😂'), find.text('Anna')]) {
+        for (final element in finder.evaluate()) {
+          final paragraph = element.findRenderObject() as RenderParagraph;
+          expect(
+            paragraph.text.style?.decoration ?? TextDecoration.none,
+            TextDecoration.none,
+          );
+        }
+      }
+      expect(find.text('😂'), findsNWidgets(5));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'phone spectator sees legal borders, advice and read-only guesses while chatting',
+    (tester) async {
+      final rooms = _Rooms('guest');
+      await _joinTest(tester, rooms, const Size(390, 844));
+      expect(find.text('Room chat · Anna'), findsOneWidget);
+      await tester.drag(find.byType(ListView).first, const Offset(0, -800));
+      await tester.pumpAndSettle();
+      final position = rooms.game.snapshot().validSelectable.first;
+      final option = rooms.game.getValidOptionsForCard(position).first;
+      final proposal = AiMoveProposal(
+        action: PolicyAction.guess(
+          position: position,
+          orientation: option.orientation,
+          guess: option.guesses.first,
+        ),
+        confidence: 0.75,
+        source: 'Pure statistics',
+        explanation: 'Shared reason',
+        expectedDrinks: 2,
+      );
+      rooms.share({
+        'stage': 'guess',
+        'row': position.row,
+        'column': position.column,
+        'orientation': option.orientation.name,
+        'proposal': encodeSharedProposal(proposal),
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('Your guess'), findsOneWidget);
+      expect(find.text('Watching Max'), findsOneWidget);
+      final guess = find.widgetWithText(FilledButton, 'Higher · suggested');
+      expect(tester.widget<FilledButton>(guess).onPressed, isNull);
+      await _preview(tester, 'phone-spectator');
+      final inks = tester
+          .widgetList<Ink>(find.byType(Ink))
+          .where((i) => i.decoration is BoxDecoration);
+      expect(
+        inks.any(
+          (i) =>
+              ((i.decoration as BoxDecoration).border as Border).top.color ==
+              Colors.lightBlueAccent,
+        ),
+        isTrue,
+      );
+      expect(
+        inks
+            .where(
+              (i) =>
+                  ((i.decoration as BoxDecoration).border as Border)
+                          .top
+                          .color ==
+                      Colors.amber ||
+                  ((i.decoration as BoxDecoration).border as Border)
+                          .top
+                          .color ==
+                      Colors.lightBlueAccent,
+            )
+            .length,
+        greaterThanOrEqualTo(rooms.game.snapshot().validSelectable.length),
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Message everyone…'),
+        'Hello 😂',
+      );
+      await tester.tap(find.byTooltip('Send message'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Anna: Hello 😂'), findsOneWidget);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byTooltip('Send message')).bottom,
+        lessThanOrEqualTo(524),
+      );
+      expect(tester.takeException(), isNull);
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Release 🎉 for everyone'));
+      await tester.pump(const Duration(milliseconds: 350));
+      await _preview(tester, 'phone-reaction');
+      expect(find.byType(RoomReactionLayer), findsOneWidget);
+      expect(find.text('Device 1 (Max, Heiko, Tom)'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('Device 1 (Max, Heiko, Tom)'), findsNothing);
+      final reconnect = {
+        ...rooms.social,
+        'reactions': {
+          'host': {
+            'id': 'missed-during-disconnect',
+            'sender': 'Max',
+            'emoji': '😂',
+            'createdAt': DateTime.now().millisecondsSinceEpoch,
+          },
+        },
+      };
+      rooms.socialEvents.add(
+        RoomSocialSnapshot(reconnect, isFullSnapshot: true),
+      );
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: find.byType(RoomReactionLayer),
+          matching: find.text('Max'),
+        ),
+        findsNothing,
+      );
+      // A duplicate snapshot must not restart the burst.
+      rooms.socialEvents.add(RoomSocialSnapshot({...rooms.social}));
+      await tester.pump();
+      expect(find.text('Device 1 (Max, Heiko, Tom)'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'active device selects a card and guess without losing access to chat',
+    (tester) async {
+      final rooms = _HostRooms();
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      expect(
+        find.text('Room chat · Device 1 (Max, Heiko, Tom)'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Propose best move'));
+      await tester.pumpAndSettle();
+      expect(find.text('Best-move prediction'), findsOneWidget);
+      await tester.tap(find.text('RL model'));
+      await tester.pumpAndSettle();
+      expect(find.text('Shared model explanation'), findsOneWidget);
+      expect(rooms.social['turnViews']['host']['stage'], 'suggestion');
+      final position = rooms.game.snapshot().validSelectable.first;
+      await tester.tap(
+        find.byKey(ValueKey('card:${position.row}:${position.column}')),
+      );
+      await tester.pumpAndSettle();
+      if (find.textContaining('Choose the comparison').evaluate().isNotEmpty) {
+        await tester.tap(find.textContaining('Horizontal cards').first);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('Your guess'), findsOneWidget);
+      await _preview(tester, 'desktop-turn');
+      await tester.tap(find.byTooltip('Minimize chat'));
+      await tester.pumpAndSettle();
+      expect(find.text('Your guess'), findsOneWidget);
+      await tester.tap(find.byTooltip('Open chat'));
+      await tester.pumpAndSettle();
+      expect(find.byType(RoomChatPanel), findsOneWidget);
+      expect(find.text('Your guess'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextField, 'Message everyone…'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Higher · suggested'));
+      await tester.pumpAndSettle();
+      expect(rooms.calls.where((c) => c['type'] == 'guess'), isEmpty);
+      expect(rooms.publishedVersions, [8]);
+      expect(find.text('Your guess'), findsNothing);
+      expect(tester.takeException(), isNull);
+      expect(rooms.loads, 0);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'compact chat supports keyboard-sized viewports and reduced effects',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var reduced = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: const SizedBox(),
+            bottomNavigationBar: RoomChatPanel(
+              sender: 'Anna',
+              messages: const [],
+              onSend: (_) async {},
+              onReact: (_) async {},
+              reducedMotion: false,
+              onReducedMotion: (value) => reduced = value,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('Reduce reaction animations'));
+      expect(reduced, isTrue);
+      await tester.tap(find.byTooltip('Expand chat history'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+}

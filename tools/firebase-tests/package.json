@@ -1,0 +1,14 @@
+{
+  "name": "window-firebase-rule-tests",
+  "private": true,
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "scripts": {
+    "test": "cd ../.. && npx --yes firebase-tools@15.32.0 emulators:exec --only database --project demo-window-social --config firebase.emulator.json \"node tools/firebase-tests/rules.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.0.0"
+  }
+}

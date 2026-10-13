@@ -11,6 +11,12 @@ class FirebaseEvent {
   final String data;
 }
 
+class FirebaseSnapshot {
+  const FirebaseSnapshot(this.value, {required this.complete});
+  final Object? value;
+  final bool complete;
+}
+
 typedef FirebaseEventOpener = Stream<FirebaseEvent> Function(Uri uri);
 
 /// Firebase SSE sends a complete snapshot first, then relative put/patch events.
@@ -19,6 +25,7 @@ Stream<Object?> watchFirebase(
   Uri Function() uri, {
   FirebaseEventOpener? open,
   Future<void> Function()? refreshAuth,
+  bool includeMetadata = false,
 }) {
   late StreamController<Object?> controller;
   StreamSubscription<FirebaseEvent>? subscription;
@@ -55,6 +62,7 @@ Stream<Object?> watchFirebase(
 
   connect = () {
     if (stopped) return;
+    var awaitingSnapshot = true;
     void armWatchdog() {
       watchdog?.cancel();
       watchdog = Timer(const Duration(seconds: 65), reconnect);
@@ -73,7 +81,16 @@ Stream<Object?> watchFirebase(
           try {
             snapshot = applyFirebaseEvent(snapshot, event);
             failures = 0;
-            controller.add(snapshot);
+            final connectionSnapshot =
+                awaitingSnapshot &&
+                event.type == 'put' &&
+                (jsonDecode(event.data) as Map)['path'] == '/';
+            awaitingSnapshot = false;
+            controller.add(
+              includeMetadata
+                  ? FirebaseSnapshot(snapshot, complete: connectionSnapshot)
+                  : snapshot,
+            );
           } catch (error, stack) {
             controller.addError(error, stack);
             unawaited(reconnect());

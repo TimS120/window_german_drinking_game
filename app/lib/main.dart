@@ -3,8 +3,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' hide Orientation;
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData, LogicalKeyboardKey;
 
 import 'firebase_options.dart';
 import 'firebase_room_repository.dart';
@@ -12,6 +14,8 @@ import 'game_engine.dart';
 import 'game_state_codec.dart';
 import 'lobby_players.dart';
 import 'rl_policy.dart';
+import 'room_social.dart';
+import 'room_social_widgets.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
@@ -71,11 +75,13 @@ class GameShell extends StatefulWidget {
     required this.rlPolicy,
     this.browserGuest = kIsWeb,
     this.initialRoomCode,
+    this.repository,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
   final bool browserGuest;
   final String? initialRoomCode;
+  final FirebaseRoomRepository? repository;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -99,11 +105,37 @@ class _GameShellState extends State<GameShell> {
   AiMoveProposal? _proposal;
   bool _proposing = false;
   Future<void> _hostRequestQueue = Future<void>.value();
+  Future<void> _socialSendQueue = Future<void>.value();
+  Future<void> _hostSocialQueue = Future<void>.value();
+  Map<String, dynamic>? _pendingSharedUi;
+  String? _pendingUiRoom;
+  bool _publishingUi = false;
+  int _uiSequence = 0;
+  final GlobalKey _footerKey = GlobalKey();
+  double _footerExtent = 0;
+  double _chatSideExtent = 0;
+  bool _chatMinimized = false;
+  bool _footerMeasureScheduled = false;
+  StreamSubscription<RoomSocialSnapshot>? _socialSubscription;
+  String? _socialRoomCode;
+  RoomSocialSnapshot _social = RoomSocialSnapshot(null);
+  RoomSocialSnapshot? _hostSocial;
+  String? _hostSocialRoomCode;
+  Map<String, dynamic> _localTurnUi = {};
+  int _localTurnVersion = -1;
+  final Set<String> _seenReactions = {};
+  final List<Map<String, dynamic>> _flyingReactions = [];
+  final List<Timer> _reactionTimers = [];
+  Timer? _activityTimer;
+  String? _socialStatus;
+  bool _reducedMotion = false;
+  String? _pressedTarget;
 
   @override
   void initState() {
     super.initState();
     _rlPolicy = widget.rlPolicy;
+    _rooms = widget.repository;
     if (widget.browserGuest) {
       _roomCode.text =
           (widget.initialRoomCode ?? Uri.base.queryParameters['room'] ?? '')
@@ -129,6 +161,11 @@ class _GameShellState extends State<GameShell> {
     _seatName.dispose();
     _roomSubscription?.cancel();
     _requestSubscription?.cancel();
+    _socialSubscription?.cancel();
+    _activityTimer?.cancel();
+    for (final timer in _reactionTimers) {
+      timer.cancel();
+    }
     super.dispose();
   }
 
@@ -279,6 +316,11 @@ class _GameShellState extends State<GameShell> {
             final bool isHost = room.hostUid == _rooms?.uid;
             if (isHost && room.version < _hostVersion) return;
             setState(() {
+              if (_room?.version != room.version) {
+                _localTurnUi = {};
+                _localTurnVersion = -1;
+                _proposal = null;
+              }
               _room = room;
               _hostVersion = isHost
                   ? math.max(_hostVersion, room.version)
@@ -295,6 +337,9 @@ class _GameShellState extends State<GameShell> {
               _watchRequests(room.code);
               _restoreHostStateIfNeeded(room);
             }
+            if (_socialRoomCode != room.code) {
+              unawaited(_watchSocial(room.code));
+            }
           },
           onError: (Object error) {
             if (mounted) {
@@ -310,6 +355,12 @@ class _GameShellState extends State<GameShell> {
   Future<void> _returnToMenu() async {
     await _roomSubscription?.cancel();
     await _requestSubscription?.cancel();
+    await _socialSubscription?.cancel();
+    _activityTimer?.cancel();
+    for (final timer in _reactionTimers) {
+      timer.cancel();
+    }
+    _reactionTimers.clear();
     if (!mounted) return;
     setState(() {
       _room = null;
@@ -317,6 +368,23 @@ class _GameShellState extends State<GameShell> {
       _requestRoomCode = null;
       _hostVersion = 0;
       _busy = false;
+      _social = RoomSocialSnapshot(null);
+      _localTurnUi = {};
+      _localTurnVersion = -1;
+      _proposal = null;
+      _seenReactions.clear();
+      _flyingReactions.clear();
+      _pressedTarget = null;
+      _socialStatus = null;
+      _socialRoomCode = null;
+      _lastActivityId = null;
+      _hostSocial = null;
+      _pendingSharedUi = null;
+      _pendingUiRoom = null;
+      _footerExtent = 0;
+      _chatSideExtent = 0;
+      _chatMinimized = false;
+      _hostSocialRoomCode = null;
       _message = widget.browserGuest
           ? 'Enter a room code and your player names to join.'
           : 'Choose player names to begin a local game.';
@@ -346,6 +414,539 @@ class _GameShellState extends State<GameShell> {
   }
 
   bool get _isOnline => _room != null;
+
+  Map<String, dynamic> get _turnUi => !_isOnline
+      ? {}
+      : _canControlCurrentTurn && _localTurnVersion == _room!.version
+      ? _localTurnUi
+      : _social.turnFor(_room!);
+
+  AiMoveProposal? get _visibleProposal =>
+      _isOnline ? decodeSharedProposal(_turnUi['proposal']) : _proposal;
+
+  Future<void> _watchSocial(String code) async {
+    _socialRoomCode = code;
+    await _socialSubscription?.cancel();
+    var initial = true;
+    _socialSubscription = _rooms!
+        .observeSocial(code)
+        .listen(
+          (snapshot) {
+            if (!mounted || _room?.code != code) return;
+            final now = DateTime.now().millisecondsSinceEpoch;
+            setState(() {
+              _social = snapshot;
+              _socialStatus = null;
+              for (final raw in snapshot.reactions.values) {
+                final reaction = socialMap(raw);
+                final id = reaction['id'] as String?;
+                if (id == null || !_seenReactions.add(id)) continue;
+                final age =
+                    now - ((reaction['createdAt'] as num?)?.toInt() ?? 0);
+                if (initial ||
+                    snapshot.isFullSnapshot ||
+                    age < -5000 ||
+                    age > 5000) {
+                  continue;
+                }
+                if (_flyingReactions.length == 5) _flyingReactions.removeAt(0);
+                _flyingReactions.add(reaction);
+                late Timer timer;
+                timer = Timer(const Duration(seconds: 2), () {
+                  _reactionTimers.remove(timer);
+                  if (mounted) {
+                    setState(
+                      () => _flyingReactions.removeWhere((r) => r['id'] == id),
+                    );
+                  }
+                });
+                _reactionTimers.add(timer);
+              }
+              // A reconnect snapshot may restore a dialog, but never replays an old click.
+              final activity = snapshot.activityFor(_room!);
+              final age = now - ((activity['createdAt'] as num?)?.toInt() ?? 0);
+              if (!initial &&
+                  !snapshot.isFullSnapshot &&
+                  age >= -5000 &&
+                  age < 1500 &&
+                  activity['id'] != _lastActivityId) {
+                _lastActivityId = activity['id'] as String?;
+                _pressedTarget = activity['clicked'] as String?;
+                _activityTimer?.cancel();
+                _activityTimer = Timer(const Duration(milliseconds: 900), () {
+                  if (mounted) setState(() => _pressedTarget = null);
+                });
+              }
+            });
+            initial = false;
+            if (_seenReactions.length > 1000) {
+              _seenReactions.retainAll(
+                snapshot.reactions.values.map((r) => '${socialMap(r)['id']}'),
+              );
+            }
+          },
+          onError: (Object error) {
+            if (mounted) {
+              setState(() => _socialStatus = 'Room chat is reconnecting…');
+            }
+          },
+        );
+  }
+
+  String? _lastActivityId;
+
+  Future<void> _sendSocial(
+    String type,
+    Map<String, dynamic> action, {
+    int? version,
+  }) {
+    final room = _room;
+    if (room == null) return Future<void>.value();
+    final send = _socialSendQueue.then(
+      (_) => _rooms!.requestSocial(
+        roomCode: room.code,
+        type: type,
+        action: action,
+        expectedVersion: version ?? room.version,
+      ),
+    );
+    _socialSendQueue = send.catchError((Object _) {});
+    return send;
+  }
+
+  void _shareUi(
+    String stage, {
+    Position? position,
+    Orientation? orientation,
+    String? clicked,
+    String? label,
+    _AdvisorMethod? method,
+    bool clearProposal = false,
+  }) {
+    if (!_isOnline || !_canControlCurrentTurn) return;
+    final version = _room!.version;
+    final proposal = clearProposal ? null : (_proposal ?? _visibleProposal);
+    final ui = <String, dynamic>{
+      'stage': stage,
+      'version': version,
+      'playerIndex': _room!.state.currentPlayerIndex,
+      'eventId': '${_rooms!.uid}:${_uiSequence++}',
+      if (position != null) 'row': position.row,
+      if (position != null) 'column': position.column,
+      if (orientation != null) 'orientation': orientation.name,
+      if (proposal != null) 'proposal': encodeSharedProposal(proposal),
+      if (method != null) 'method': method.name,
+      'clicked': ?clicked,
+      'label': ?label,
+    };
+    setState(() {
+      _localTurnUi = ui;
+      _localTurnVersion = version;
+    });
+    _pendingSharedUi = ui;
+    _pendingUiRoom = _room!.code;
+    unawaited(_flushSharedUi());
+  }
+
+  Future<void> _flushSharedUi() async {
+    if (_publishingUi) return;
+    _publishingUi = true;
+    try {
+      while (_pendingSharedUi != null && mounted) {
+        final ui = _pendingSharedUi!;
+        final code = _pendingUiRoom!;
+        _pendingSharedUi = null;
+        if (_room?.code != code ||
+            _room?.version != ui['version'] ||
+            !_canControlCurrentTurn) {
+          continue;
+        }
+        try {
+          await _rooms!.publishTurnUi(code, ui);
+        } catch (_) {
+          // An old view may arrive after the move changed the version. Its
+          // rejection is harmless and must never delay or reject that move.
+          if (mounted &&
+              _room?.code == code &&
+              _room?.version == ui['version']) {
+            setState(
+              () => _socialStatus = 'Turn sharing is temporarily unavailable. Gameplay remains available.',
+            );
+          }
+        }
+      }
+    } finally {
+      _publishingUi = false;
+    }
+  }
+
+  Future<void> _turnAction(Map<String, dynamic> action, String label) async {
+    if (!_canControlCurrentTurn || _busy) return;
+    final version = _room!.version;
+    _shareUi('idle', clicked: '${action['type']}', label: label);
+    if (mounted && _room?.version == version) await _submitOnline(action);
+  }
+
+  Widget _chatPanel() => RoomChatPanel(
+    sidePanel: !_chatBelow,
+    onMinimize: () {
+      FocusScope.of(context).unfocus();
+      setState(() => _chatMinimized = true);
+    },
+    sender: roomDeviceLabel(_room!.seats, _rooms!.uid),
+    messages: _social.messages,
+    onSend: (text) => _sendSocial('chat', {'text': text}),
+    onReact: (emoji) => _sendSocial('reaction', {'emoji': emoji}),
+    reducedMotion: _reducedMotion,
+    onReducedMotion: (value) => setState(() => _reducedMotion = value),
+    status: _socialStatus,
+  );
+
+  Widget _onlineFrame(Widget child) {
+    _measureFooter();
+    final dialog = _sharedTurnDialog();
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (dialog != null && _canControlCurrentTurn && !_proposing) {
+            _shareUi('idle');
+          }
+        },
+      },
+      child: PopScope(
+        canPop: dialog == null || !_canControlCurrentTurn,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && dialog != null && _canControlCurrentTurn) {
+            _shareUi('idle');
+          }
+        },
+        child: Stack(
+          children: [
+            Positioned.fill(child: child),
+            if (dialog != null)
+              Positioned.fill(
+                top: MediaQuery.paddingOf(context).top + kToolbarHeight,
+                bottom: _chatBelow && !_chatMinimized ? _footerExtent : 0,
+                right: !_chatBelow && !_chatMinimized ? _chatSideExtent : 0,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        ignoring: !_canControlCurrentTurn,
+                        child: ModalBarrier(
+                          color: Colors.black54,
+                          dismissible: _canControlCurrentTurn && !_proposing,
+                          onDismiss: () => _shareUi(
+                            'idle',
+                            clicked: 'close',
+                            label: 'closed the dialog',
+                          ),
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: MediaQuery.removeViewInsets(
+                        context: context,
+                        removeBottom: true,
+                        child: dialog,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Positioned.fill(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+              child: RoomReactionLayer(
+                reactions: _flyingReactions,
+                reducedMotion: _reducedMotion,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _measureFooter() {
+    if (_footerMeasureScheduled) return;
+    _footerMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _footerMeasureScheduled = false;
+      if (!mounted) return;
+      final box = _footerKey.currentContext?.findRenderObject();
+      if (box is RenderBox &&
+          box.hasSize &&
+          ((box.size.height - _footerExtent).abs() > 0.5 ||
+              (box.size.width - _chatSideExtent).abs() > 0.5)) {
+        setState(() {
+          _footerExtent = box.size.height;
+          _chatSideExtent = box.size.width;
+        });
+      }
+    });
+  }
+
+  bool get _chatBelow =>
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) &&
+      MediaQuery.sizeOf(context).shortestSide < 600;
+
+  Widget _chatRegion(Widget child) => SizedBox(
+    key: _footerKey,
+    child: Visibility(
+      visible: !_chatMinimized,
+      maintainState: true,
+      child: child,
+    ),
+  );
+
+  Widget _withSideChat(Widget child) {
+    if (!_isOnline || _chatBelow) return child;
+    return LayoutBuilder(
+      builder: (context, size) => Row(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, area) => area.maxWidth >= 480
+                  ? child
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: 480,
+                        height: area.maxHeight,
+                        child: child,
+                      ),
+                    ),
+            ),
+          ),
+          _chatRegion(
+            SizedBox(
+              width: (size.maxWidth * 0.26).clamp(240.0, 360.0),
+              height: size.maxHeight,
+              child: SafeArea(top: false, left: false, child: _chatPanel()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget get _reopenChat => IconButton(
+    tooltip: 'Open chat',
+    icon: const Icon(Icons.chat_bubble_outline),
+    onPressed: () => setState(() => _chatMinimized = false),
+  );
+
+  Widget _roomFooter() => _chatRegion(_bottomChat());
+
+  Widget _bottomChat() {
+    final media = MediaQuery.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(
+              80,
+              media.size.height -
+                  media.viewInsets.bottom -
+                  media.padding.top -
+                  media.padding.bottom -
+                  100,
+            ),
+          ),
+          child: SingleChildScrollView(
+            reverse: true,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [_chatPanel()],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _chooseSharedGuess(GuessType guess) async {
+    final ui = _turnUi;
+    if (ui['stage'] != 'guess' || !_canControlCurrentTurn || _busy) return;
+    final position = Position(ui['row'] as int, ui['column'] as int);
+    final orientation = Orientation.values.byName(ui['orientation'] as String);
+    final version = _room!.version;
+    setState(() => _proposal = null);
+    _shareUi(
+      'idle',
+      clicked: guess.name,
+      clearProposal: true,
+      label:
+          'chose ${_guessLabel(guess)} for row ${position.row + 1}, column ${position.column + 1}',
+    );
+    if (mounted && _room?.version == version) {
+      await _submitOnline({
+        'type': 'guess',
+        'position': [position.row, position.column],
+        'orientation': orientation.name,
+        'guess': guess.name,
+      });
+    }
+  }
+
+  Widget? _sharedTurnDialog() {
+    if (!_isOnline || _game == null || !_room!.started) return null;
+    final ui = _turnUi;
+    final stage = ui['stage'];
+    final active = _canControlCurrentTurn && !_busy;
+    final proposal = _visibleProposal;
+    Position? position;
+    List<GuessOption> options = [];
+    if (ui['row'] is int && ui['column'] is int) {
+      position = Position(ui['row'], ui['column']);
+      if (_game!.isValidSlot(position)) {
+        options = _game!.getValidOptionsForCard(position);
+      }
+    }
+    Widget button(
+      String key,
+      String label,
+      VoidCallback action, {
+      bool suggested = false,
+    }) => FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: _pressedTarget == key
+            ? Colors.amber
+            : suggested
+            ? Colors.lightBlue
+            : null,
+        disabledBackgroundColor: _pressedTarget == key
+            ? Colors.amber
+            : suggested
+            ? Colors.lightBlue
+            : null,
+        disabledForegroundColor: _pressedTarget == key || suggested
+            ? Colors.black
+            : null,
+        foregroundColor: _pressedTarget == key || suggested
+            ? Colors.black
+            : null,
+      ),
+      onPressed: active ? action : null,
+      child: Text(label),
+    );
+    final widgets = <Widget>[];
+    String? title;
+    if (stage == 'comparison' && position != null) {
+      title = 'Choose the comparison';
+      for (final option in options) {
+        final selected = position;
+        final suggested =
+            proposal?.action.position == position &&
+            proposal?.action.orientation == option.orientation;
+        widgets.add(
+          ListTile(
+            title: Text(
+              option.orientation == Orientation.horizontal
+                  ? 'Horizontal cards'
+                  : 'Vertical cards',
+            ),
+            subtitle: Text(
+              option.type == GuessOptionType.inBetween
+                  ? 'In-between or outside'
+                  : 'Higher, same, or lower',
+            ),
+            tileColor: suggested
+                ? Colors.lightBlue.withValues(alpha: 0.25)
+                : null,
+            trailing: suggested
+                ? const Icon(Icons.auto_awesome, color: Colors.lightBlueAccent)
+                : null,
+            onTap: active
+                ? () => _shareUi(
+                    'guess',
+                    position: selected,
+                    orientation: option.orientation,
+                    clicked: option.orientation.name,
+                    label: 'chose ${option.orientation.name} comparison',
+                  )
+                : null,
+          ),
+        );
+      }
+    } else if (stage == 'guess' && position != null) {
+      title = 'Your guess';
+      final option = options
+          .where((o) => o.orientation.name == ui['orientation'])
+          .firstOrNull;
+      for (final guess in option?.guesses ?? <GuessType>[]) {
+        final suggested =
+            proposal?.action.position == position &&
+            proposal?.action.orientation == option?.orientation &&
+            proposal?.action.guess == guess;
+        widgets.add(
+          button(
+            guess.name,
+            '${_guessLabel(guess)}${suggested ? ' · suggested' : ''}',
+            () => _chooseSharedGuess(guess),
+            suggested: suggested,
+          ),
+        );
+      }
+    } else if (stage == 'adviser') {
+      title = 'Best-move prediction';
+      widgets.add(
+        ListTile(
+          leading: const Icon(Icons.psychology_outlined),
+          title: const Text('RL model'),
+          subtitle: Text(_rlPolicy.availabilityMessage),
+          onTap: active
+              ? () => _calculateProposal(_AdvisorMethod.rlModel)
+              : null,
+        ),
+      );
+      widgets.add(
+        ListTile(
+          leading: const Icon(Icons.query_stats_outlined),
+          title: const Text('Pure statistics'),
+          subtitle: const Text(
+            'Estimate your future drinks using public card history.',
+          ),
+          onTap: active
+              ? () => _calculateProposal(_AdvisorMethod.statistics)
+              : null,
+        ),
+      );
+    } else if (stage == 'calculating') {
+      title = 'Finding best move…';
+      widgets.add(
+        Text(ui['method'] == 'statistics' ? 'Pure statistics' : 'RL model'),
+      );
+    }
+    if (title == null) return null;
+    return _MovableGameDialog(
+      key: ValueKey('turn-dialog:${_room!.version}:$stage'),
+      title: title,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!active)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Watching ${_game!.currentPlayer}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          if (stage == 'adviser' || stage == 'comparison')
+            ...widgets
+          else
+            Wrap(spacing: 8, runSpacing: 8, children: widgets),
+        ],
+      ),
+      actions: const [],
+    );
+  }
+
   bool get _isHost => _isOnline && _room!.hostUid == _rooms?.uid;
   bool get _canControlCurrentTurn {
     if (!_isOnline) return true;
@@ -395,6 +996,14 @@ class _GameShellState extends State<GameShell> {
   Future<void> _proposeMove() async {
     final WindowGameEngine? game = _game;
     if (game == null || !_canControlCurrentTurn || _busy || _proposing) return;
+    if (_isOnline) {
+      _shareUi(
+        'adviser',
+        clicked: 'propose',
+        label: 'opened best-move prediction',
+      );
+      return;
+    }
     final _AdvisorMethod? method = await _showMovableGameDialog<_AdvisorMethod>(
       title: 'Best-move prediction',
       content: Column(
@@ -418,10 +1027,23 @@ class _GameShellState extends State<GameShell> {
       ),
     );
     if (!mounted || method == null) return;
+    await _calculateProposal(method);
+  }
+
+  Future<void> _calculateProposal(_AdvisorMethod method) async {
+    final game = _game;
+    if (game == null || !_canControlCurrentTurn || _busy || _proposing) return;
     final requestState = jsonEncode(
       GameStateCodec.encode(game.publicObservation()),
     );
     setState(() => _proposing = true);
+    _shareUi(
+      'calculating',
+      method: method,
+      clicked: method.name,
+      label:
+          'selected ${method == _AdvisorMethod.statistics ? 'Pure statistics' : 'RL model'}',
+    );
     try {
       final AiMoveProposal? proposal = method == _AdvisorMethod.rlModel
           ? await _rlPolicy.propose(game)
@@ -438,6 +1060,12 @@ class _GameShellState extends State<GameShell> {
             ? 'Finish the pending action before requesting a proposal.'
             : 'Suggested move: ${proposal.action.label}.';
       });
+      _shareUi('suggestion', method: method, clearProposal: proposal == null);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Prediction failed: $error');
+        _shareUi('idle');
+      }
     } finally {
       if (mounted) setState(() => _proposing = false);
     }
@@ -483,10 +1111,22 @@ class _GameShellState extends State<GameShell> {
         .observeRequests(code)
         .listen(
           (RoomRequest request) {
-            unawaited(
-              _queueHostOperation(() => _processHostRequest(request))
-                  .catchError((Object _) {}),
-            );
+            final social = [
+              'chat',
+              'reaction',
+              'turnUi',
+            ].contains(request.type);
+            if (social) {
+              final operation = _hostSocialQueue.then(
+                (_) => _processHostRequest(request),
+              );
+              _hostSocialQueue = operation.catchError((Object _) {});
+            } else {
+              unawaited(
+                _queueHostOperation(() => _processHostRequest(request))
+                    .catchError((Object _) {}),
+              );
+            }
           },
           onError: (Object error) {
             if (mounted) {
@@ -501,7 +1141,23 @@ class _GameShellState extends State<GameShell> {
     final WindowGameEngine? game = _game;
     if (!_isHost || room == null || game == null) return;
     try {
-      if (request.type == 'joinLobby' && !room.started) {
+      if (['chat', 'reaction', 'turnUi'].contains(request.type)) {
+        if (_hostSocialRoomCode != room.code || _hostSocial == null) {
+          _hostSocial = await _rooms!.loadSocial(room.code);
+          _hostSocialRoomCode = room.code;
+        }
+        if (!mounted || _room?.code != room.code) return;
+        final patch = socialRequestPatch(
+          request: request,
+          room: room,
+          game: game,
+          social: _hostSocial!,
+        );
+        if (patch.isNotEmpty) {
+          await _rooms!.publishSocial(room.code, patch);
+          _hostSocial = _hostSocial!.updated(patch);
+        }
+      } else if (request.type == 'joinLobby' && !room.started) {
         final List<RoomSeat> seats = addLobbyPlayers(
           room,
           request.uid,
@@ -519,7 +1175,16 @@ class _GameShellState extends State<GameShell> {
         setState(() => _message = 'Ignored invalid room request: $error');
       }
     } finally {
-      await _rooms!.deleteRequest(room.code, request.id);
+      unawaited(
+        _rooms!.deleteRequest(room.code, request.id).catchError((Object _) {
+          if (mounted && _room?.code == room.code) {
+            setState(
+              () => _socialStatus =
+                  'Room request cleanup failed; gameplay remains available.',
+            );
+          }
+        }),
+      );
     }
   }
 
@@ -616,6 +1281,18 @@ class _GameShellState extends State<GameShell> {
     final List<GuessOption> options = game.getValidOptionsForCard(position);
     if (options.isEmpty) {
       setState(() => _message = 'That card cannot be selected yet.');
+      return;
+    }
+    if (_isOnline) {
+      if (!_canControlCurrentTurn || _busy) return;
+      _shareUi(
+        options.length == 1 ? 'guess' : 'comparison',
+        position: position,
+        orientation: options.length == 1 ? options.single.orientation : null,
+        clicked: 'card:${position.row}:${position.column}',
+        label:
+            'selected card at row ${position.row + 1}, column ${position.column + 1}',
+      );
       return;
     }
     final GuessOption? option = options.length == 1
@@ -931,108 +1608,114 @@ class _GameShellState extends State<GameShell> {
     }
     if (_isOnline && !_room!.started) {
       final OnlineRoom room = _room!;
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Window lobby'),
-          actions: <Widget>[
-            IconButton(
-              tooltip: 'Leave lobby and return to menu',
-              icon: const Icon(Icons.home_outlined),
-              onPressed: _returnToMenu,
-            ),
-          ],
-        ),
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: Card(
-                  margin: const EdgeInsets.all(24),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Text(
-                          'Room ${room.code}',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _isHost
-                              ? 'Share this code. Players may join until you start the game.'
-                              : 'You are in the lobby. Waiting for the host to start.',
-                          textAlign: TextAlign.center,
-                        ),
-                        if (_isHost &&
-                            WindowFirebaseOptions.browserUrl !=
-                                null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Friends can join in the app with this room code, or in their browser at:',
-                          ),
-                          SelectableText(WindowFirebaseOptions.browserUrl!),
-                          const Text(
-                            'Browser players enter the room code above. No installation required.',
-                          ),
-                          TextButton.icon(
-                            onPressed: () async {
-                              await Clipboard.setData(
-                                ClipboardData(
-                                  text: WindowFirebaseOptions.browserUrl!,
-                                ),
-                              );
-                              if (mounted) {
-                                setState(
-                                  () => _message =
-                                      'Browser address copied. Share it together with room ${room.code}.',
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.copy),
-                            label: const Text('Copy browser address'),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Text(
-                          'Players (${room.seats.length})',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        ...room.seats.map(
-                          (RoomSeat seat) => ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.person),
-                            title: Text(seat.name),
-                            trailing: seat.ownerUid == room.hostUid
-                                ? const Text('Host')
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _message,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        if (_isHost) ...<Widget>[
-                          const SizedBox(height: 20),
-                          FilledButton.icon(
-                            onPressed: _busy
-                                ? null
-                                : () {
-                                    unawaited(
-                                      _queueHostOperation(_startLobbyGame)
-                                          .catchError((Object _) {}),
+      return _onlineFrame(
+        Scaffold(
+          bottomNavigationBar: _chatBelow ? _roomFooter() : null,
+          appBar: AppBar(
+            title: const Text('Window lobby'),
+            actions: <Widget>[
+              if (_isOnline && _chatMinimized) _reopenChat,
+              IconButton(
+                tooltip: 'Leave lobby and return to menu',
+                icon: const Icon(Icons.home_outlined),
+                onPressed: _returnToMenu,
+              ),
+            ],
+          ),
+          body: _withSideChat(
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Card(
+                      margin: const EdgeInsets.all(24),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            Text(
+                              'Room ${room.code}',
+                              style: Theme.of(context).textTheme.headlineSmall,
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _isHost
+                                  ? 'Share this code. Players may join until you start the game.'
+                                  : 'You are in the lobby. Waiting for the host to start.',
+                              textAlign: TextAlign.center,
+                            ),
+                            if (_isHost &&
+                                WindowFirebaseOptions.browserUrl !=
+                                    null) ...<Widget>[
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Friends can join in the app with this room code, or in their browser at:',
+                              ),
+                              SelectableText(WindowFirebaseOptions.browserUrl!),
+                              const Text(
+                                'Browser players enter the room code above. No installation required.',
+                              ),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  await Clipboard.setData(
+                                    ClipboardData(
+                                      text: WindowFirebaseOptions.browserUrl!,
+                                    ),
+                                  );
+                                  if (mounted) {
+                                    setState(
+                                      () => _message =
+                                          'Browser address copied. Share it together with room ${room.code}.',
                                     );
-                                  },
-                            icon: const Icon(Icons.play_arrow),
-                            label: const Text('Start game and lock lobby'),
-                          ),
-                        ],
-                      ],
+                                  }
+                                },
+                                icon: const Icon(Icons.copy),
+                                label: const Text('Copy browser address'),
+                              ),
+                            ],
+                            const SizedBox(height: 20),
+                            Text(
+                              'Players (${room.seats.length})',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 8),
+                            ...room.seats.map(
+                              (RoomSeat seat) => ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.person),
+                                title: Text(seat.name),
+                                trailing: seat.ownerUid == room.hostUid
+                                    ? const Text('Host')
+                                    : null,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              _message,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            if (_isHost) ...<Widget>[
+                              const SizedBox(height: 20),
+                              FilledButton.icon(
+                                onPressed: _busy
+                                    ? null
+                                    : () {
+                                        unawaited(
+                                          _queueHostOperation(_startLobbyGame)
+                                              .catchError((Object _) {}),
+                                        );
+                                      },
+                                icon: const Icon(Icons.play_arrow),
+                                label: const Text('Start game and lock lobby'),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1053,7 +1736,7 @@ class _GameShellState extends State<GameShell> {
       canControl: _canControlCurrentTurn,
       onEndTurn: () {
         if (_isOnline) {
-          _submitOnline(<String, dynamic>{'type': 'endTurn'});
+          _turnAction(<String, dynamic>{'type': 'endTurn'}, 'clicked End turn');
         } else {
           game.endTurn();
           setState(() {
@@ -1068,12 +1751,15 @@ class _GameShellState extends State<GameShell> {
           setState(() => _message = '${game.currentPlayer} starts a new game.');
         }
       },
-      onConfirmSame: () =>
-          _submitOnline(<String, dynamic>{'type': 'confirmSame'}),
-      onConfirmRemovals: () =>
-          _submitOnline(<String, dynamic>{'type': 'confirmRemovals'}),
-      proposal: _proposal,
-      proposing: _proposing,
+      onConfirmSame: () => _turnAction(<String, dynamic>{
+        'type': 'confirmSame',
+      }, 'confirmed the same-rank penalty'),
+      onConfirmRemovals: () => _turnAction(<String, dynamic>{
+        'type': 'confirmRemovals',
+      }, 'clicked Redeal marked cards'),
+      proposal: _visibleProposal,
+      pressedTarget: _pressedTarget,
+      proposing: _proposing || _turnUi['stage'] == 'calculating',
       policyStatus: _rlPolicy.availabilityMessage,
       onPropose: _proposeMove,
     );
@@ -1082,12 +1768,18 @@ class _GameShellState extends State<GameShell> {
       snapshot: snapshot,
       enabled: _canControlCurrentTurn && !_busy,
       onSelect: _select,
-      proposal: _proposal,
+      proposal: _visibleProposal,
+      selectedPosition: _turnUi['row'] is int && _turnUi['column'] is int
+          ? Position(_turnUi['row'], _turnUi['column'])
+          : null,
+      pressedTarget: _pressedTarget,
     );
-    return Scaffold(
+    final scaffold = Scaffold(
+      bottomNavigationBar: _isOnline && _chatBelow ? _roomFooter() : null,
       appBar: AppBar(
         title: const Text('Window'),
         actions: <Widget>[
+          if (_isOnline && _chatMinimized) _reopenChat,
           IconButton(
             tooltip: _isOnline
                 ? 'Leave room and return to menu'
@@ -1097,46 +1789,53 @@ class _GameShellState extends State<GameShell> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints size) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: size.maxWidth >= 900
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder:
-                              (
-                                BuildContext context,
-                                BoxConstraints boardConstraints,
-                              ) {
-                                final double boardWidth = math.min(
-                                  boardConstraints.maxWidth,
-                                  boardConstraints.maxHeight *
-                                      _boardAspectRatio,
-                                );
-                                return Center(
-                                  child: SizedBox(
-                                    width: boardWidth,
-                                    child: board,
-                                  ),
-                                );
-                              },
+      body: _withSideChat(
+        SafeArea(
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints size) => Padding(
+              padding: const EdgeInsets.all(16),
+              child: (_isOnline && !_chatBelow) || size.maxWidth >= 900
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder:
+                                (
+                                  BuildContext context,
+                                  BoxConstraints boardConstraints,
+                                ) {
+                                  final double boardWidth = math.min(
+                                    boardConstraints.maxWidth,
+                                    boardConstraints.maxHeight *
+                                        _boardAspectRatio,
+                                  );
+                                  return Center(
+                                    child: SizedBox(
+                                      width: boardWidth,
+                                      child: board,
+                                    ),
+                                  );
+                                },
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 24),
-                      Expanded(child: SingleChildScrollView(child: info)),
-                    ],
-                  )
-                : ListView(
-                    children: <Widget>[info, const SizedBox(height: 18), board],
-                  ),
+                        const SizedBox(width: 24),
+                        Expanded(child: SingleChildScrollView(child: info)),
+                      ],
+                    )
+                  : ListView(
+                      children: <Widget>[
+                        info,
+                        const SizedBox(height: 18),
+                        board,
+                      ],
+                    ),
+            ),
           ),
         ),
       ),
     );
+    return _isOnline ? _onlineFrame(scaffold) : scaffold;
   }
 }
 
@@ -1157,6 +1856,7 @@ class _Info extends StatelessWidget {
     required this.proposing,
     required this.policyStatus,
     required this.onPropose,
+    this.pressedTarget,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
@@ -1173,6 +1873,7 @@ class _Info extends StatelessWidget {
   final bool proposing;
   final String policyStatus;
   final VoidCallback onPropose;
+  final String? pressedTarget;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -1226,9 +1927,15 @@ class _Info extends StatelessWidget {
             onPressed: snapshot.turnCanEnd && canControl && !busy
                 ? onEndTurn
                 : null,
-            style: proposal?.action.isPass == true
+            style: pressedTarget == 'endTurn' || proposal?.action.isPass == true
                 ? FilledButton.styleFrom(
-                    backgroundColor: Colors.lightBlue,
+                    backgroundColor: pressedTarget == 'endTurn'
+                        ? Colors.amber
+                        : Colors.lightBlue,
+                    disabledBackgroundColor: pressedTarget == 'endTurn'
+                        ? Colors.amber
+                        : Colors.lightBlue,
+                    disabledForegroundColor: Colors.black,
                     foregroundColor: Colors.black,
                   )
                 : null,
@@ -1306,6 +2013,7 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class _MovableGameDialog extends StatefulWidget {
   const _MovableGameDialog({
+    super.key,
     required this.title,
     required this.content,
     required this.actions,
@@ -1326,51 +2034,55 @@ class _MovableGameDialogState extends State<_MovableGameDialog> {
   Widget build(BuildContext context) => Transform.translate(
     offset: _translation,
     child: Dialog(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            MouseRegion(
-              cursor: SystemMouseCursors.move,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanUpdate: (DragUpdateDetails details) =>
-                    setState(() => _translation += details.delta),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Row(
-                    children: <Widget>[
-                      const Icon(Icons.drag_indicator),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.title,
-                          style: Theme.of(context).textTheme.titleLarge,
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              MouseRegion(
+                cursor: SystemMouseCursors.move,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanUpdate: (DragUpdateDetails details) =>
+                      setState(() => _translation += details.delta),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.drag_indicator),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-              child: widget.content,
-            ),
-            if (widget.actions.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: widget.actions,
-                ),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+                child: widget.content,
               ),
-          ],
+              if (widget.actions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: widget.actions,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     ),
@@ -1502,12 +2214,16 @@ class _Board extends StatelessWidget {
     required this.enabled,
     required this.onSelect,
     required this.proposal,
+    this.selectedPosition,
+    this.pressedTarget,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
   final bool enabled;
   final ValueChanged<Position> onSelect;
   final AiMoveProposal? proposal;
+  final Position? selectedPosition;
+  final String? pressedTarget;
   @override
   Widget build(BuildContext context) => AspectRatio(
     aspectRatio: _boardAspectRatio,
@@ -1541,17 +2257,30 @@ class _Board extends StatelessWidget {
   Widget _cardSlot(BuildContext context, Position position) {
     if (!game.isValidSlot(position)) return const SizedBox.shrink();
     final bool faceUp = snapshot.faceUp[position.row][position.column];
-    final bool selectable =
-        enabled && snapshot.validSelectable.contains(position);
+    final bool legal = snapshot.validSelectable.contains(position);
+    final bool selectable = enabled && legal;
+    final bool selected =
+        selectedPosition == position ||
+        pressedTarget == 'card:${position.row}:${position.column}';
     final bool markedForRemoval = snapshot.pendingRemovals.contains(position);
     final bool proposed = proposal?.action.position == position;
+    final double borderWidth = selected
+        ? 6
+        : markedForRemoval || proposed
+        ? 4
+        : legal
+        ? 3
+        : 1;
     final int? card = snapshot.cardGrid[position.row][position.column];
     return Semantics(
       button: selectable,
       label: position == handlePosition
           ? 'Handle card'
-          : (faceUp ? 'Face-up ${game.cardLabel(card!)}' : 'Face-down card'),
+          : '${faceUp ? 'Face-up ${game.cardLabel(card!)}' : 'Face-down card'}, '
+                'row ${position.row + 1}, column ${position.column + 1}'
+                '${legal ? ', selectable' : ''}${proposed ? ', suggested' : ''}${selected ? ', selected' : ''}',
       child: InkWell(
+        key: ValueKey('card:${position.row}:${position.column}'),
         onTap: selectable ? () => onSelect(position) : null,
         borderRadius: BorderRadius.circular(10),
         child: Ink(
@@ -1563,10 +2292,8 @@ class _Board extends StatelessWidget {
                   ? Colors.redAccent
                   : (proposed
                         ? Colors.lightBlueAccent
-                        : (selectable
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.black54)),
-              width: markedForRemoval || proposed ? 4 : (selectable ? 3 : 1),
+                        : (legal || selected ? Colors.amber : Colors.black54)),
+              width: borderWidth,
             ),
             boxShadow: const <BoxShadow>[
               BoxShadow(
@@ -1576,20 +2303,23 @@ class _Board extends StatelessWidget {
               ),
             ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: Image.asset(
-              faceUp
-                  ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
-                  : 'assets/cards/card_back.png',
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => Center(
-                child: Text(
-                  faceUp ? game.cardLabel(card!) : '?',
-                  style: TextStyle(
-                    color: faceUp ? const Color(0xff251c13) : Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: faceUp ? 18 : 30,
+          child: Padding(
+            padding: EdgeInsets.all(borderWidth),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: Image.asset(
+                faceUp
+                    ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
+                    : 'assets/cards/card_back.png',
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => Center(
+                  child: Text(
+                    faceUp ? game.cardLabel(card!) : '?',
+                    style: TextStyle(
+                      color: faceUp ? const Color(0xff251c13) : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: faceUp ? 18 : 30,
+                    ),
                   ),
                 ),
               ),

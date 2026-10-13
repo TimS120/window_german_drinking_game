@@ -15,8 +15,109 @@
         "requests": {
           ".read": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid",
           "$requestId": {
-            ".write": "auth != null && (root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid || (!data.exists() && newData.child('uid').val() === auth.uid))",
-            ".validate": "newData.hasChildren(['uid', 'type', 'createdAt'])"
+            ".write": "(auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid) || (auth != null && !data.exists() && newData.child('uid').val() === auth.uid && (newData.child('type').val() === 'joinLobby' || newData.child('type').val() === 'action' || (auth != null && root.child('rooms').child($roomCode).child('public').child('members').child(auth.uid).val() === true)))",
+            ".validate": "newData.hasChildren(['uid', 'type', 'createdAt']) && newData.child('createdAt').isNumber() && newData.child('createdAt').val() <= now && newData.child('createdAt').val() >= now - 30000 && (newData.child('type').val() === 'joinLobby' || newData.child('type').val() === 'action' || newData.child('type').val() === 'chat' || newData.child('type').val() === 'reaction' || newData.child('type').val() === 'turnUi')",
+            "action": {
+              "text": {
+                ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 500"
+              },
+              "emoji": {
+                ".validate": "newData.isString() && newData.val().length <= 10"
+              },
+              "proposal": {
+                "explanation": {
+                  ".validate": "newData.isString() && newData.val().length <= 2500"
+                },
+                "source": {
+                  ".validate": "newData.isString() && newData.val().length <= 100"
+                }
+              }
+            }
+          }
+        },
+        "social": {
+          ".read": "auth != null && root.child('rooms').child($roomCode).child('public').child('members').child(auth.uid).val() === true",
+          ".write": "auth != null && root.child('rooms').child($roomCode).child('public').child('hostUid').val() === auth.uid",
+          "turnViews": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && root.child('rooms').child($roomCode).child('public').child('members').child(auth.uid).val() === true && root.child('rooms').child($roomCode).child('public').child('started').val() === true && root.child('rooms').child($roomCode).child('public').child('seats').child(root.child('rooms').child($roomCode).child('public').child('state').child('currentPlayerIndex').val() + '').child('ownerUid').val() === auth.uid && newData.child('version').val() === root.child('rooms').child($roomCode).child('public').child('version').val() && newData.child('playerIndex').val() === root.child('rooms').child($roomCode).child('public').child('state').child('currentPlayerIndex').val()",
+              ".validate": "newData.hasChildren(['uid', 'version', 'playerIndex', 'stage', 'eventId', 'createdAt']) && newData.child('uid').val() === $uid",
+              "uid": {
+                ".validate": "newData.isString() && newData.val() === $uid"
+              },
+              "version": {
+                ".validate": "newData.isNumber()"
+              },
+              "playerIndex": {
+                ".validate": "newData.isNumber() && newData.val() >= 0"
+              },
+              "stage": {
+                ".validate": "newData.val() === 'idle' || newData.val() === 'comparison' || newData.val() === 'guess' || newData.val() === 'adviser' || newData.val() === 'calculating' || newData.val() === 'suggestion'"
+              },
+              "eventId": {
+                ".validate": "newData.isString() && newData.val().length <= 80"
+              },
+              "createdAt": {
+                ".validate": "newData.isNumber() && newData.val() <= now && newData.val() >= now - 30000"
+              },
+              "row": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 5"
+              },
+              "column": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 6"
+              },
+              "orientation": {
+                ".validate": "newData.val() === 'horizontal' || newData.val() === 'vertical'"
+              },
+              "method": {
+                ".validate": "newData.val() === 'statistics' || newData.val() === 'rlModel'"
+              },
+              "clicked": {
+                ".validate": "newData.isString() && newData.val().length <= 80"
+              },
+              "label": {
+                ".validate": "newData.isString() && newData.val().length <= 180"
+              },
+              "proposal": {
+                ".validate": "newData.hasChildren(['pass', 'confidence', 'source'])",
+                "pass": {
+                  ".validate": "newData.isBoolean()"
+                },
+                "confidence": {
+                  ".validate": "newData.isNumber()"
+                },
+                "source": {
+                  ".validate": "newData.isString() && newData.val().length <= 100"
+                },
+                "explanation": {
+                  ".validate": "newData.isString() && newData.val().length <= 2500"
+                },
+                "row": {
+                  ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 5"
+                },
+                "column": {
+                  ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 6"
+                },
+                "orientation": {
+                  ".validate": "newData.val() === 'horizontal' || newData.val() === 'vertical'"
+                },
+                "guess": {
+                  ".validate": "newData.val() === 'higher' || newData.val() === 'lower' || newData.val() === 'same' || newData.val() === 'inBetween' || newData.val() === 'outside'"
+                },
+                "value": {
+                  ".validate": "newData.isNumber()"
+                },
+                "drinks": {
+                  ".validate": "newData.isNumber()"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
           }
         }
       }
