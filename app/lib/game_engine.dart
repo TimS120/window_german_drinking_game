@@ -183,6 +183,7 @@ class GameSnapshot {
 class WindowGameEngine {
   WindowGameEngine(List<String> players, {int? seed})
     : _random = Random(seed),
+      recordHistory = true,
       _players = List<String>.unmodifiable(
         players.where((String name) => name.trim().isNotEmpty).toList().isEmpty
             ? <String>['Player 1']
@@ -194,13 +195,20 @@ class WindowGameEngine {
     resetGame();
   }
 
-  WindowGameEngine.fromState(GameState state, {int? seed})
-    : _random = Random(seed) {
+  WindowGameEngine.fromState(
+    GameState state, {
+    int? seed,
+    this.recordHistory = true,
+  }) : _random = Random(seed) {
     _players = List<String>.unmodifiable(state.players);
     restore(state);
   }
 
   final Random _random;
+  final bool recordHistory;
+
+  /// Immutable public totals; rollout scoring need not copy an observation.
+  PlayerStats playerStats(String player) => _stats[player]!;
   late List<String> _players;
   late List<int> _deck;
   late List<List<int?>> _cardGrid;
@@ -257,7 +265,7 @@ class WindowGameEngine {
   }
 
   /// Player-visible input for advisers. Never copies hidden cards or the deck.
-  GameState publicObservation() => GameState(
+  GameState publicObservation({int maxEvents = 16}) => GameState(
     players: List<String>.from(_players),
     currentPlayerIndex: _currentPlayerIndex,
     turnStartFaceUp: _turnStartFaceUp,
@@ -271,7 +279,7 @@ class WindowGameEngine {
     pendingSamePosition: _pendingSamePosition,
     stats: Map<String, PlayerStats>.from(_stats),
     recentEvents: _recentEvents
-        .skip(max(0, _recentEvents.length - 16))
+        .skip(max(0, _recentEvents.length - maxEvents))
         .toList(),
   );
 
@@ -335,35 +343,57 @@ class WindowGameEngine {
     return '${const <String>['6', '7', '8', '9', '10', 'U', 'O', 'K', 'A'][cardId ~/ 4]}.${const <String>['E', 'B', 'H', 'S'][cardId % 4]}';
   }
 
-  List<Position> adjacentPositions(Position position) {
-    const List<Position> offsets = <Position>[
+  static List<Position> _buildNeighbors(Position position) {
+    const offsets = [
       Position(-1, 0),
       Position(1, 0),
       Position(0, -1),
       Position(0, 1),
     ];
-    return offsets
-        .map(
-          (Position offset) => Position(
-            position.row + offset.row,
-            position.column + offset.column,
+    return List<Position>.unmodifiable(
+      offsets
+          .map(
+            (offset) => Position(
+              position.row + offset.row,
+              position.column + offset.column,
+            ),
+          )
+          .where(
+            (p) =>
+                p.row >= 0 &&
+                p.row < windowLayout.length &&
+                p.column >= 0 &&
+                p.column < windowLayout[p.row].length &&
+                windowLayout[p.row][p.column],
           ),
-        )
-        .where(isValidSlot)
-        .toList();
+    );
   }
+
+  // Geometry never changes. Reuse immutable coordinates internally; the public
+  // API still returns a fresh list so callers cannot mutate this cache.
+  static final Map<Position, List<Position>> _adjacency = {
+    for (int r = 0; r < windowLayout.length; r++)
+      for (int c = 0; c < windowLayout[r].length; c++)
+        Position(r, c): _buildNeighbors(Position(r, c)),
+  };
+
+  List<Position> _neighbors(Position position) =>
+      _adjacency[position] ?? _buildNeighbors(position);
+
+  List<Position> adjacentPositions(Position position) =>
+      List<Position>.of(_neighbors(position));
 
   List<GuessOption> getValidOptionsForCard(Position position) {
     if (!isValidSlot(position) || isFaceUp(position)) {
       return const <GuessOption>[];
     }
     if (_mustSelectAdjacentToHandle &&
-        !adjacentPositions(handlePosition).contains(position)) {
+        !_neighbors(handlePosition).contains(position)) {
       return const <GuessOption>[];
     }
     final List<Position> horizontal = <Position>[];
     final List<Position> vertical = <Position>[];
-    for (final Position neighbor in adjacentPositions(position)) {
+    for (final Position neighbor in _neighbors(position)) {
       if (!isFaceUp(neighbor)) continue;
       if (neighbor.row == position.row) {
         horizontal.add(neighbor);
@@ -458,7 +488,9 @@ class WindowGameEngine {
     if (!option.guesses.contains(guess)) {
       return const GuessResult(invalidReason: 'Invalid guess.');
     }
-    final List<List<int?>> boardBefore = _publicBoard();
+    final List<List<int?>> boardBefore = recordHistory
+        ? _publicBoard()
+        : const [];
     final bool mustSelectBefore = _mustSelectAdjacentToHandle;
     final bool turnCanEndBefore = _turnCanEnd;
     final int actionIndex = _actionIndex(position, option.orientation, guess);
@@ -474,14 +506,16 @@ class WindowGameEngine {
       };
       if (correct && guess == GuessType.same) {
         _pendingSamePosition = position;
-        _appendPublicEvent(
-          boardBefore,
-          actionIndex,
-          'correct',
-          _emptyPublicBoard(),
-          mustSelectBefore,
-          turnCanEndBefore,
-        );
+        if (recordHistory) {
+          _appendPublicEvent(
+            boardBefore,
+            actionIndex,
+            'correct',
+            _emptyPublicBoard(),
+            mustSelectBefore,
+            turnCanEndBefore,
+          );
+        }
         return const GuessResult(correct: true, requiresSameConfirmation: true);
       }
     } else {
@@ -495,14 +529,16 @@ class WindowGameEngine {
           (guess == GuessType.outside && !inRange);
     }
     final GuessResult result = _finalizeGuess(position, correct);
-    _appendPublicEvent(
-      boardBefore,
-      actionIndex,
-      correct ? 'correct' : 'wrong',
-      correct ? _emptyPublicBoard() : _publicRemovalCards(),
-      mustSelectBefore,
-      turnCanEndBefore,
-    );
+    if (recordHistory) {
+      _appendPublicEvent(
+        boardBefore,
+        actionIndex,
+        correct ? 'correct' : 'wrong',
+        correct ? _emptyPublicBoard() : _publicRemovalCards(),
+        mustSelectBefore,
+        turnCanEndBefore,
+      );
+    }
     return result;
   }
 
@@ -543,7 +579,9 @@ class WindowGameEngine {
         _pendingSamePosition != null) {
       return;
     }
-    final List<List<int?>> boardBefore = _publicBoard();
+    final List<List<int?>> boardBefore = recordHistory
+        ? _publicBoard()
+        : const [];
     final bool mustSelectBefore = _mustSelectAdjacentToHandle;
     final bool turnCanEndBefore = _turnCanEnd;
     final PlayerStats current = _stats[currentPlayer]!;
@@ -555,7 +593,16 @@ class WindowGameEngine {
     _turnStartFaceUp = countFaceUpCards();
     _incrementTurns(currentPlayer);
     _turnCanEnd = false;
-    _appendPublicEvent(boardBefore, 300, 'pass', _emptyPublicBoard(), mustSelectBefore, turnCanEndBefore);
+    if (recordHistory) {
+      _appendPublicEvent(
+        boardBefore,
+        300,
+        'pass',
+        _emptyPublicBoard(),
+        mustSelectBefore,
+        turnCanEndBefore,
+      );
+    }
   }
 
   int countFaceUpCards() {
@@ -614,7 +661,7 @@ class WindowGameEngine {
     while (queue.isNotEmpty) {
       final Position current = queue.removeLast();
       if (!visited.add(current)) continue;
-      for (final Position neighbor in adjacentPositions(current)) {
+      for (final Position neighbor in _neighbors(current)) {
         if (isFaceUp(neighbor) && !visited.contains(neighbor)) {
           queue.add(neighbor);
         }
@@ -627,7 +674,8 @@ class WindowGameEngine {
     Position position,
     Orientation orientation,
     GuessType guess,
-  ) => (((position.row * 6 + position.column) * 2 + orientation.index) * 5) +
+  ) =>
+      (((position.row * 6 + position.column) * 2 + orientation.index) * 5) +
       guess.index;
 
   List<List<int?>> _emptyPublicBoard() => List<List<int?>>.generate(
@@ -645,15 +693,12 @@ class WindowGameEngine {
 
   List<List<int?>> _publicRemovalCards() => List<List<int?>>.generate(
     windowLayout.length,
-    (int row) => List<int?>.generate(
-      windowLayout[row].length,
-      (int column) {
-        final Position position = Position(row, column);
-        return _pendingRemovals.contains(position)
-            ? _cardGrid[row][column]
-            : null;
-      },
-    ),
+    (int row) => List<int?>.generate(windowLayout[row].length, (int column) {
+      final Position position = Position(row, column);
+      return _pendingRemovals.contains(position)
+          ? _cardGrid[row][column]
+          : null;
+    }),
   );
 
   void _appendPublicEvent(
@@ -664,14 +709,16 @@ class WindowGameEngine {
     bool mustSelectAdjacentToHandle,
     bool turnCanEnd,
   ) {
-    _recentEvents.add(PublicMoveEvent(
-      boardBefore: boardBefore,
-      actionIndex: actionIndex,
-      outcome: outcome,
-      removedCards: removedCards,
-      mustSelectAdjacentToHandle: mustSelectAdjacentToHandle,
-      turnCanEnd: turnCanEnd,
-    ));
+    _recentEvents.add(
+      PublicMoveEvent(
+        boardBefore: boardBefore,
+        actionIndex: actionIndex,
+        outcome: outcome,
+        removedCards: removedCards,
+        mustSelectAdjacentToHandle: mustSelectAdjacentToHandle,
+        turnCanEnd: turnCanEnd,
+      ),
+    );
     // Keep enough public context for the largest supported deployed history
     // window (63 events plus the current board).
     if (_recentEvents.length > maxPublicHistoryEvents) {

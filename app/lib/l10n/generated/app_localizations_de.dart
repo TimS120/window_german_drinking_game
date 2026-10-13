@@ -348,24 +348,19 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get modelWillLoad =>
-      'Das enthaltene ONNX-Testmodell wird geladen, sobald du eine Empfehlung anforderst.';
+      'Das enthaltene ONNX-Modell wird geladen, sobald du eine Empfehlung anforderst.';
 
   @override
   String get modelLoading => 'Enthaltenes ONNX-Modell wird geladen…';
 
   @override
-  String get modelUnavailable =>
-      'Modell nicht verfügbar; stattdessen wird reine Statistik verwendet.';
+  String get modelUnavailable => 'RL-Modell nicht verfügbar.';
 
   @override
   String get modelSource => 'ONNX-Modell';
 
   @override
   String get testModelSource => 'ONNX-Testmodell (untrainiert)';
-
-  @override
-  String get fallbackSource =>
-      'ONNX-Auswertung fehlgeschlagen → Reine Statistik';
 
   @override
   String get passAction => 'Zug beenden (passen)';
@@ -645,7 +640,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String inferenceFailed(String error) {
-    return 'ONNX-Auswertung fehlgeschlagen; stattdessen wird reine Statistik verwendet. $error';
+    return 'RL-Berater nicht verfügbar: $error';
   }
 
   @override

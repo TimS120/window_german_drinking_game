@@ -37,3 +37,9 @@ node_modules/
 *.iml
 .DS_Store
 Thumbs.db
+
+# Local adviser comparison reports and raw game records
+benchmark-results/
+
+# Cached headless adviser benchmark executable and isolated ONNX runtime
+benchmark-cache/

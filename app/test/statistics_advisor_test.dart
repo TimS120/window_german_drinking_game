@@ -28,6 +28,29 @@ List<List<int?>> blank() => List.generate(5, (_) => List<int?>.filled(6, null));
 
 void main() {
   test(
+    'fixed search rounds ignore the clock budget and reject unbalanced rounds',
+    () {
+      final game = WindowGameEngine(['Ada', 'Ben'], seed: 42);
+      final first = WindowRlPolicy.statisticsProposal(
+        game,
+        fixedRounds: 3,
+        budgetMilliseconds: 0,
+      );
+      final second = WindowRlPolicy.statisticsProposal(
+        game,
+        fixedRounds: 3,
+        budgetMilliseconds: 10000,
+      );
+      expect(first.action.index, second.action.index);
+      expect(first.expectedDrinks, second.expectedDrinks);
+      expect(
+        () => WindowRlPolicy.statisticsProposal(game, fixedRounds: 4),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test(
     'hidden permutations cannot change beliefs or a fixed-budget proposal',
     () {
       final game = WindowGameEngine(['Ada', 'Ben'], seed: 42);

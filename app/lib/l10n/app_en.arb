@@ -103,12 +103,11 @@
   "reactionFailed": "Reaction could not be sent. Please retry.",
   "modelLoaded": "ONNX policy loaded.",
   "testModelLoaded": "ONNX test model loaded.",
-  "modelWillLoad": "Bundled ONNX test model will load when you request a proposal.",
+  "modelWillLoad": "Bundled ONNX model will load when you request a proposal.",
   "modelLoading": "Loading bundled ONNX model…",
-  "modelUnavailable": "Model unavailable; using the pure-statistics fallback.",
+  "modelUnavailable": "RL model unavailable.",
   "modelSource": "ONNX policy",
   "testModelSource": "ONNX test model (untrained)",
-  "fallbackSource": "ONNX inference failed → Pure statistics",
   "passAction": "end turn (pass)",
   "horizontal": "horizontal",
   "vertical": "vertical",
@@ -441,7 +440,7 @@
       }
     }
   },
-  "inferenceFailed": "ONNX inference failed; using pure statistics. {error}",
+  "inferenceFailed": "RL adviser unavailable: {error}",
   "@inferenceFailed": {
     "placeholders": {
       "error": {

@@ -1122,10 +1122,11 @@ class _GameShellState extends State<GameShell> {
       _shareUi('suggestion', method: method, clearProposal: proposal == null);
     } catch (error) {
       if (mounted) {
-        setState(
-          () => _message = (l) => l.predictionFailed(localizedError(l, error)),
-        );
-        _shareUi('idle');
+        setState(() {
+          _proposal = null;
+          _message = (l) => l.predictionFailed(localizedError(l, error));
+        });
+        _shareUi('idle', clearProposal: true);
       }
     } finally {
       if (mounted) setState(() => _proposing = false);

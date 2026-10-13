@@ -1,8 +1,93 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/game_engine.dart';
 import 'package:window_game/game_state_codec.dart';
+import 'package:window_game/policy_core.dart';
 
 void main() {
+  test('omitting rollout history preserves every rule outcome and shuffle', () {
+    final initial = WindowGameEngine([
+      'A',
+      'B',
+      'C',
+      'D',
+    ], seed: 71).exportState();
+    final normal = WindowGameEngine.fromState(initial, seed: 991);
+    final rollout = WindowGameEngine.fromState(
+      initial,
+      seed: 991,
+      recordHistory: false,
+    );
+    final random = Random(901);
+    for (int step = 0; step < 200 && !normal.gameEnded; step++) {
+      final actions = WindowRlCodec.validActions(normal);
+      final action = actions[random.nextInt(actions.length)];
+      for (final game in [normal, rollout]) {
+        if (action.isPass) {
+          game.endTurn();
+        } else {
+          final option = game
+              .getValidOptionsForCard(action.position!)
+              .firstWhere((o) => o.orientation == action.orientation);
+          final result = game.applyGuess(
+            action.position!,
+            option,
+            action.guess!,
+          );
+          if (result.requiresSameConfirmation) game.confirmSameGuess();
+          if (result.requiresRemovalConfirmation) game.confirmRemovals();
+        }
+      }
+      final a = GameStateCodec.encode(normal.exportState())
+        ..remove('recentEvents');
+      final b = GameStateCodec.encode(rollout.exportState())
+        ..remove('recentEvents');
+      expect(b, a, reason: 'Rule state diverged at step $step');
+    }
+    expect(normal.recentEvents, isNotEmpty);
+    expect(rollout.recentEvents, isEmpty);
+    final fullPublic = WindowGameEngine.fromState(
+      normal.publicObservation(maxEvents: maxPublicHistoryEvents),
+    );
+    expect(
+      WindowRlCodec.encodeHistory(fullPublic, historyLength: 64),
+      WindowRlCodec.encodeHistory(normal, historyLength: 64),
+    );
+    expect(
+      normal.publicObservation().recentEvents.length,
+      lessThanOrEqualTo(16),
+    );
+  });
+
+  test(
+    'shared removal-component penalties agree with actual failed guesses',
+    () {
+      final game = WindowGameEngine(['A', 'B', 'C'], seed: 19);
+      final random = Random(12);
+      int failures = 0;
+      for (int step = 0; step < 150 && !game.gameEnded; step++) {
+        final risks = StatisticsPolicy.immediateMoveRisks(game);
+        final candidate = risks[random.nextInt(risks.length)];
+        final action = candidate.action;
+        final option = game
+            .getValidOptionsForCard(action.position!)
+            .firstWhere((o) => o.orientation == action.orientation);
+        final result = game.applyGuess(action.position!, option, action.guess!);
+        if (result.requiresRemovalConfirmation) {
+          expect(game.pendingPenalty, candidate.penalty);
+          failures++;
+          game.confirmRemovals();
+        }
+        if (result.requiresSameConfirmation) game.confirmSameGuess();
+        if (game.turnCanEnd && !game.gameEnded && random.nextBool()) {
+          game.endTurn();
+        }
+      }
+      expect(failures, greaterThan(0));
+    },
+  );
+
   group('WindowGameEngine', () {
     test('deals the 22-slot window with only corners and handle face-up', () {
       final WindowGameEngine game = WindowGameEngine(<String>[

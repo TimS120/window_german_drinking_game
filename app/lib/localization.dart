@@ -253,6 +253,8 @@ class LocalizedFailure implements Exception {
 String localizedError(AppLocalizations l, Object error) =>
     error is LocalizedFailure
     ? error.message(l)
+    : error is RlPolicyException
+    ? l.inferenceFailed(error.details)
     : localizedDomainText(l, '${error is StateError ? error.message : error}');
 
 String localizedPolicyStatus(AppLocalizations l, WindowRlPolicy policy) =>
@@ -296,7 +298,6 @@ String localizedDomainText(AppLocalizations l, String text) {
     'Pure statistics' => l.pureStatistics,
     'ONNX policy' => l.modelSource,
     'ONNX test model (untrained)' => l.testModelSource,
-    'ONNX inference failed → Pure statistics' => l.fallbackSource,
     'Pass to avoid more risk' => l.passExplanation,
     'Certain guess, no immediate drinks' => l.certainExplanation,
     'Low risk, small penalty' => l.smallPenaltyExplanation,

@@ -2,7 +2,7 @@
 
 Select **Propose best move → Pure statistics**. The adviser estimates the
 current player's remaining drinks through game completion. It does not execute
-moves or learn from opponents. The same adviser is the ONNX failure fallback.
+moves or learn from opponents. RL availability or inference failures are displayed as errors; they never select this adviser automatically.
 
 ## Information boundary and beliefs
 
@@ -96,3 +96,5 @@ Shortlisting, particle depletion, fixed opponent assumptions, simple continuatio
 policies, and the tail approximation can affect recommendations. Superiority
 over a trained RL policy requires a separate controlled gameplay comparison;
 it is not claimed by this implementation.
+
+The headless comparison imports this same adviser through `policy_core.dart`. Shared optimizations reuse public removal components/rank sums and omit unused history recording in internal search rollouts; the externally played game retains its public history. Fixed-round comparison decisions preserve the original search semantics. See `BENCHMARK_README.md`.

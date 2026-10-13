@@ -719,7 +719,7 @@ abstract class AppLocalizations {
   /// No description provided for @modelWillLoad.
   ///
   /// In en, this message translates to:
-  /// **'Bundled ONNX test model will load when you request a proposal.'**
+  /// **'Bundled ONNX model will load when you request a proposal.'**
   String get modelWillLoad;
 
   /// No description provided for @modelLoading.
@@ -731,7 +731,7 @@ abstract class AppLocalizations {
   /// No description provided for @modelUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'Model unavailable; using the pure-statistics fallback.'**
+  /// **'RL model unavailable.'**
   String get modelUnavailable;
 
   /// No description provided for @modelSource.
@@ -745,12 +745,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'ONNX test model (untrained)'**
   String get testModelSource;
-
-  /// No description provided for @fallbackSource.
-  ///
-  /// In en, this message translates to:
-  /// **'ONNX inference failed → Pure statistics'**
-  String get fallbackSource;
 
   /// No description provided for @passAction.
   ///
@@ -1109,7 +1103,7 @@ abstract class AppLocalizations {
   /// No description provided for @inferenceFailed.
   ///
   /// In en, this message translates to:
-  /// **'ONNX inference failed; using pure statistics. {error}'**
+  /// **'RL adviser unavailable: {error}'**
   String inferenceFailed(String error);
 
   /// No description provided for @cleanupFailed.

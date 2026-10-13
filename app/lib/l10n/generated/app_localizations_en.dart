@@ -342,23 +342,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get modelWillLoad =>
-      'Bundled ONNX test model will load when you request a proposal.';
+      'Bundled ONNX model will load when you request a proposal.';
 
   @override
   String get modelLoading => 'Loading bundled ONNX model…';
 
   @override
-  String get modelUnavailable =>
-      'Model unavailable; using the pure-statistics fallback.';
+  String get modelUnavailable => 'RL model unavailable.';
 
   @override
   String get modelSource => 'ONNX policy';
 
   @override
   String get testModelSource => 'ONNX test model (untrained)';
-
-  @override
-  String get fallbackSource => 'ONNX inference failed → Pure statistics';
 
   @override
   String get passAction => 'end turn (pass)';
@@ -633,7 +629,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String inferenceFailed(String error) {
-    return 'ONNX inference failed; using pure statistics. $error';
+    return 'RL adviser unavailable: $error';
   }
 
   @override

@@ -1,7 +1,4 @@
-part of 'rl_policy.dart';
-
-AiMoveProposal _statisticsFromPublicState(GameState state) =>
-    _StatisticsAdvisor(state).propose();
+part of 'policy_core.dart';
 
 /// Sequential importance sampling over physical cards. Cohorts contain cards
 /// which are exchangeable given public observations; after a shuffle only the
@@ -213,8 +210,22 @@ class _Candidate {
 
 /// Bounded rollout search, not a learned policy or an optimality guarantee.
 class _StatisticsAdvisor {
-  _StatisticsAdvisor(this.state, {this.budgetMilliseconds = 180});
+  _StatisticsAdvisor(
+    this.state, {
+    this.budgetMilliseconds = 180,
+    this.fixedRounds,
+  }) {
+    if (fixedRounds != null &&
+        (fixedRounds! < 3 || fixedRounds! > 12 || fixedRounds! % 3 != 0)) {
+      throw ArgumentError.value(
+        fixedRounds,
+        'fixedRounds',
+        'Use 3, 6, 9 or 12',
+      );
+    }
+  }
   final int budgetMilliseconds;
+  final int? fixedRounds;
   final GameState state;
 
   AiMoveProposal propose({List<PolicyAction>? actions}) {
@@ -227,26 +238,40 @@ class _StatisticsAdvisor {
         : legal.where((a) => actions.any((b) => a.index == b.index)).toList();
     if (requested.isEmpty) throw StateError('No legal action can be proposed.');
     final beliefs = _CardBeliefs(state, random);
-    final baseline = {
-      for (final c in _publicRisks(publicGame)) c.action.index: c.success,
-    };
+    final publicRisks = _publicRisks(publicGame);
+    final baseline = {for (final c in publicRisks) c.action.index: c};
+    final options = <(Position, Orientation), GuessOption>{};
     final candidates = <_Candidate>[];
     for (final action in requested) {
-      final sampledSuccess = action.isPass
-          ? 1.0
-          : beliefs.particles
-                    .where(
-                      (particle) => _succeeds(publicGame, particle, action),
-                    )
-                    .length /
-                beliefs.particles.length;
-      final exact = action.isPass ? 1.0 : baseline[action.index]!;
-      // Unanimous samples alone do not prove certainty. Use the broader public
-      // rank support for a conservative check before claiming a certain guess.
-      final success = beliefs.exchangeable || exact == 1 || exact == 0
-          ? exact
-          : sampledSuccess.clamp(0.01, 0.99).toDouble();
-      candidates.add(_Candidate(action, success, _penalty(publicGame, action)));
+      if (action.isPass) {
+        candidates.add(_Candidate(action, 1, 0));
+        continue;
+      }
+      final known = baseline[action.index]!;
+      double success = known.success;
+      if (!beliefs.exchangeable && success != 0 && success != 1) {
+        final option = options.putIfAbsent(
+          (action.position!, action.orientation!),
+          () => publicGame
+              .getValidOptionsForCard(action.position!)
+              .firstWhere((o) => o.orientation == action.orientation),
+        );
+        final first = publicGame.cardAt(option.neighbors.first)! ~/ 4;
+        final last = publicGame.cardAt(option.neighbors.last)! ~/ 4;
+        final matchingRanks = List.generate(
+          9,
+          (rank) => _matches(rank, first, last, action.guess!),
+        );
+        final position = action.position!.row * 6 + action.position!.column;
+        success =
+            (beliefs.particles
+                        .where((p) => matchingRanks[p.cards[position]! ~/ 4])
+                        .length /
+                    beliefs.particles.length)
+                .clamp(0.01, 0.99)
+                .toDouble();
+      }
+      candidates.add(_Candidate(action, success, known.penalty));
     }
     candidates.sort((a, b) {
       final risk = a.risk.compareTo(b.risk);
@@ -271,8 +296,9 @@ class _StatisticsAdvisor {
     int rounds = 0;
     // Finish complete paired rounds to avoid giving earlier candidates a larger
     // budget. Native Flutter runs this in compute(); web keeps this bound small.
-    while (rounds < 12 &&
-        (rounds < 3 ||
+    while (rounds < (fixedRounds ?? 12) &&
+        (fixedRounds != null ||
+            rounds < 3 ||
             rounds % 3 != 0 ||
             stopwatch.elapsedMilliseconds < budgetMilliseconds)) {
       final particle =
@@ -323,44 +349,63 @@ class _StatisticsAdvisor {
     );
   }
 
-  static bool _succeeds(
-    WindowGameEngine game,
-    _Particle p,
-    PolicyAction action,
-  ) {
-    final option = game
-        .getValidOptionsForCard(action.position!)
-        .firstWhere((o) => o.orientation == action.orientation);
-    final rank =
-        p.cards[action.position!.row * 6 + action.position!.column]! ~/ 4;
-    final first = game.cardAt(option.neighbors.first)! ~/ 4;
-    final last = game.cardAt(option.neighbors.last)! ~/ 4;
-    return switch (action.guess!) {
-      GuessType.higher => rank > first,
-      GuessType.same => rank == first,
-      GuessType.lower => rank < first,
-      GuessType.inBetween =>
-        rank >= math.min(first, last) && rank <= math.max(first, last),
-      GuessType.outside =>
-        rank < math.min(first, last) || rank > math.max(first, last),
-    };
-  }
+  static bool _matches(int rank, int first, int last, GuessType guess) =>
+      switch (guess) {
+        GuessType.higher => rank > first,
+        GuessType.same => rank == first,
+        GuessType.lower => rank < first,
+        GuessType.inBetween =>
+          rank >= math.min(first, last) && rank <= math.max(first, last),
+        GuessType.outside =>
+          rank < math.min(first, last) || rank > math.max(first, last),
+      };
 
-  static int _penalty(WindowGameEngine game, PolicyAction action) {
-    if (action.isPass) return 0;
-    final visited = <Position>{};
-    final queue = <Position>[action.position!];
-    while (queue.isNotEmpty) {
-      final position = queue.removeLast();
-      if (!visited.add(position)) continue;
-      queue.addAll(
-        game
-            .adjacentPositions(position)
-            .where(game.isFaceUp)
-            .where((p) => !visited.contains(p)),
-      );
+  // Face-up components are shared by all hypothetical failed guesses. Build
+  // them once per public board instead of repeating a flood fill per action.
+  static Map<Position, int> _removalPenalties(WindowGameEngine game) {
+    final groups = List<int>.filled(30, -1);
+    final sizes = <int>[];
+    for (int r = 0; r < 5; r++) {
+      for (int c = 0; c < 6; c++) {
+        final start = Position(r, c);
+        if (!windowLayout[r][c] ||
+            !game.isFaceUp(start) ||
+            groups[r * 6 + c] >= 0) {
+          continue;
+        }
+        final group = sizes.length;
+        int size = 0;
+        final queue = <Position>[start];
+        groups[r * 6 + c] = group;
+        while (queue.isNotEmpty) {
+          final p = queue.removeLast();
+          size++;
+          for (final neighbor in game.adjacentPositions(p)) {
+            final index = neighbor.row * 6 + neighbor.column;
+            if (game.isFaceUp(neighbor) && groups[index] < 0) {
+              groups[index] = group;
+              queue.add(neighbor);
+            }
+          }
+        }
+        sizes.add(size);
+      }
     }
-    return visited.length;
+    final penalties = <Position, int>{};
+    for (int r = 0; r < 5; r++) {
+      for (int c = 0; c < 6; c++) {
+        final p = Position(r, c);
+        if (!windowLayout[r][c] || game.isFaceUp(p)) continue;
+        final connected = <int>{};
+        for (final neighbor in game.adjacentPositions(p)) {
+          final group = groups[neighbor.row * 6 + neighbor.column];
+          if (group >= 0) connected.add(group);
+        }
+        penalties[p] =
+            1 + connected.fold<int>(0, (n, group) => n + sizes[group]);
+      }
+    }
+    return penalties;
   }
 
   static void _play(WindowGameEngine game, PolicyAction action) {
@@ -387,39 +432,45 @@ class _StatisticsAdvisor {
       }
     }
     final total = counts.reduce((a, b) => a + b);
+    final prefix = List<int>.filled(10, 0);
+    for (int rank = 0; rank < 9; rank++) {
+      prefix[rank + 1] = prefix[rank] + counts[rank];
+    }
     final results = <_Candidate>[];
-    final penalties = <Position, int>{};
-    final options = <(Position, Orientation), GuessOption>{};
-    for (final action in WindowRlCodec.validActions(game)) {
-      if (action.isPass) continue;
-      final option = options.putIfAbsent(
-        (action.position!, action.orientation!),
-        () => game
-            .getValidOptionsForCard(action.position!)
-            .firstWhere((o) => o.orientation == action.orientation),
-      );
-      final first = game.cardAt(option.neighbors.first)! ~/ 4;
-      final last = game.cardAt(option.neighbors.last)! ~/ 4;
-      int matches = 0;
-      for (int rank = 0; rank < 9; rank++) {
-        final succeeds = switch (action.guess!) {
-          GuessType.higher => rank > first,
-          GuessType.same => rank == first,
-          GuessType.lower => rank < first,
-          GuessType.inBetween =>
-            rank >= math.min(first, last) && rank <= math.max(first, last),
-          GuessType.outside =>
-            rank < math.min(first, last) || rank > math.max(first, last),
-        };
-        if (succeeds) matches += counts[rank];
+    final penalties = _removalPenalties(game);
+    // Same ordering as WindowRlCodec.validActions, with each option built once.
+    for (int r = 0; r < 5; r++) {
+      for (int c = 0; c < 6; c++) {
+        if (!windowLayout[r][c]) continue;
+        final position = Position(r, c);
+        if (game.isFaceUp(position)) continue;
+        for (final option in game.getValidOptionsForCard(position)) {
+          final first = game.cardAt(option.neighbors.first)! ~/ 4;
+          final last = game.cardAt(option.neighbors.last)! ~/ 4;
+          final inBetween =
+              prefix[math.max(first, last) + 1] - prefix[math.min(first, last)];
+          for (final guess in option.guesses) {
+            final matches = switch (guess) {
+              GuessType.higher => total - prefix[first + 1],
+              GuessType.same => counts[first],
+              GuessType.lower => prefix[first],
+              GuessType.inBetween => inBetween,
+              GuessType.outside => total - inBetween,
+            };
+            results.add(
+              _Candidate(
+                PolicyAction.guess(
+                  position: position,
+                  orientation: option.orientation,
+                  guess: guess,
+                ),
+                matches / math.max(1, total),
+                penalties[position]!,
+              ),
+            );
+          }
+        }
       }
-      results.add(
-        _Candidate(
-          action,
-          matches / math.max(1, total),
-          penalties.putIfAbsent(action.position!, () => _penalty(game, action)),
-        ),
-      );
     }
     return results;
   }
@@ -431,11 +482,15 @@ class _StatisticsAdvisor {
     int style,
     double immediateRisk,
   ) {
-    final game = WindowGameEngine.fromState(world, seed: seed);
+    final game = WindowGameEngine.fromState(
+      world,
+      seed: seed,
+      recordHistory: false,
+    );
     final random = math.Random(seed);
     final owner = world.players[world.currentPlayerIndex];
     _play(game, root);
-    final immediateDrinks = game.publicObservation().stats[owner]!.drinks;
+    final immediateDrinks = game.playerStats(owner).drinks;
     for (int step = 0; step < 48 && !game.gameEnded; step++) {
       final risks = _publicRisks(game);
       if (risks.isEmpty) break;
@@ -460,11 +515,10 @@ class _StatisticsAdvisor {
       }
       _play(game, action);
     }
-    final observed = game.publicObservation();
     // Replace sampled first-move penalties with their analytically estimated
     // expectation. This control variate reduces noise with a small rollout budget.
     final drinks =
-        observed.stats[owner]!.drinks - immediateDrinks + immediateRisk;
+        game.playerStats(owner).drinks - immediateDrinks + immediateRisk;
     if (game.gameEnded) return drinks;
     final risks = _publicRisks(game)..sort((a, b) => a.risk.compareTo(b.risk));
     if (risks.isEmpty) return drinks;

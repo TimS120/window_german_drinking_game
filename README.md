@@ -243,7 +243,7 @@ guests still enter their names and explicitly join.
 | `app/lib/game_engine.dart` | Canonical rules, independent of UI and networking. |
 | `app/lib/main.dart` | Responsive local and online game interface. |
 | `app/lib/firebase_room_repository.dart` | Host-authoritative Firebase room transport. |
-| `app/lib/rl_policy.dart` | ONNX inference, legal-action masking, and fallback suggestions. |
+| `app/lib/rl_policy.dart` | ONNX inference, legal-action masking, and explicit adviser errors. |
 | `app/assets/` | Card artwork and bundled ONNX policy. |
 | `app/test/` | Game-engine, policy, browser entry, and lobby transport tests. |
 | `tools/browser.py` | Build and publish the browser guest client to Firebase Hosting. |
@@ -257,3 +257,7 @@ guests still enter their names and explicitly join.
 only packaging and inference. Until a trained policy is exported, the app
 labels its proposal accordingly. Pure statistics is independently selectable
 and also handles unavailable models or inference failures.
+
+## Comparing the advisers
+
+Run `python3 tools/compare_advisers.py` from the repository root to compare the current RL and statistics advisers through full games in parallel headless Dart workers using the same app rules engine. Unchanged code reuses a cached executable; model inference uses persistent ONNX workers. The default runs 240 games, with a hard 250-game limit. Read `benchmark-results/YYYY-MM-DD_HH-MM-SS/report.md` (the same timestamp format as RL training). See [BENCHMARK_README.md](BENCHMARK_README.md) for scenario selection, runtime, interpretation, and failure handling.

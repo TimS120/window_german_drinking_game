@@ -128,17 +128,18 @@ void main() {
       expect(WindowRlContract.actionSize, WindowRlContract.cardActionSize + 1);
     });
 
-    test(
-      'offers a statistics fallback when a runtime is unavailable',
-      () async {
-        final WindowGameEngine game = WindowGameEngine(<String>[
-          'Ada',
-        ], seed: 3);
-        final AiMoveProposal? proposal = await WindowRlPolicy().propose(game);
-        expect(proposal, isNotNull);
-        expect(proposal!.source, 'Pure statistics');
-        expect(proposal.confidence, inInclusiveRange(0, 1));
-      },
-    );
+    test('reports an error without changing the game when a runtime is unavailable', () async {
+      final WindowGameEngine game = WindowGameEngine(<String>['Ada'], seed: 3);
+      final before = GameStateCodec.encode(game.exportState());
+      final policy = WindowRlPolicy();
+      await expectLater(
+        policy.propose(game),
+        throwsA(isA<RlPolicyException>()),
+      );
+      expect(policy.availability, PolicyAvailability.inferenceFailed);
+      expect(policy.inferenceError, isNotEmpty);
+      expect(policy.availabilityMessage, isNot(contains('statistics')));
+      expect(GameStateCodec.encode(game.exportState()), before);
+    });
   });
 }

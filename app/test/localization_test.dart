@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:window_game/game_engine.dart';
 import 'package:window_game/localization.dart';
 import 'package:window_game/main.dart';
 import 'package:window_game/rl_policy.dart';
@@ -25,6 +26,13 @@ class MemoryLanguages implements LanguagePreferenceStore {
 class _Policy extends WindowRlPolicy {
   @override
   Future<void> preload() async {}
+}
+
+class _UnavailablePolicy extends _Policy {
+  @override
+  Future<AiMoveProposal?> propose(WindowGameEngine game) async {
+    throw const RlPolicyException('Test runtime unavailable');
+  }
 }
 
 Future<void> chooseLanguage(
@@ -211,6 +219,41 @@ void main() {
         same(card),
       );
       expect(find.text('Max'), findsWidgets);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'unavailable RL adviser displays an error instead of a suggestion',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final controller = LanguageController(store: MemoryLanguages('en'));
+      await controller.load();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        WindowGameApp(
+          firebaseEnabled: false,
+          rlPolicy: _UnavailablePolicy(),
+          browserGuest: false,
+          languageController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Players'), 'Ada');
+      await tester.tap(find.text('Start local game'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Propose best move'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('RL model').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Prediction failed: RL adviser unavailable:'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Suggested move:'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
