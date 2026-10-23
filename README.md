@@ -30,6 +30,40 @@ project files remain in the repository, but iOS is outside the current support s
   never plays a move automatically.
 - Train and deploy a replacement ONNX policy with the GPU-native RL pipeline.
 
+## Get the Android app and share it
+
+The Android installer is a single **APK file** at
+```text
+app/build/app/outputs/flutter-apk/app-release.apk
+```
+
+Users do only need the apk-file. APKs and the `build/` directory are Git-ignored, so cloning the repository does not download an installer, so someone must build and share it first.
+
+To install on an Android phone:
+
+1. Download the shared `app-release.apk` onto the phone and open it.
+2. If Android asks, allow **Install unknown apps** for the browser or file
+   manager used to open it. The wording varies by phone.
+3. Choose **Install**, then open **Window**. The permission from step 2 can be turned off again afterward.
+
+To build a fresh installer, install Flutter and the Android SDK, then run from the repository root:
+
+```bash
+cd app
+flutter pub get
+flutter build apk --release --dart-define-from-file=../firebase-options.json
+```
+
+For online play, first set up `firebase-options.json` as described in
+[Firebase multiplayer and browser joining](#firebase-multiplayer-and-browser-joining).
+Use the same Firebase project as the other players. For an offline-only APK,
+omit `--dart-define-from-file=../firebase-options.json`.
+
+The project currently signs release APKs with the local **debug key**, as
+configured in `app/android/app/build.gradle.kts`. This supports direct sharing for testing with friends. Before wider distribution, configure a private release
+keystore using the [Flutter Android release guide](https://docs.flutter.dev/deployment/android#sign-the-app)
+and keep a backup of it.
+
 ## Run on a PC/laptop or smartphone
 
 Install the [Flutter SDK](https://docs.flutter.dev/get-started/install) and
