@@ -675,4 +675,42 @@ class AppLocalizationsEn extends AppLocalizations {
   String firebaseRequestFailed(int status, String details) {
     return 'Firebase request failed ($status): $details';
   }
+
+  @override
+  String yourTurn(String player) {
+    return 'Your turn, $player!';
+  }
+
+  @override
+  String playerWon(String player) {
+    return '$player won!';
+  }
+
+  @override
+  String get youWon => 'You won!';
+
+  @override
+  String get restartGame => 'Restart game';
+
+  @override
+  String get waitingRestart => 'Waiting for the host to restart…';
+
+  @override
+  String get developerMode => 'Developer mode';
+
+  @override
+  String get developerModeHelp =>
+      'Reveal all card values. When hosting, share them with developer-mode guests.';
+
+  @override
+  String get debugHostRequired =>
+      'The host must also enable developer mode to share hidden cards.';
+
+  @override
+  String get debugDeck => 'Remaining deck (next card first)';
+
+  @override
+  String waitingTurn(String player) {
+    return '$player is playing';
+  }
 }

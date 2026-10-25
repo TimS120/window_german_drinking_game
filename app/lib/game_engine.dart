@@ -475,7 +475,9 @@ class WindowGameEngine {
     GuessOption option,
     GuessType guess,
   ) {
-    if (_pendingSamePosition != null || _pendingRemovals.isNotEmpty) {
+    if (gameEnded ||
+        _pendingSamePosition != null ||
+        _pendingRemovals.isNotEmpty) {
       return const GuessResult(
         invalidReason: 'Finish the pending action first.',
       );
@@ -574,7 +576,8 @@ class WindowGameEngine {
   }
 
   void endTurn() {
-    if (!_turnCanEnd ||
+    if (gameEnded ||
+        !_turnCanEnd ||
         _pendingRemovals.isNotEmpty ||
         _pendingSamePosition != null) {
       return;

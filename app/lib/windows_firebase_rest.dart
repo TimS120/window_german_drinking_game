@@ -220,6 +220,7 @@ class WindowsFirebaseRestRoomRepository {
     required List<RoomSeat> seats,
     required GameState state,
     required bool started,
+    bool developerMode = false,
   }) async {
     final String code = roomCode.toUpperCase();
     await _write('PATCH', 'rooms/$code', <String, dynamic>{
@@ -230,6 +231,7 @@ class WindowsFirebaseRestRoomRepository {
         seats: seats,
         state: state,
         started: started,
+        developerMode: developerMode,
       ),
     });
   }
@@ -341,6 +343,7 @@ class WindowsFirebaseRestRoomRepository {
     required List<RoomSeat> seats,
     required GameState state,
     required bool started,
+    bool developerMode = false,
   }) => <String, dynamic>{
     'hostUid': hostUid,
     'version': version,
@@ -352,6 +355,7 @@ class WindowsFirebaseRestRoomRepository {
     'started': started,
     'deckSize': state.deck.length,
     'state': _publicState(state),
+    if (developerMode) 'debugState': GameStateCodec.encode(state),
   };
 
   Map<String, dynamic> _publicState(GameState state) {

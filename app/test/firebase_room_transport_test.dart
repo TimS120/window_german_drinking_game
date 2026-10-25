@@ -262,6 +262,39 @@ void main() {
     // permissions outside the original public/private paths.
     expect(body.keys.toSet(), {'public', 'private'});
     expect(body['public']['members'], {'host': true});
+    expect(body['public'].containsKey('debugState'), isFalse);
+    final state = WindowGameEngine(['Host'], seed: 1).exportState();
+    await rooms.publishState(
+      roomCode: 'abc234',
+      hostUid: 'host',
+      version: 3,
+      seats: [const RoomSeat(index: 0, name: 'Host', ownerUid: 'host')],
+      state: state,
+      started: true,
+      developerMode: true,
+    );
+    final debugBody = jsonDecode(calls.last.body);
+    final publicRoom = OnlineRoom.fromJson(
+      'ABC234',
+      Map<String, dynamic>.from(debugBody['public']),
+    );
+    expect(publicRoom.state.deck, isEmpty);
+    expect(publicRoom.debugState!.deck, state.deck);
+    expect(publicRoom.debugState!.cardGrid, state.cardGrid);
+    // Each publication replaces the public snapshot, so disabling dev mode
+    // removes previously shared identities as well.
+    await rooms.publishState(
+      roomCode: 'abc234',
+      hostUid: 'host',
+      version: 4,
+      seats: [const RoomSeat(index: 0, name: 'Host', ownerUid: 'host')],
+      state: state,
+      started: true,
+    );
+    expect(
+      jsonDecode(calls.last.body)['public'].containsKey('debugState'),
+      isFalse,
+    );
   });
 
   test(

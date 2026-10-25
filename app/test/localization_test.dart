@@ -245,6 +245,7 @@ void main() {
       await tester.enterText(find.widgetWithText(TextField, 'Players'), 'Ada');
       await tester.tap(find.text('Start local game'));
       await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
       await tester.tap(find.text('Propose best move'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('RL model').last);

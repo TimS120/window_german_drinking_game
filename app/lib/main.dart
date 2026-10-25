@@ -17,6 +17,8 @@ import 'rl_policy.dart';
 import 'room_social.dart';
 import 'room_social_widgets.dart';
 import 'localization.dart';
+import 'game_feedback.dart';
+import 'hosting_service.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
@@ -154,6 +156,7 @@ class _GameShellState extends State<GameShell> {
   OnlineRoom? _room;
   int _hostVersion = 0;
   bool _busy = false;
+  bool _developerMode = false;
   late final WindowRlPolicy _rlPolicy;
   AiMoveProposal? _proposal;
   bool _proposing = false;
@@ -209,6 +212,7 @@ class _GameShellState extends State<GameShell> {
 
   @override
   void dispose() {
+    unawaited(HostingService.stop());
     _players.dispose();
     _roomCode.dispose();
     _seatName.dispose();
@@ -266,6 +270,7 @@ class _GameShellState extends State<GameShell> {
         state: game.exportState(),
         localPlayers: local,
       );
+      await HostingService.start(code);
       _roomCode.text = code;
       _game = game;
       await _watchRoom(code);
@@ -389,6 +394,7 @@ class _GameShellState extends State<GameShell> {
   }
 
   Future<void> _returnToMenu() async {
+    await HostingService.stop();
     await _roomSubscription?.cancel();
     await _requestSubscription?.cancel();
     await _socialSubscription?.cancel();
@@ -1135,9 +1141,16 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _startLobbyGame() async {
     final OnlineRoom? room = _room;
-    if (room == null || room.started || !_isHost || _busy) return;
+    if (room == null ||
+        (room.started && !(_game?.gameEnded ?? false)) ||
+        !_isHost ||
+        _busy) {
+      return;
+    }
+    final previousGame = _game;
     try {
       setState(() {
+        _proposal = null;
         _busy = true;
         _message = (l) => l.startingGame;
         _game = WindowGameEngine(
@@ -1148,6 +1161,7 @@ class _GameShellState extends State<GameShell> {
     } catch (error) {
       if (mounted) {
         setState(() {
+          _game = previousGame;
           _busy = false;
           _message = (l) => l.startFailed(localizedError(l, error));
         });
@@ -1266,6 +1280,7 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _applyHostAction(Map<String, dynamic> action) async {
     final WindowGameEngine game = _game!;
+    if (game.gameEnded) return;
     final String type = '${action['type']}';
     GuessResult? result;
     if (type == 'guess') {
@@ -1320,6 +1335,7 @@ class _GameShellState extends State<GameShell> {
         seats: seats ?? room.seats,
         state: _game!.exportState(),
         started: started ?? room.started,
+        developerMode: _developerMode,
       );
     } catch (_) {
       _hostVersion = previousVersion;
@@ -1531,6 +1547,7 @@ class _GameShellState extends State<GameShell> {
                     ),
                     const SizedBox(height: 12),
                     Text(tr(context).browserDescription),
+                    _developerSwitch,
                     const SizedBox(height: 12),
                     Text(tr(context).askHost),
                     const SizedBox(height: 24),
@@ -1582,6 +1599,37 @@ class _GameShellState extends State<GameShell> {
     ),
   );
 
+  Widget get _developerSwitch => SwitchListTile(
+    key: const ValueKey('developer-mode'),
+    contentPadding: EdgeInsets.zero,
+    title: Text(_l.developerMode),
+    subtitle: Text(_l.developerModeHelp),
+    value: _developerMode,
+    onChanged: (value) => setState(() => _developerMode = value),
+  );
+
+  Widget _debugDeck(GameState? state) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_l.developerMode),
+          if (state == null)
+            Text(_l.debugHostRequired)
+          else ...[
+            Text(_l.debugDeck),
+            SelectableText(
+              state.deck.reversed
+                  .map((card) => _game!.cardLabel(card))
+                  .join(', '),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final WindowGameEngine? game = _game;
@@ -1610,6 +1658,7 @@ class _GameShellState extends State<GameShell> {
                       ),
                       const SizedBox(height: 8),
                       Text(tr(context).localDescription),
+                      _developerSwitch,
                       const SizedBox(height: 24),
                       TextField(
                         controller: _players,
@@ -1790,6 +1839,11 @@ class _GameShellState extends State<GameShell> {
       );
     }
     final GameSnapshot snapshot = game.snapshot();
+    final debugState = !_developerMode
+        ? null
+        : (!_isOnline || _isHost)
+        ? game.exportState()
+        : _room!.debugState;
     final Widget info = _Info(
       game: game,
       snapshot: snapshot,
@@ -1837,6 +1891,7 @@ class _GameShellState extends State<GameShell> {
           ? Position(_turnUi['row'], _turnUi['column'])
           : null,
       pressedTarget: _pressedTarget,
+      debugState: debugState,
     );
     final scaffold = Scaffold(
       bottomNavigationBar: _isOnline && _chatBelow ? _roomFooter() : null,
@@ -1853,46 +1908,77 @@ class _GameShellState extends State<GameShell> {
         ],
       ),
       body: _withSideChat(
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints size) => Padding(
-              padding: const EdgeInsets.all(16),
-              child: (_isOnline && !_chatBelow) || size.maxWidth >= 900
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          child: LayoutBuilder(
-                            builder:
-                                (
-                                  BuildContext context,
-                                  BoxConstraints boardConstraints,
-                                ) {
-                                  final double boardWidth = math.min(
-                                    boardConstraints.maxWidth,
-                                    boardConstraints.maxHeight *
-                                        _boardAspectRatio,
-                                  );
-                                  return Center(
-                                    child: SizedBox(
-                                      width: boardWidth,
-                                      child: board,
-                                    ),
-                                  );
-                                },
+        GameFeedback(
+          turnKey:
+              '${snapshot.currentPlayer}:${snapshot.stats.values.fold<int>(0, (sum, stats) => sum + stats.turns)}',
+          player: snapshot.currentPlayer,
+          active: _canControlCurrentTurn,
+          finished: snapshot.gameEnded,
+          busy: _busy,
+          canRestart: !_isOnline || _isHost,
+          onRestart: () {
+            if (_isOnline) {
+              unawaited(
+                _queueHostOperation(_startLobbyGame).catchError((Object _) {}),
+              );
+            } else {
+              setState(() {
+                game.resetGame();
+                _proposal = null;
+              });
+            }
+          },
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints size) => Padding(
+                padding: const EdgeInsets.all(16),
+                child: (_isOnline && !_chatBelow) || size.maxWidth >= 900
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder:
+                                  (
+                                    BuildContext context,
+                                    BoxConstraints boardConstraints,
+                                  ) {
+                                    final double boardWidth = math.min(
+                                      boardConstraints.maxWidth,
+                                      boardConstraints.maxHeight *
+                                          _boardAspectRatio,
+                                    );
+                                    return Center(
+                                      child: SizedBox(
+                                        width: boardWidth,
+                                        child: board,
+                                      ),
+                                    );
+                                  },
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 24),
-                        Expanded(child: SingleChildScrollView(child: info)),
-                      ],
-                    )
-                  : ListView(
-                      children: <Widget>[
-                        info,
-                        const SizedBox(height: 18),
-                        board,
-                      ],
-                    ),
+                          const SizedBox(width: 24),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  info,
+                                  if (_developerMode) _debugDeck(debugState),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : ListView(
+                        children: <Widget>[
+                          info,
+                          if (_developerMode) _debugDeck(debugState),
+                          const SizedBox(height: 18),
+                          board,
+                        ],
+                      ),
+              ),
             ),
           ),
         ),
@@ -2304,6 +2390,7 @@ class _Board extends StatelessWidget {
     required this.enabled,
     required this.onSelect,
     required this.proposal,
+    this.debugState,
     this.selectedPosition,
     this.pressedTarget,
   });
@@ -2312,6 +2399,7 @@ class _Board extends StatelessWidget {
   final bool enabled;
   final ValueChanged<Position> onSelect;
   final AiMoveProposal? proposal;
+  final GameState? debugState;
   final Position? selectedPosition;
   final String? pressedTarget;
   @override
@@ -2404,21 +2492,47 @@ class _Board extends StatelessWidget {
             padding: EdgeInsets.all(borderWidth),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(9),
-              child: Image.asset(
-                faceUp
-                    ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
-                    : 'assets/cards/card_back.png',
-                fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => Center(
-                  child: Text(
-                    faceUp ? game.cardLabel(card!) : '?',
-                    style: TextStyle(
-                      color: faceUp ? const Color(0xff251c13) : Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: faceUp ? 18 : 30,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(
+                    faceUp
+                        ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
+                        : 'assets/cards/card_back.png',
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => Center(
+                      child: Text(
+                        faceUp ? game.cardLabel(card!) : '?',
+                        style: TextStyle(
+                          color: faceUp
+                              ? const Color(0xff251c13)
+                              : Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: faceUp ? 18 : 30,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  if (debugState?.cardGrid[position.row][position.column]
+                      case final int debugCard)
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        color: Colors.black87,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          game.cardLabel(debugCard),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

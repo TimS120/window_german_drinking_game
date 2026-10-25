@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:window_game/firebase_options.dart';
 import 'package:window_game/firebase_room_repository.dart';
 import 'package:window_game/game_engine.dart';
+import 'package:window_game/game_state_codec.dart';
 import 'package:window_game/main.dart';
 import 'package:window_game/localization.dart';
 
@@ -260,6 +261,7 @@ class _HostRooms extends _Rooms {
     required List<RoomSeat> seats,
     required GameState state,
     required bool started,
+    bool developerMode = false,
   }) async {
     this.version = version;
     publishedVersions.add(version);
@@ -407,9 +409,39 @@ Future<void> _joinTest(
     );
   }
   await tester.pumpAndSettle();
+  await tester.pump(const Duration(seconds: 3));
 }
 
 void main() {
+  testWidgets(
+    'host restarts a completed game in the same room with the same seats',
+    (tester) async {
+      final rooms = _HostRooms();
+      final state = GameStateCodec.encode(rooms.game.exportState());
+      state['faceUp'] = windowLayout.map((row) => row.toList()).toList();
+      state['turnCanEnd'] = true;
+      rooms.game = WindowGameEngine.fromState(GameStateCodec.decode(state));
+      expect(rooms.game.gameEnded, isTrue);
+      final originalSeats = rooms.room.seats
+          .map((seat) => seat.toJson())
+          .toList();
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      expect(find.text('You won!'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Restart game'));
+      await tester.pumpAndSettle();
+      expect(rooms.publishedVersions, [8]);
+      expect(rooms.room.code, 'ABC234');
+      expect(
+        rooms.room.seats.map((seat) => seat.toJson()).toList(),
+        originalSeats,
+      );
+      expect(rooms.game.gameEnded, isFalse);
+      expect(rooms.game.currentPlayer, 'Max');
+      expect(find.text('Your turn, Max!'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets(
     'accepted lobby exposes the language selector without rejoining',
     (tester) async {

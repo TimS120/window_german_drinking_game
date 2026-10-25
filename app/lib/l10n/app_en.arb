@@ -505,5 +505,36 @@
   },
   "@inBetween": {
     "description": "Guess that the hidden rank lies strictly between the two visible ranks."
+  },
+  "yourTurn": "Your turn, {player}!",
+  "@yourTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "playerWon": "{player} won!",
+  "@playerWon": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "youWon": "You won!",
+  "restartGame": "Restart game",
+  "waitingRestart": "Waiting for the host to restart…",
+  "developerMode": "Developer mode",
+  "developerModeHelp": "Reveal all card values. When hosting, share them with developer-mode guests.",
+  "debugHostRequired": "The host must also enable developer mode to share hidden cards.",
+  "debugDeck": "Remaining deck (next card first)",
+  "waitingTurn": "{player} is playing",
+  "@waitingTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
   }
 }

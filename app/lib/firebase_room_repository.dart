@@ -31,6 +31,7 @@ class OnlineRoom {
     required this.seats,
     required this.started,
     this.deckSize,
+    this.debugState,
   });
 
   final String code;
@@ -42,6 +43,7 @@ class OnlineRoom {
 
   /// Public count only; guests never receive the cards remaining in the deck.
   final int? deckSize;
+  final GameState? debugState;
 
   factory OnlineRoom.fromJson(String code, Map<String, dynamic> raw) {
     final Object? rawSeats = raw['seats'];
@@ -64,6 +66,11 @@ class OnlineRoom {
       seats: seats,
       started: raw['started'] != false,
       deckSize: (raw['deckSize'] as num?)?.toInt(),
+      debugState: raw['debugState'] is Map
+          ? GameStateCodec.decode(
+              Map<Object?, Object?>.from(raw['debugState'] as Map),
+            )
+          : null,
     );
   }
 
@@ -190,6 +197,7 @@ class FirebaseRoomRepository {
     required List<RoomSeat> seats,
     required GameState state,
     required bool started,
+    bool developerMode = false,
   }) => _rest.publishState(
     roomCode: roomCode,
     hostUid: hostUid,
@@ -197,6 +205,7 @@ class FirebaseRoomRepository {
     seats: seats,
     state: state,
     started: started,
+    developerMode: developerMode,
   );
   Future<void> deleteRequest(String roomCode, String requestId) =>
       _rest.deleteRequest(roomCode, requestId);

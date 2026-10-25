@@ -147,8 +147,10 @@ Room state and move requests use Firebase's live change stream on Android,
 Linux, Windows, and browsers. Updates arrive without the previous 700 ms polling
 timers; the host still validates each move. Private and public state publish
 together in one atomic update. Connections retry after interruptions and refresh
-expired sign-in credentials. Network latency still affects delivery. Keep the
-host app open during a game, especially on a smartphone. Cursor sharing is not
+expired sign-in credentials. Network latency still affects delivery. On Android, creating a room starts a foreground hosting service with an ongoing
+notification, so guests can continue during short app switches or screen lock.
+Leaving the room stops the service. Force-stopping the app, losing connectivity,
+or Android stopping the service still pauses hosting. Cursor sharing is not
 included. Online rooms include chat below the game on phones and in a right-hand column
 on tablets and desktops, flying emoji reactions, and
 a shared view of the active player's selections, comparison/guess panels, and
@@ -232,7 +234,8 @@ changes; selecting a card, choosing a guess, and submitting a move never await
 them. Host moves apply directly, and request cleanup also runs in the background.
 The host loads chat history once and keeps its relay cache current. Guests
 use two database streams (board and social); hosts also watch move requests.
-As with gameplay, keep the host app open and connected.
+Android hosting continues during short app switches through the foreground service;
+the host device still needs a network connection.
 
 Run Flutter's headless tests from `app/` with `flutter test`. Firebase access
 rules also have an isolated emulator suite in `tools/firebase-tests/`: with
@@ -254,11 +257,39 @@ there. It uses a local demo project and does not access the deployed database.
 
 The room creator is the trusted host: it validates moves and retains the deck
 and face-down card identities. Guests receive the public board and submit
-requests only for seats owned by their device. Keep the host app open and
-connected during play. Refresh/restart behavior remains unchanged: anonymous
+requests only for seats owned by their device. Keep the host connected during play. Android hosts can switch apps briefly;
+other platforms must keep the host process running. Refresh/restart behavior remains unchanged: anonymous
 identity is held in memory, so refreshing or restarting does not recover the
 previous seat. Optional links ending in `?room=ABC234` prefill the room code;
 guests still enter their names and explicitly join.
+
+## Turn indicators, winning, and developer mode
+
+At the start of each local turn (or a turn owned by your online device), a
+notice appears for three seconds. Tap it to dismiss it immediately. Other
+devices see a grey game area with disabled gameplay controls; scrolling,
+chat, and leaving the room remain available.
+
+Completing the window celebrates the whole lobby with “You won!” and plays
+rockets that launch from the bottom and burst across the screen for fifteen
+seconds. Devices requesting reduced motion see the result without fireworks.
+The host can restart immediately, including during the animation, in the same locked room, preserving
+its code, players, seat ownership, and chat. Local games can restart too.
+
+Enable **Developer mode** on the home/join screen before starting or joining.
+Grid cards keep their normal fronts/backs with a value label overlaid; the
+remaining deck is listed in draw order, next card first. This does not change
+what the advisers know. In online games the host must enable developer mode
+before hidden values can be shared with developer-mode guests. Treat these as
+test rooms: enabling it on the host publishes the full deck and hidden grid in
+the room's public debug payload. Normal rooms still publish only visible cards.
+
+Android hosting uses a data-sync foreground service and a partial wake lock
+while the room is open. Android 15+ limits this service type to six hours in the
+background, resetting the allowance when the app returns to the foreground;
+the service stops cleanly at its timeout. It is intended for short app switches,
+not permanent server hosting. For uninterrupted hosting independent of any
+player's device, move authoritative validation to a server in a future change.
 
 ## Documentation
 

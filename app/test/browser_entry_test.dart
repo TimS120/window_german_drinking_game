@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/main.dart';
+import 'package:window_game/game_engine.dart';
 import 'package:window_game/localization.dart';
 import 'package:window_game/rl_policy.dart';
 
@@ -17,6 +18,55 @@ class _Preferences implements LanguagePreferenceStore {
 }
 
 void main() {
+  testWidgets(
+    'developer mode labels every grid card while preserving card backs and lists the deck',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        WindowGameApp(
+          languageController: LanguageController(
+            store: _Preferences(),
+            initialLocale: const Locale('en'),
+          ),
+          firebaseEnabled: false,
+          rlPolicy: _TestPolicy(),
+          browserGuest: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('developer-mode')));
+      await tester.tap(find.text('Start local game'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      for (var row = 0; row < windowLayout.length; row++) {
+        for (var column = 0; column < windowLayout[row].length; column++) {
+          if (!windowLayout[row][column]) continue;
+          expect(
+            find.descendant(
+              of: find.byKey(ValueKey('card:$row:$column')),
+              matching: find.byType(Text),
+            ),
+            findsOneWidget,
+          );
+        }
+      }
+      expect(find.text('Remaining deck (next card first)'), findsOneWidget);
+      final backs = tester
+          .widgetList<Image>(find.byType(Image))
+          .where(
+            (image) =>
+                image.image is AssetImage &&
+                (image.image as AssetImage).assetName.endsWith('card_back.png'),
+          );
+      expect(backs.length, 17);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets(
     'browser guests only see joining and can use a room from a link',
     (WidgetTester tester) async {
@@ -135,6 +185,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Start local game'));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 3));
     await tester.ensureVisible(find.text('Propose best move'));
     await tester.tap(find.text('Propose best move'));
     await tester.pumpAndSettle();

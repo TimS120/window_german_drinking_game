@@ -177,5 +177,36 @@
   "faceUp": "Aufgedeckte Karte {card}",
   "cardSemantics": "{face}, Zeile {row}, Spalte {column}{legal}{proposed}{selected}",
   "defaultPlayer": "Spieler 1",
-  "firebaseRequestFailed": "Firebase-Anfrage fehlgeschlagen ({status}): {details}"
+  "firebaseRequestFailed": "Firebase-Anfrage fehlgeschlagen ({status}): {details}",
+  "yourTurn": "Du bist dran, {player}!",
+  "@yourTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "playerWon": "{player} hat gewonnen!",
+  "@playerWon": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  },
+  "youWon": "Du hast gewonnen!",
+  "restartGame": "Spiel neu starten",
+  "waitingRestart": "Warte auf den Neustart durch den Host…",
+  "developerMode": "Entwicklermodus",
+  "developerModeHelp": "Alle Kartenwerte anzeigen. Als Host auch mit Gästen im Entwicklermodus teilen.",
+  "debugHostRequired": "Der Host muss den Entwicklermodus ebenfalls aktivieren, um verdeckte Karten zu teilen.",
+  "debugDeck": "Restlicher Stapel (nächste Karte zuerst)",
+  "waitingTurn": "{player} ist am Zug",
+  "@waitingTurn": {
+    "placeholders": {
+      "player": {
+        "type": "String"
+      }
+    }
+  }
 }

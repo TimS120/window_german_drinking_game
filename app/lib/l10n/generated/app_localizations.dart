@@ -1172,6 +1172,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Firebase request failed ({status}): {details}'**
   String firebaseRequestFailed(int status, String details);
+
+  /// No description provided for @yourTurn.
+  ///
+  /// In en, this message translates to:
+  /// **'Your turn, {player}!'**
+  String yourTurn(String player);
+
+  /// No description provided for @playerWon.
+  ///
+  /// In en, this message translates to:
+  /// **'{player} won!'**
+  String playerWon(String player);
+
+  /// No description provided for @youWon.
+  ///
+  /// In en, this message translates to:
+  /// **'You won!'**
+  String get youWon;
+
+  /// No description provided for @restartGame.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart game'**
+  String get restartGame;
+
+  /// No description provided for @waitingRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the host to restart…'**
+  String get waitingRestart;
+
+  /// No description provided for @developerMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Developer mode'**
+  String get developerMode;
+
+  /// No description provided for @developerModeHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Reveal all card values. When hosting, share them with developer-mode guests.'**
+  String get developerModeHelp;
+
+  /// No description provided for @debugHostRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'The host must also enable developer mode to share hidden cards.'**
+  String get debugHostRequired;
+
+  /// No description provided for @debugDeck.
+  ///
+  /// In en, this message translates to:
+  /// **'Remaining deck (next card first)'**
+  String get debugDeck;
+
+  /// No description provided for @waitingTurn.
+  ///
+  /// In en, this message translates to:
+  /// **'{player} is playing'**
+  String waitingTurn(String player);
 }
 
 class _AppLocalizationsDelegate
