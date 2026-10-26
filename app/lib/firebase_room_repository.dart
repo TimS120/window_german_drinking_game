@@ -32,6 +32,9 @@ class OnlineRoom {
     required this.started,
     this.deckSize,
     this.debugState,
+    this.devices = const {},
+    this.controlId = 0,
+    this.controlNotice,
   });
 
   final String code;
@@ -44,6 +47,19 @@ class OnlineRoom {
   /// Public count only; guests never receive the cards remaining in the deck.
   final int? deckSize;
   final GameState? debugState;
+  final Map<String, String> devices;
+  final int controlId;
+  final String? controlNotice;
+  Map<String, String> get deviceLabels {
+    final labels = Map<String, String>.from(devices);
+    for (final uid in [
+      hostUid,
+      ...seats.map((seat) => seat.ownerUid).whereType<String>(),
+    ]) {
+      labels.putIfAbsent(uid, () => 'Device ${labels.length + 1}');
+    }
+    return labels;
+  }
 
   factory OnlineRoom.fromJson(String code, Map<String, dynamic> raw) {
     final Object? rawSeats = raw['seats'];
@@ -66,6 +82,13 @@ class OnlineRoom {
       seats: seats,
       started: raw['started'] != false,
       deckSize: (raw['deckSize'] as num?)?.toInt(),
+      devices: raw['devices'] is Map
+          ? (raw['devices'] as Map).map(
+              (key, value) => MapEntry('$key', '$value'),
+            )
+          : const {},
+      controlId: (raw['controlId'] as num?)?.toInt() ?? 0,
+      controlNotice: raw['controlNotice'] as String?,
       debugState: raw['debugState'] is Map
           ? GameStateCodec.decode(
               Map<Object?, Object?>.from(raw['debugState'] as Map),
@@ -82,6 +105,9 @@ class OnlineRoom {
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
     'started': started,
     'deckSize': deckSize,
+    'devices': deviceLabels,
+    'controlId': controlId,
+    'controlNotice': controlNotice,
   };
 }
 
@@ -198,6 +224,7 @@ class FirebaseRoomRepository {
     required GameState state,
     required bool started,
     bool developerMode = false,
+    Map<String, dynamic> roomMetadata = const {},
   }) => _rest.publishState(
     roomCode: roomCode,
     hostUid: hostUid,
@@ -206,6 +233,7 @@ class FirebaseRoomRepository {
     state: state,
     started: started,
     developerMode: developerMode,
+    roomMetadata: roomMetadata,
   );
   Future<void> deleteRequest(String roomCode, String requestId) =>
       _rest.deleteRequest(roomCode, requestId);

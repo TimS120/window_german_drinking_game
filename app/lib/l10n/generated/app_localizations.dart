@@ -1232,6 +1232,168 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{player} is playing'**
   String waitingTurn(String player);
+
+  /// No description provided for @appearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearance;
+
+  /// No description provided for @themeSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'Use system theme'**
+  String get themeSystem;
+
+  /// No description provided for @themeLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light mode'**
+  String get themeLight;
+
+  /// No description provided for @themeDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark mode'**
+  String get themeDark;
+
+  /// No description provided for @browserReminder.
+  ///
+  /// In en, this message translates to:
+  /// **'Friends can join a lobby hosted on a PC or smartphone in their browser—no installation needed. Share the browser link from your lobby before starting the game.'**
+  String get browserReminder;
+
+  /// No description provided for @restartQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart the game?'**
+  String get restartQuestion;
+
+  /// No description provided for @restartExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'The board and scores will be reset for everyone. The room and players will stay.'**
+  String get restartExplanation;
+
+  /// No description provided for @yesAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes'**
+  String get yesAction;
+
+  /// No description provided for @cancelAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get cancelAction;
+
+  /// No description provided for @saveAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get saveAction;
+
+  /// No description provided for @gameRestarted.
+  ///
+  /// In en, this message translates to:
+  /// **'The host restarted the game'**
+  String get gameRestarted;
+
+  /// No description provided for @backToLobby.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to lobby'**
+  String get backToLobby;
+
+  /// No description provided for @backToLobbyQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Return everyone to the lobby?'**
+  String get backToLobbyQuestion;
+
+  /// No description provided for @backToLobbyHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'The current game will be cleared. Keep the room code and edit players before starting again.'**
+  String get backToLobbyHelp;
+
+  /// No description provided for @returnedLobby.
+  ///
+  /// In en, this message translates to:
+  /// **'The host returned everyone to the lobby'**
+  String get returnedLobby;
+
+  /// No description provided for @hostControls.
+  ///
+  /// In en, this message translates to:
+  /// **'Host controls'**
+  String get hostControls;
+
+  /// No description provided for @editDevicePlayers.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit device and players'**
+  String get editDevicePlayers;
+
+  /// No description provided for @physicalGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Room / device name'**
+  String get physicalGroup;
+
+  /// No description provided for @physicalGroupExample.
+  ///
+  /// In en, this message translates to:
+  /// **'Living room, Kitchen, …'**
+  String get physicalGroupExample;
+
+  /// No description provided for @editPlayersHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Separate names with commas. Remove a name to remove that player; add a name to assign a player to this device. Leave empty for no players.'**
+  String get editPlayersHelp;
+
+  /// No description provided for @noDevicePlayers.
+  ///
+  /// In en, this message translates to:
+  /// **'No players assigned'**
+  String get noDevicePlayers;
+
+  /// No description provided for @deviceGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Device {number}'**
+  String deviceGroup(int number);
+
+  /// No description provided for @systemLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get systemLabel;
+
+  /// No description provided for @keepOnePlayer.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep at least one player in the lobby.'**
+  String get keepOnePlayer;
+
+  /// No description provided for @lobbyEditOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to the lobby before editing players.'**
+  String get lobbyEditOnly;
+
+  /// No description provided for @deckShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Deck'**
+  String get deckShort;
+
+  /// No description provided for @restartLocalExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'This resets the board and scores and keeps your players.'**
+  String get restartLocalExplanation;
 }
 
 class _AppLocalizationsDelegate

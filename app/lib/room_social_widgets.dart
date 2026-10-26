@@ -121,6 +121,9 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Text.rich(
                 TextSpan(
+                  style: message['systemError'] == true
+                      ? TextStyle(color: Theme.of(context).colorScheme.error)
+                      : null,
                   children: [
                     TextSpan(
                       text: '$clock  ${message['sender']}: ',

@@ -15,6 +15,57 @@ OnlineRoom lobby({bool started = false, List<RoomSeat>? seats}) => OnlineRoom(
 );
 
 void main() {
+  test('host device edits preserve ownership, reindex seats and retain empty devices', () {
+    final room = OnlineRoom(
+      code: 'ABC234',
+      version: 1,
+      hostUid: 'host',
+      state: WindowGameEngine(['Host', 'Anna']).exportState(),
+      started: false,
+      devices: const {'host': 'Living room', 'guest': 'Kitchen'},
+      seats: const [
+        RoomSeat(index: 0, name: 'Host', ownerUid: 'host'),
+        RoomSeat(index: 1, name: 'Anna', ownerUid: 'guest'),
+      ],
+    );
+    final edited = replaceDevicePlayers(room, 'guest', ['Ben', 'Carla']);
+    expect(edited.map((s) => s.name), ['Host', 'Ben', 'Carla']);
+    expect(edited.map((s) => s.index), [0, 1, 2]);
+    expect(edited.skip(1).every((s) => s.ownerUid == 'guest'), isTrue);
+    final empty = replaceDevicePlayers(room, 'guest', []);
+    final emptyRoom = OnlineRoom(
+      code: room.code,
+      version: 2,
+      hostUid: room.hostUid,
+      state: room.state,
+      started: false,
+      seats: empty,
+      devices: room.devices,
+    );
+    expect(emptyRoom.deviceLabels['guest'], 'Kitchen');
+    expect(
+      replaceDevicePlayers(emptyRoom, 'guest', ['Dana']).last.ownerUid,
+      'guest',
+    );
+    expect(
+      () => replaceDevicePlayers(room, 'guest', ['host']),
+      throwsStateError,
+    );
+    expect(
+      () => replaceDevicePlayers(room, 'guest', ['Ben', 'ben']),
+      throwsStateError,
+    );
+    expect(
+      () => replaceDevicePlayers(room, 'unknown', ['Ben']),
+      throwsStateError,
+    );
+    expect(() => replaceDevicePlayers(lobby(), 'host', []), throwsStateError);
+    expect(
+      () => replaceDevicePlayers(lobby(started: true), 'host', ['Ben']),
+      throwsStateError,
+    );
+  });
+
   test('shared-device names are trimmed and must be unique', () {
     expect(parseLobbyPlayers(' Anna, , Ben '), <String>['Anna', 'Ben']);
     expect(() => parseLobbyPlayers(' , '), throwsStateError);

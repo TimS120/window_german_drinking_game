@@ -19,6 +19,102 @@ class _Preferences implements LanguagePreferenceStore {
 
 void main() {
   testWidgets(
+    'offline toolbar restart asks first, preserves players and resets only after Yes',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        WindowGameApp(
+          languageController: LanguageController(
+            store: _Preferences(),
+            initialLocale: const Locale('en'),
+          ),
+          firebaseEnabled: false,
+          rlPolicy: _TestPolicy(),
+          browserGuest: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Players'),
+        'tim, élise',
+      );
+      await tester.tap(find.text('Start local game'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('Tim'), findsWidgets);
+      expect(find.text('Élise'), findsOneWidget);
+      final restart = find.byKey(const ValueKey('restart-local-game'));
+      expect(
+        find.ancestor(of: restart, matching: find.byType(AppBar)),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('New local game'), findsNothing);
+      expect(
+        tester.getRect(restart).right,
+        lessThanOrEqualTo(
+          tester.getRect(find.byTooltip('Return to menu')).left,
+        ),
+      );
+      List<ImageProvider> cards() => tester
+          .widgetList<Image>(find.byType(Image))
+          .map((image) => image.image)
+          .toList();
+      final before = cards();
+      await tester.tap(restart);
+      await tester.pumpAndSettle();
+      expect(find.text('Restart the game?'), findsOneWidget);
+      expect(
+        find.text('This resets the board and scores and keeps your players.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(cards(), before);
+      expect(find.byKey(const ValueKey('turn-notice')), findsNothing);
+      await tester.tap(restart);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Your turn, Tim!'), findsOneWidget);
+      expect(find.text('Tim'), findsWidgets);
+      expect(find.text('Élise'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'capitalization collisions are rejected before an offline game starts',
+    (tester) async {
+      await tester.pumpWidget(
+        WindowGameApp(
+          languageController: LanguageController(
+            store: _Preferences(),
+            initialLocale: const Locale('en'),
+          ),
+          firebaseEnabled: false,
+          rlPolicy: _TestPolicy(),
+          browserGuest: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Players'),
+        'tim, Tim',
+      );
+      await tester.tap(find.text('Start local game'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('restart-local-game')), findsNothing);
+      expect(find.text('Start local game'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'developer mode labels every grid card while preserving card backs and lists the deck',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 1100);

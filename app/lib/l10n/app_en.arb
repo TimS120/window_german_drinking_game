@@ -536,5 +536,39 @@
         "type": "String"
       }
     }
-  }
+  },
+  "appearance": "Appearance",
+  "themeSystem": "Use system theme",
+  "themeLight": "Light mode",
+  "themeDark": "Dark mode",
+  "browserReminder": "Friends can join a lobby hosted on a PC or smartphone in their browser—no installation needed. Share the browser link from your lobby before starting the game.",
+  "restartQuestion": "Restart the game?",
+  "restartExplanation": "The board and scores will be reset for everyone. The room and players will stay.",
+  "yesAction": "Yes",
+  "cancelAction": "Cancel",
+  "saveAction": "Save",
+  "gameRestarted": "The host restarted the game",
+  "backToLobby": "Return to lobby",
+  "backToLobbyQuestion": "Return everyone to the lobby?",
+  "backToLobbyHelp": "The current game will be cleared. Keep the room code and edit players before starting again.",
+  "returnedLobby": "The host returned everyone to the lobby",
+  "hostControls": "Host controls",
+  "editDevicePlayers": "Edit device and players",
+  "physicalGroup": "Room / device name",
+  "physicalGroupExample": "Living room, Kitchen, …",
+  "editPlayersHelp": "Separate names with commas. Remove a name to remove that player; add a name to assign a player to this device. Leave empty for no players.",
+  "noDevicePlayers": "No players assigned",
+  "deviceGroup": "Device {number}",
+  "@deviceGroup": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "systemLabel": "System",
+  "keepOnePlayer": "Keep at least one player in the lobby.",
+  "lobbyEditOnly": "Return to the lobby before editing players.",
+  "deckShort": "Deck",
+  "restartLocalExplanation": "This resets the board and scores and keeps your players."
 }

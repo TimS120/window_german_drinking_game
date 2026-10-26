@@ -713,4 +713,92 @@ class AppLocalizationsEn extends AppLocalizations {
   String waitingTurn(String player) {
     return '$player is playing';
   }
+
+  @override
+  String get appearance => 'Appearance';
+
+  @override
+  String get themeSystem => 'Use system theme';
+
+  @override
+  String get themeLight => 'Light mode';
+
+  @override
+  String get themeDark => 'Dark mode';
+
+  @override
+  String get browserReminder =>
+      'Friends can join a lobby hosted on a PC or smartphone in their browser—no installation needed. Share the browser link from your lobby before starting the game.';
+
+  @override
+  String get restartQuestion => 'Restart the game?';
+
+  @override
+  String get restartExplanation =>
+      'The board and scores will be reset for everyone. The room and players will stay.';
+
+  @override
+  String get yesAction => 'Yes';
+
+  @override
+  String get cancelAction => 'Cancel';
+
+  @override
+  String get saveAction => 'Save';
+
+  @override
+  String get gameRestarted => 'The host restarted the game';
+
+  @override
+  String get backToLobby => 'Return to lobby';
+
+  @override
+  String get backToLobbyQuestion => 'Return everyone to the lobby?';
+
+  @override
+  String get backToLobbyHelp =>
+      'The current game will be cleared. Keep the room code and edit players before starting again.';
+
+  @override
+  String get returnedLobby => 'The host returned everyone to the lobby';
+
+  @override
+  String get hostControls => 'Host controls';
+
+  @override
+  String get editDevicePlayers => 'Edit device and players';
+
+  @override
+  String get physicalGroup => 'Room / device name';
+
+  @override
+  String get physicalGroupExample => 'Living room, Kitchen, …';
+
+  @override
+  String get editPlayersHelp =>
+      'Separate names with commas. Remove a name to remove that player; add a name to assign a player to this device. Leave empty for no players.';
+
+  @override
+  String get noDevicePlayers => 'No players assigned';
+
+  @override
+  String deviceGroup(int number) {
+    return 'Device $number';
+  }
+
+  @override
+  String get systemLabel => 'System';
+
+  @override
+  String get keepOnePlayer => 'Keep at least one player in the lobby.';
+
+  @override
+  String get lobbyEditOnly => 'Return to the lobby before editing players.';
+
+  @override
+  String get deckShort => 'Deck';
+
+  @override
+  String get restartLocalExplanation =>
+      'This resets the board and scores and keeps your players.';
 }

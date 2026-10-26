@@ -18,6 +18,19 @@ class WindowFirebaseOptions {
     return _projectId.isEmpty ? null : 'https://$_projectId.web.app';
   }
 
+  /// One stable hosted client serves every PC/phone room; the link prefills its
+  /// code without automatically enrolling a browser or bypassing lobby locks.
+  static String? browserInvite(String code) {
+    final base = browserUrl;
+    if (base == null) return null;
+    final uri = Uri.parse(base);
+    return uri
+        .replace(
+          queryParameters: {...uri.queryParameters, 'room': code.toUpperCase()},
+        )
+        .toString();
+  }
+
   static const String _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
   static const String _webApiKey = String.fromEnvironment(
     'FIREBASE_WEB_API_KEY',

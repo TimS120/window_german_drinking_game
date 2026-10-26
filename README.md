@@ -248,7 +248,7 @@ there. It uses a local demo project and does not access the deployed database.
    that device, and choose **Create online lobby**.
 2. Share the six-character room code outside the app. For browser guests,
    also share the browser address displayed in the lobby; **Copy browser
-   address** copies the stable URL.
+   address** copies an invitation link with the room code already filled in.
 3. Guests either enter that code in their installed app or open the website
    on their phone or PC/laptop. Enter one or more player names separated by
    commas, then choose **Join online room**. Names must be unique in the lobby.
@@ -263,6 +263,71 @@ identity is held in memory, so refreshing or restarting does not recover the
 previous seat. Optional links ending in `?room=ABC234` prefill the room code;
 guests still enter their names and explicitly join.
 
+## Room access and expiry
+
+The hosted browser address is public. Current rules allow anonymously signed-in
+clients to read a room's public snapshot if they know its code. Open lobbies
+accept devices with unique player names; starting the game locks new joining.
+Private hidden-card state is host-only in normal mode, and chat is limited to
+registered room members. Host developer mode deliberately shares hidden values
+in the public debug payload. The room code is an invitation, not a user login.
+
+Rooms currently have no automatic thirty-minute expiry. Leaving the app stops
+its hosting work but does not delete the stored Firebase room. A future idle-room
+expiry should use accepted room activity and server-enforced access/cleanup;
+merely stopping the host's network connection does not revoke access to stored
+public snapshots. Expiry should not count a host app switch as inactivity while
+guests are still playing. Longer invitation secrets, host approval of devices,
+and membership-gated board reads would further limit access by strangers.
+
+## Appearance and saved settings
+
+The appearance menu (sun/moon/automatic icon) is available on the home/join
+screen and in the lobby/game toolbar. Choose **Use system theme**, **Light
+mode**, or **Dark mode**. New installations follow the system's theme, including
+changes while the app is running. Selecting a mode overrides that default until
+you change it again. Dark mode retains the original green/gold design.
+
+Theme and language choices are saved on that device or browser profile and
+restored on later launches. Browser preferences persist until site data is
+cleared; they are independent of the host and other players' preferences.
+
+A single hosted browser client can join new lobbies from either PC or Android
+hosts without a separate deployment per room. The home screen reminds players
+of this option, and each lobby displays a browser invitation with its room code
+prefilled. Guests still enter their names and explicitly join before the host
+locks the lobby by starting the game.
+
+During an online game the host can use **Restart game** in the toolbar at any
+time, including while another device owns the turn. The host must confirm the
+restart; Cancel leaves the game untouched. Everyone sees a shared three-second
+restart notice, dismissible by tapping it. Restarting resets the board,
+deck, turn, and scores in the same locked room, preserving seats and chat.
+Guests cannot use this control or write the authoritative room state. Offline
+games use the same toolbar position and confirmation; there is no separate
+instant-reset button in the information panel. Restarting preserves the player
+list in either mode.
+
+Player and device-group names are trimmed and start with a capital letter when
+starting, joining, or saving. The rest of the spelling is preserved (for example
+`tim` becomes `Tim`, while `McDonald` and `TIM` stay as entered).
+
+The host's overflow menu also offers **Return to lobby**, with confirmation.
+Everyone returns to the same room code and chat, and new devices can join again.
+The lobby groups players by the device connection they share. The host can name
+each group after its physical room (for example Living room or Kitchen) and edit
+its comma-separated player list. Removing every player from a device leaves the
+group registered so the host can add players back without reconnecting it.
+Names must remain unique across the lobby, and at least one player must remain.
+Editing is disabled after the host starts the game again.
+
+Portrait screens put the board first. The free top-right board slot shows the
+deck count; the lower-right slots hold **End turn** and **Propose best move**.
+Landscape layouts retain the controls in the information panel. Routine room-code,
+seat-waiting and successful model-loading text is hidden during play. Adviser
+failures appear as red local System messages in online chat, or a red error in
+local play; these diagnostic messages are not sent as player chat.
+
 ## Turn indicators, winning, and developer mode
 
 At the start of each local turn (or a turn owned by your online device), a
@@ -273,7 +338,8 @@ chat, and leaving the room remain available.
 Completing the window celebrates the whole lobby with “You won!” and plays
 rockets that launch from the bottom and burst across the screen for fifteen
 seconds. Devices requesting reduced motion see the result without fireworks.
-The host can restart immediately, including during the animation, in the same locked room, preserving
+The host can request a restart immediately, including during the animation,
+then confirm it in the same locked room, preserving
 its code, players, seat ownership, and chat. Local games can restart too.
 
 Enable **Developer mode** on the home/join screen before starting or joining.

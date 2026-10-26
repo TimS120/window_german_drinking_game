@@ -262,6 +262,30 @@ void main() {
     // permissions outside the original public/private paths.
     expect(body.keys.toSet(), {'public', 'private'});
     expect(body['public']['members'], {'host': true});
+    await rooms.publishState(
+      roomCode: 'abc234',
+      hostUid: 'host',
+      version: 3,
+      seats: [const RoomSeat(index: 0, name: 'Host', ownerUid: 'host')],
+      state: WindowGameEngine(['Host']).exportState(),
+      started: false,
+      roomMetadata: {
+        'devices': {'host': 'Living room', 'empty': 'Kitchen'},
+        'controlId': 7,
+        'controlNotice': 'lobby',
+      },
+    );
+    final reopened = jsonDecode(calls.last.body)['public'];
+    final decoded = OnlineRoom.fromJson(
+      'ABC234',
+      Map<String, dynamic>.from(reopened),
+    );
+    expect(decoded.started, isFalse);
+    expect(decoded.deviceLabels['empty'], 'Kitchen');
+    expect(decoded.controlId, 7);
+    expect(decoded.controlNotice, 'lobby');
+    expect(reopened['members'], {'host': true, 'empty': true});
+
     expect(body['public'].containsKey('debugState'), isFalse);
     final state = WindowGameEngine(['Host'], seed: 1).exportState();
     await rooms.publishState(

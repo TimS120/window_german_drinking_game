@@ -208,5 +208,39 @@
         "type": "String"
       }
     }
-  }
+  },
+  "appearance": "Darstellung",
+  "themeSystem": "Systemeinstellung verwenden",
+  "themeLight": "Heller Modus",
+  "themeDark": "Dunkler Modus",
+  "browserReminder": "Freunde können einer Lobby auf einem PC oder Smartphone im Browser beitreten – ohne Installation. Teile vor dem Spielstart den Browserlink aus deiner Lobby.",
+  "restartQuestion": "Spiel neu starten?",
+  "restartExplanation": "Das Spielfeld und die Punkte werden für alle zurückgesetzt. Raum und Spieler bleiben erhalten.",
+  "yesAction": "Ja",
+  "cancelAction": "Abbrechen",
+  "saveAction": "Speichern",
+  "gameRestarted": "Der Host hat das Spiel neu gestartet",
+  "backToLobby": "Zurück zur Lobby",
+  "backToLobbyQuestion": "Alle zurück in die Lobby bringen?",
+  "backToLobbyHelp": "Das aktuelle Spiel wird zurückgesetzt. Der Raumcode bleibt, und Spieler können vor dem nächsten Start geändert werden.",
+  "returnedLobby": "Der Host hat alle zurück in die Lobby gebracht",
+  "hostControls": "Host-Steuerung",
+  "editDevicePlayers": "Gerät und Spieler bearbeiten",
+  "physicalGroup": "Zimmer- / Gerätename",
+  "physicalGroupExample": "Wohnzimmer, Küche, …",
+  "editPlayersHelp": "Namen durch Kommas trennen. Namen entfernen oder hinzufügen, um die Spieler auf diesem Gerät zu ändern. Leer lassen für keine Spieler.",
+  "noDevicePlayers": "Keine Spieler zugewiesen",
+  "deviceGroup": "Gerät {number}",
+  "@deviceGroup": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "systemLabel": "System",
+  "keepOnePlayer": "Mindestens ein Spieler muss in der Lobby bleiben.",
+  "lobbyEditOnly": "Kehre vor dem Bearbeiten der Spieler zur Lobby zurück.",
+  "deckShort": "Stapel",
+  "restartLocalExplanation": "Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten."
 }

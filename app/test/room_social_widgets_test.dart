@@ -41,6 +41,12 @@ class _Policy extends WindowRlPolicy {
   }
 }
 
+class _FailingPolicy extends _Policy {
+  @override
+  Future<AiMoveProposal?> propose(WindowGameEngine game) async =>
+      throw StateError('Test adviser failure');
+}
+
 class _Rooms extends FirebaseRoomRepository {
   _Rooms(this.identity, {this.started = true})
     : super(
@@ -52,7 +58,16 @@ class _Rooms extends FirebaseRoomRepository {
         ),
       );
   final String identity;
-  final bool started;
+  bool started;
+  Map<String, String> devices = {};
+  int controlId = 0;
+  String? controlNotice;
+  List<RoomSeat> seats = const [
+    RoomSeat(index: 0, name: 'Max', ownerUid: 'host'),
+    RoomSeat(index: 1, name: 'Heiko', ownerUid: 'host'),
+    RoomSeat(index: 2, name: 'Tom', ownerUid: 'host'),
+    RoomSeat(index: 3, name: 'Anna', ownerUid: 'guest'),
+  ];
   WindowGameEngine game = WindowGameEngine([
     'Max',
     'Heiko',
@@ -75,12 +90,10 @@ class _Rooms extends FirebaseRoomRepository {
     hostUid: 'host',
     state: game.publicObservation(),
     started: started,
-    seats: const [
-      RoomSeat(index: 0, name: 'Max', ownerUid: 'host'),
-      RoomSeat(index: 1, name: 'Heiko', ownerUid: 'host'),
-      RoomSeat(index: 2, name: 'Tom', ownerUid: 'host'),
-      RoomSeat(index: 3, name: 'Anna', ownerUid: 'guest'),
-    ],
+    seats: seats,
+    devices: devices,
+    controlId: controlId,
+    controlNotice: controlNotice,
   );
   @override
   Future<OnlineRoom?> loadRoom(String code) async => room;
@@ -262,8 +275,14 @@ class _HostRooms extends _Rooms {
     required GameState state,
     required bool started,
     bool developerMode = false,
+    Map<String, dynamic> roomMetadata = const {},
   }) async {
     this.version = version;
+    this.started = started;
+    this.seats = seats;
+    devices = Map<String, String>.from(roomMetadata['devices'] as Map? ?? {});
+    controlId = roomMetadata['controlId'] as int? ?? 0;
+    controlNotice = roomMetadata['controlNotice'] as String?;
     publishedVersions.add(version);
     game = WindowGameEngine.fromState(state);
     social.remove('turn');
@@ -332,6 +351,7 @@ Future<void> _joinTest(
   _Rooms rooms,
   Size size, {
   LanguageController? language,
+  WindowRlPolicy? policy,
 }) async {
   const previewFont = String.fromEnvironment('UI_PREVIEW_FONT');
   const previewEmojiFont = String.fromEnvironment('UI_PREVIEW_EMOJI_FONT');
@@ -375,7 +395,7 @@ Future<void> _joinTest(
       firebaseEnabled: true,
       browserGuest: true,
       initialRoomCode: 'ABC234',
-      rlPolicy: _Policy(),
+      rlPolicy: policy ?? _Policy(),
       repository: rooms,
     ),
   );
@@ -413,6 +433,214 @@ Future<void> _joinTest(
 }
 
 void main() {
+  testWidgets('canceling a restart leaves the game unchanged', (tester) async {
+    final rooms = _HostRooms();
+    await _joinTest(tester, rooms, const Size(1400, 1000));
+    final before = GameStateCodec.encode(rooms.game.exportState());
+    await tester.tap(find.byKey(const ValueKey('restart-online-game')));
+    await tester.pumpAndSettle();
+    expect(find.text('Restart the game?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(rooms.publishedVersions, isEmpty);
+    expect(GameStateCodec.encode(rooms.game.exportState()), before);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('all guests see each restart notice once and can dismiss it', (
+    tester,
+  ) async {
+    final rooms = _Rooms('guest')
+      ..controlId = 3
+      ..controlNotice = 'restart';
+    await _joinTest(tester, rooms, const Size(390, 844));
+    expect(find.text('The host restarted the game'), findsNothing);
+    rooms.controlId++;
+    rooms.version++;
+    rooms.roomEvents.add(rooms.room);
+    await tester.pumpAndSettle();
+    expect(find.text('The host restarted the game'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('room-notice')));
+    await tester.pump();
+    rooms.roomEvents.add(rooms.room);
+    await tester.pumpAndSettle();
+    expect(find.text('The host restarted the game'), findsNothing);
+    rooms.controlId++;
+    rooms.version++;
+    rooms.roomEvents.add(rooms.room);
+    await tester.pumpAndSettle();
+    expect(find.text('The host restarted the game'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.text('The host restarted the game'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'host reopens same lobby and can edit empty physical device groups',
+    (tester) async {
+      final rooms = _HostRooms();
+      rooms.social['messages'] = {
+        'keep': {'sender': 'Anna', 'text': 'Keep chat', 'createdAt': 1},
+      };
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      await tester.tap(find.byKey(const ValueKey('host-controls')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Return to lobby'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+      await tester.pumpAndSettle();
+      expect(rooms.started, isFalse);
+      expect(rooms.room.code, 'ABC234');
+      expect(rooms.social['messages']['keep']['text'], 'Keep chat');
+      expect(find.text('Window lobby'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('room-notice')));
+      await tester.pumpAndSettle();
+      Future<void> edit(String names) async {
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('edit-device:guest')),
+        );
+        await tester.tap(find.byKey(const ValueKey('edit-device:guest')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('device-label')),
+          'Kitchen',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('device-players')),
+          names,
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+      }
+
+      await edit('Ben, Carla');
+      expect(rooms.room.deviceLabels['guest'], 'Kitchen');
+      expect(
+        rooms.room.seats
+            .where((s) => s.ownerUid == 'guest')
+            .map((s) => s.name)
+            .toList(),
+        ['Ben', 'Carla'],
+      );
+      await edit('');
+      expect(rooms.room.seats.where((s) => s.ownerUid == 'guest'), isEmpty);
+      expect(find.text('No players assigned'), findsOneWidget);
+      await edit('Dana');
+      expect(rooms.room.seats.last.name, 'Dana');
+      expect(rooms.room.seats.last.ownerUid, 'guest');
+      await tester.ensureVisible(find.text('Start game and lock lobby'));
+      await tester.tap(find.text('Start game and lock lobby'));
+      await tester.pumpAndSettle();
+      expect(rooms.started, isTrue);
+      expect(rooms.game.players, ['Max', 'Heiko', 'Tom', 'Dana']);
+      expect(rooms.room.code, 'ABC234');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'portrait board owns turn buttons and deck count without routine room/model status',
+    (tester) async {
+      await _joinTest(tester, _GuestTurnRooms(), const Size(390, 844));
+      final boardEnd = find.byKey(const ValueKey('board-end-turn'));
+      final boardPropose = find.byKey(const ValueKey('board-propose'));
+      final deck = find.byKey(const ValueKey('board-deck-counter'));
+      expect(boardEnd, findsOneWidget);
+      expect(boardPropose, findsOneWidget);
+      expect(deck, findsOneWidget);
+      final handle = tester.getRect(find.byKey(const ValueKey('card:2:5')));
+      expect(tester.getRect(deck).bottom, lessThan(handle.top));
+      expect(tester.getRect(boardEnd).top, greaterThan(handle.bottom));
+      expect(
+        tester.getRect(boardPropose).top,
+        greaterThan(tester.getRect(boardEnd).bottom),
+      );
+      expect(find.text('ONNX policy loaded.'), findsNothing);
+      expect(find.textContaining('Online room:'), findsNothing);
+      expect(find.textContaining('Room ABC234:'), findsNothing);
+      expect(
+        find.text('Waiting for the player who owns this seat.'),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+      await _preview(tester, 'portrait-board-controls');
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('adviser failures appear as red local system chat messages', (
+    tester,
+  ) async {
+    await _joinTest(
+      tester,
+      _GuestTurnRooms(),
+      const Size(1400, 1000),
+      policy: _FailingPolicy(),
+    );
+    await tester.tap(find.text('Propose best move'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('RL model'));
+    await tester.pumpAndSettle();
+    final error = find.byWidgetPredicate(
+      (w) =>
+          w is Text &&
+          (w.textSpan?.toPlainText().contains('Test adviser failure') ?? false),
+    );
+    expect(error, findsOneWidget);
+    final text = tester.widget<Text>(error);
+    expect(
+      text.textSpan!.style!.color,
+      Theme.of(tester.element(error)).colorScheme.error,
+    );
+    expect(text.textSpan!.toPlainText(), contains('System:'));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'host can reset during a guest turn while preserving room, seats and chat',
+    (tester) async {
+      final rooms = _HostRooms();
+      final state = GameStateCodec.encode(rooms.game.exportState());
+      state['currentPlayerIndex'] = 3;
+      rooms.game = WindowGameEngine.fromState(GameStateCodec.decode(state));
+      rooms.social['messages'] = {
+        'saved': {'sender': 'Anna', 'text': 'Keep this chat', 'createdAt': 1},
+      };
+      final seats = rooms.room.seats.map((seat) => seat.toJson()).toList();
+      await _joinTest(tester, rooms, const Size(1400, 1000));
+      expect(find.text('Anna is playing'), findsOneWidget);
+      final restart = find.byKey(const ValueKey('restart-online-game'));
+      expect(tester.widget<IconButton>(restart).onPressed, isNotNull);
+      await tester.tap(restart);
+      await tester.pumpAndSettle();
+      expect(rooms.publishedVersions, isEmpty);
+      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+      await tester.pumpAndSettle();
+      expect(rooms.publishedVersions, [8]);
+      expect(rooms.game.currentPlayer, 'Max');
+      expect(rooms.room.code, 'ABC234');
+      expect(rooms.room.seats.map((seat) => seat.toJson()).toList(), seats);
+      expect(rooms.social['messages']['saved']['text'], 'Keep this chat');
+      expect(rooms.game.exportState().currentPlayerIndex, 0);
+      expect(
+        rooms.game.snapshot().stats.values.every(
+          (stats) =>
+              stats.correct == 0 && stats.wrong == 0 && stats.drinks == 0,
+        ),
+        isTrue,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets('guest never receives the online restart control', (
+    tester,
+  ) async {
+    await _joinTest(tester, _Rooms('guest'), const Size(1400, 1000));
+    expect(find.byKey(const ValueKey('restart-online-game')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'host restarts a completed game in the same room with the same seats',
     (tester) async {
@@ -429,6 +657,8 @@ void main() {
       expect(find.text('You won!'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, 'Restart game'));
       await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+      await tester.pumpAndSettle();
       expect(rooms.publishedVersions, [8]);
       expect(rooms.room.code, 'ABC234');
       expect(
@@ -437,7 +667,7 @@ void main() {
       );
       expect(rooms.game.gameEnded, isFalse);
       expect(rooms.game.currentPlayer, 'Max');
-      expect(find.text('Your turn, Max!'), findsOneWidget);
+      expect(find.text('The host restarted the game'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -582,10 +812,15 @@ void main() {
       if (phone) {
         expect(chatRect.top, greaterThan(tester.getRect(stats).bottom));
       } else {
-        expect(
-          tester.getRect(card).right,
-          lessThan(tester.getRect(stats).left),
-        );
+        if (size.height > size.width) {
+          expect(tester.getRect(card).top, lessThan(tester.getRect(stats).top));
+          expect(find.byKey(const ValueKey('board-end-turn')), findsOneWidget);
+        } else {
+          expect(
+            tester.getRect(card).right,
+            lessThan(tester.getRect(stats).left),
+          );
+        }
         expect(tester.getRect(stats).right, lessThan(chatRect.left));
         expect(chatRect.height, greaterThan(size.height * 0.7));
       }

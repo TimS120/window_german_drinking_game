@@ -221,6 +221,7 @@ class WindowsFirebaseRestRoomRepository {
     required GameState state,
     required bool started,
     bool developerMode = false,
+    Map<String, dynamic> roomMetadata = const {},
   }) async {
     final String code = roomCode.toUpperCase();
     await _write('PATCH', 'rooms/$code', <String, dynamic>{
@@ -232,6 +233,7 @@ class WindowsFirebaseRestRoomRepository {
         state: state,
         started: started,
         developerMode: developerMode,
+        roomMetadata: roomMetadata,
       ),
     });
   }
@@ -344,11 +346,17 @@ class WindowsFirebaseRestRoomRepository {
     required GameState state,
     required bool started,
     bool developerMode = false,
+    Map<String, dynamic> roomMetadata = const {},
   }) => <String, dynamic>{
+    ...roomMetadata,
     'hostUid': hostUid,
     'version': version,
     'seats': seats.map((RoomSeat seat) => seat.toJson()).toList(),
+    'devices': _deviceLabels(hostUid, seats, roomMetadata),
     'members': {
+      hostUid: true,
+      if (roomMetadata['devices'] is Map)
+        for (final uid in (roomMetadata['devices'] as Map).keys) '$uid': true,
       for (final seat in seats)
         if (seat.ownerUid != null) seat.ownerUid!: true,
     },
@@ -357,6 +365,21 @@ class WindowsFirebaseRestRoomRepository {
     'state': _publicState(state),
     if (developerMode) 'debugState': GameStateCodec.encode(state),
   };
+
+  Map<String, String> _deviceLabels(
+    String hostUid,
+    List<RoomSeat> seats,
+    Map<String, dynamic> metadata,
+  ) {
+    final labels = Map<String, String>.from(metadata['devices'] as Map? ?? {});
+    for (final uid in {
+      hostUid,
+      ...seats.map((seat) => seat.ownerUid).whereType<String>(),
+    }) {
+      labels.putIfAbsent(uid, () => 'Device ${labels.length + 1}');
+    }
+    return labels;
+  }
 
   Map<String, dynamic> _publicState(GameState state) {
     final Map<String, dynamic> value = GameStateCodec.encode(state);

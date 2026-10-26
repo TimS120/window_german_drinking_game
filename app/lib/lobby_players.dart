@@ -1,12 +1,9 @@
 import 'firebase_room_repository.dart';
+import 'player_names.dart';
 
 /// All names on a shared device join together, before the host starts play.
 List<String> parseLobbyPlayers(String text) {
-  final List<String> names = text
-      .split(',')
-      .map((String name) => name.trim())
-      .where((String name) => name.isNotEmpty)
-      .toList();
+  final List<String> names = splitPlayerNames(text);
   if (names.isEmpty) throw StateError('Enter at least one player name.');
   if (names.map((String name) => name.toLowerCase()).toSet().length !=
       names.length) {
@@ -20,6 +17,7 @@ List<RoomSeat> addLobbyPlayers(
   String uid,
   List<String> names,
 ) {
+  names = names.map(capitalizeName).toList();
   if (room.started) {
     throw StateError(
       'This game has already started. Ask the host for a new lobby.',
@@ -48,4 +46,59 @@ List<RoomSeat> addLobbyPlayers(
         ownerUid: uid,
       ),
   ];
+}
+
+/// Host-only lobby editing. An empty group stays registered so its device can
+/// receive players again without reconnecting or changing anonymous identity.
+List<RoomSeat> replaceDevicePlayers(
+  OnlineRoom room,
+  String uid,
+  List<String> names,
+) {
+  if (room.started) {
+    throw StateError('Return to the lobby before editing players.');
+  }
+  if (!room.deviceLabels.containsKey(uid)) {
+    throw StateError('This device has not joined the room.');
+  }
+  final cleaned = names
+      .map(capitalizeName)
+      .where((name) => name.isNotEmpty)
+      .toList();
+  final taken = room.seats
+      .where((seat) => seat.ownerUid != uid)
+      .map((seat) => seat.name.toLowerCase())
+      .toSet();
+  if (cleaned.any((name) => !taken.add(name.toLowerCase()))) {
+    throw StateError(
+      'Player names must be unique in the lobby. Choose other names.',
+    );
+  }
+  final result = <RoomSeat>[];
+  bool inserted = false;
+  void insert() {
+    for (final name in cleaned) {
+      result.add(RoomSeat(index: result.length, name: name, ownerUid: uid));
+    }
+    inserted = true;
+  }
+
+  for (final seat in room.seats) {
+    if (seat.ownerUid == uid) {
+      if (!inserted) insert();
+    } else {
+      result.add(
+        RoomSeat(
+          index: result.length,
+          name: seat.name,
+          ownerUid: seat.ownerUid,
+        ),
+      );
+    }
+  }
+  if (!inserted) insert();
+  if (result.isEmpty) {
+    throw StateError('Keep at least one player in the lobby.');
+  }
+  return result;
 }

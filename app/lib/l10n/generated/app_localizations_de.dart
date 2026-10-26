@@ -724,4 +724,94 @@ class AppLocalizationsDe extends AppLocalizations {
   String waitingTurn(String player) {
     return '$player ist am Zug';
   }
+
+  @override
+  String get appearance => 'Darstellung';
+
+  @override
+  String get themeSystem => 'Systemeinstellung verwenden';
+
+  @override
+  String get themeLight => 'Heller Modus';
+
+  @override
+  String get themeDark => 'Dunkler Modus';
+
+  @override
+  String get browserReminder =>
+      'Freunde können einer Lobby auf einem PC oder Smartphone im Browser beitreten – ohne Installation. Teile vor dem Spielstart den Browserlink aus deiner Lobby.';
+
+  @override
+  String get restartQuestion => 'Spiel neu starten?';
+
+  @override
+  String get restartExplanation =>
+      'Das Spielfeld und die Punkte werden für alle zurückgesetzt. Raum und Spieler bleiben erhalten.';
+
+  @override
+  String get yesAction => 'Ja';
+
+  @override
+  String get cancelAction => 'Abbrechen';
+
+  @override
+  String get saveAction => 'Speichern';
+
+  @override
+  String get gameRestarted => 'Der Host hat das Spiel neu gestartet';
+
+  @override
+  String get backToLobby => 'Zurück zur Lobby';
+
+  @override
+  String get backToLobbyQuestion => 'Alle zurück in die Lobby bringen?';
+
+  @override
+  String get backToLobbyHelp =>
+      'Das aktuelle Spiel wird zurückgesetzt. Der Raumcode bleibt, und Spieler können vor dem nächsten Start geändert werden.';
+
+  @override
+  String get returnedLobby => 'Der Host hat alle zurück in die Lobby gebracht';
+
+  @override
+  String get hostControls => 'Host-Steuerung';
+
+  @override
+  String get editDevicePlayers => 'Gerät und Spieler bearbeiten';
+
+  @override
+  String get physicalGroup => 'Zimmer- / Gerätename';
+
+  @override
+  String get physicalGroupExample => 'Wohnzimmer, Küche, …';
+
+  @override
+  String get editPlayersHelp =>
+      'Namen durch Kommas trennen. Namen entfernen oder hinzufügen, um die Spieler auf diesem Gerät zu ändern. Leer lassen für keine Spieler.';
+
+  @override
+  String get noDevicePlayers => 'Keine Spieler zugewiesen';
+
+  @override
+  String deviceGroup(int number) {
+    return 'Gerät $number';
+  }
+
+  @override
+  String get systemLabel => 'System';
+
+  @override
+  String get keepOnePlayer =>
+      'Mindestens ein Spieler muss in der Lobby bleiben.';
+
+  @override
+  String get lobbyEditOnly =>
+      'Kehre vor dem Bearbeiten der Spieler zur Lobby zurück.';
+
+  @override
+  String get deckShort => 'Stapel';
+
+  @override
+  String get restartLocalExplanation =>
+      'Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten.';
 }

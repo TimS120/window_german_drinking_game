@@ -86,42 +86,29 @@ class _GameFeedbackState extends State<GameFeedback>
             child: IgnorePointer(
               child: ColoredBox(
                 color: const Color(0x66777777),
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text(l.waitingTurn(widget.player)),
-                    ),
-                  ),
-                ),
+                child: MediaQuery.orientationOf(context) == Orientation.portrait
+                    ? null
+                    : Align(
+                        alignment: Alignment.topCenter,
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(l.waitingTurn(widget.player)),
+                          ),
+                        ),
+                      ),
               ),
             ),
           ),
         if (_notice)
           Positioned.fill(
-            child: GestureDetector(
+            child: GameNotice(
               key: const ValueKey('turn-notice'),
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
+              message: l.yourTurn(widget.player),
+              onDismiss: () {
                 _noticeTimer?.cancel();
                 setState(() => _notice = false);
               },
-              child: ColoredBox(
-                color: Colors.black38,
-                child: Center(
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        l.yourTurn(widget.player),
-                        style: Theme.of(context).textTheme.headlineMedium,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             ),
           ),
         if (widget.finished) ...[
@@ -167,6 +154,32 @@ class _GameFeedbackState extends State<GameFeedback>
       ],
     );
   }
+}
+
+class GameNotice extends StatelessWidget {
+  const GameNotice({super.key, required this.message, required this.onDismiss});
+  final String message;
+  final VoidCallback onDismiss;
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onDismiss,
+    child: ColoredBox(
+      color: Colors.black38,
+      child: Center(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.headlineMedium,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _FireworksPainter extends CustomPainter {
