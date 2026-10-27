@@ -2911,17 +2911,14 @@ class _Board extends StatelessWidget {
         windowLayout.length,
         (int row) => Expanded(
           child: Padding(
-            padding: EdgeInsets.only(
-              bottom: row == windowLayout.length - 1 ? 0 : 6,
-            ),
+            // Equal padding keeps the last row the same height as the rest.
+            padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(
               children: List<Widget>.generate(
                 windowLayout.first.length,
                 (int column) => Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(
-                      right: column == windowLayout.first.length - 1 ? 0 : 6,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
                     child: _cardSlot(context, Position(row, column)),
                   ),
                 ),
@@ -2980,9 +2977,19 @@ class _Board extends StatelessWidget {
         key: ValueKey('card:${position.row}:${position.column}'),
         onTap: selectable ? () => onSelect(position) : null,
         borderRadius: BorderRadius.circular(10),
-        child: Ink(
+        child: Container(
           decoration: BoxDecoration(
             color: faceUp ? const Color(0xfff3ead2) : const Color(0xff164b83),
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 3,
+                offset: Offset(1, 2),
+              ),
+            ],
+          ),
+          foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: markedForRemoval
@@ -2992,16 +2999,11 @@ class _Board extends StatelessWidget {
                         : (legal || selected ? Colors.amber : Colors.black54)),
               width: borderWidth,
             ),
-            boxShadow: const <BoxShadow>[
-              BoxShadow(
-                color: Colors.black38,
-                blurRadius: 3,
-                offset: Offset(1, 2),
-              ),
-            ],
           ),
           child: Padding(
-            padding: EdgeInsets.all(borderWidth),
+            // Keep artwork dimensions identical for every card state; draw
+            // selection and proposal borders over the artwork instead.
+            padding: const EdgeInsets.all(1),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(9),
               child: Stack(
@@ -3011,7 +3013,9 @@ class _Board extends StatelessWidget {
                     faceUp
                         ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
                         : 'assets/cards/card_back.png',
-                    fit: BoxFit.contain,
+                    // Source images have different proportions. Fill the same
+                    // rectangle for fronts and backs without letterboxing.
+                    fit: BoxFit.fill,
                     errorBuilder: (_, _, _) => Center(
                       child: Text(
                         faceUp ? game.cardLabel(card!) : '?',

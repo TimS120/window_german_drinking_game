@@ -564,6 +564,21 @@ void main() {
         findsNothing,
       );
       expect(tester.takeException(), isNull);
+      final cardImages = find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName.startsWith('assets/cards/'),
+      );
+      final imageSizes = cardImages
+          .evaluate()
+          .map((element) => tester.getSize(find.byWidget(element.widget)))
+          .toList();
+      expect(imageSizes.length, greaterThan(1));
+      for (final size in imageSizes) {
+        expect(size.width, closeTo(imageSizes.first.width, 0.001));
+        expect(size.height, closeTo(imageSizes.first.height, 0.001));
+      }
       await _preview(tester, 'portrait-board-controls');
       await tester.pumpWidget(const SizedBox());
     },
@@ -1013,29 +1028,22 @@ void main() {
       final guess = find.widgetWithText(FilledButton, 'Higher · suggested');
       expect(tester.widget<FilledButton>(guess).onPressed, isNull);
       await _preview(tester, 'phone-spectator');
-      final inks = tester
-          .widgetList<Ink>(find.byType(Ink))
-          .where((i) => i.decoration is BoxDecoration);
+      final borders = tester
+          .widgetList<Container>(find.byType(Container))
+          .map((container) => container.foregroundDecoration)
+          .whereType<BoxDecoration>()
+          .map((decoration) => decoration.border)
+          .whereType<Border>();
       expect(
-        inks.any(
-          (i) =>
-              ((i.decoration as BoxDecoration).border as Border).top.color ==
-              Colors.lightBlueAccent,
-        ),
+        borders.any((border) => border.top.color == Colors.lightBlueAccent),
         isTrue,
       );
       expect(
-        inks
+        borders
             .where(
-              (i) =>
-                  ((i.decoration as BoxDecoration).border as Border)
-                          .top
-                          .color ==
-                      Colors.amber ||
-                  ((i.decoration as BoxDecoration).border as Border)
-                          .top
-                          .color ==
-                      Colors.lightBlueAccent,
+              (border) =>
+                  border.top.color == Colors.amber ||
+                  border.top.color == Colors.lightBlueAccent,
             )
             .length,
         greaterThanOrEqualTo(rooms.game.snapshot().validSelectable.length),
