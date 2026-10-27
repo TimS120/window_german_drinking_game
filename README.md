@@ -32,7 +32,7 @@ project files remain in the repository, but iOS is outside the current support s
 
 ## Get the Android app and share it
 
-The Android installer is a single **APK file** at
+The Android installer is a single **compressed universal APK file** at
 ```text
 app/build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -46,7 +46,8 @@ To install on an Android phone:
    manager used to open it. The wording varies by phone.
 3. Choose **Install**, then open **Window**. The permission from step 2 can be turned off again afterward.
 
-To build a fresh installer, install Flutter and the Android SDK, then run from the repository root:
+To build the compressed universal installer (native libraries are compressed in
+the APK and extracted on installation), install Flutter and the Android SDK, then run from the repository root:
 
 ```bash
 cd app

@@ -189,7 +189,9 @@ void main() {
           .where(
             (image) =>
                 image.image is AssetImage &&
-                (image.image as AssetImage).assetName.endsWith('card_back.png'),
+                (image.image as AssetImage).assetName.endsWith(
+                  'card_back.webp',
+                ),
           );
       expect(backs.length, 17);
       expect(tester.takeException(), isNull);

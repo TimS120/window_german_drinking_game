@@ -5,6 +5,9 @@ plugins {
 }
 
 android {
+    // Compress native libraries in shareable APKs; Android extracts them at install.
+    packaging { jniLibs { useLegacyPackaging = true } }
+
     namespace = "com.timss.window.window_game"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion

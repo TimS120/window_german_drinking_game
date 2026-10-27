@@ -3369,8 +3369,8 @@ class _Board extends StatelessWidget {
                 children: [
                   Image.asset(
                     faceUp
-                        ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.png'
-                        : 'assets/cards/card_back.png',
+                        ? 'assets/cards/c${card! % 4 + 1}_v${card ~/ 4 + 1}.webp'
+                        : 'assets/cards/card_back.webp',
                     // Source images have different proportions. Fill the same
                     // rectangle for fronts and backs without letterboxing.
                     fit: BoxFit.fill,
