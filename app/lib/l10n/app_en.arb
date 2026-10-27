@@ -628,5 +628,8 @@
   "asyncInProgress": "In progress",
   "asyncFinished": "Finished",
   "asyncNoLobbies": "No lobbies to manage.",
-  "asyncLoadMore": "Load more"
+  "asyncLoadMore": "Load more",
+  "developerKeyHelp": "Enter the admin key to enable developer mode.",
+  "developerVerificationFailed": "Could not verify the admin key. Check the server connection.",
+  "gameRules": "Game rules"
 }

@@ -11,6 +11,7 @@ import 'package:flutter/services.dart'
 import 'firebase_options.dart';
 import 'firebase_room_repository.dart';
 import 'game_engine.dart';
+import 'game_rules_screen.dart';
 import 'game_state_codec.dart';
 import 'lobby_players.dart';
 import 'player_names.dart';
@@ -23,6 +24,7 @@ import 'appearance.dart';
 import 'game_feedback.dart';
 import 'hosting_service.dart';
 import 'async_games_screen.dart';
+import 'async_games.dart';
 import 'async_notifications.dart';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -66,6 +68,7 @@ class WindowGameApp extends StatefulWidget {
     this.languageController,
     this.themeController,
     this.repository,
+    this.adminClientFactory,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
@@ -73,6 +76,7 @@ class WindowGameApp extends StatefulWidget {
   final LanguageController? languageController;
   final ThemeController? themeController;
   final FirebaseRoomRepository? repository;
+  final AsyncGamesClient Function()? adminClientFactory;
   @override
   State<WindowGameApp> createState() => _WindowGameAppState();
 }
@@ -161,7 +165,7 @@ class _WindowGameAppState extends State<WindowGameApp> {
       child: AnimatedBuilder(
         animation: Listenable.merge([_language, _appearance]),
         builder: (context, _) => MaterialApp(
-          title: 'Window',
+          onGenerateTitle: (context) => tr(context).appTitle,
           navigatorKey: navigatorKey,
           locale: _language.locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -189,6 +193,7 @@ class _WindowGameAppState extends State<WindowGameApp> {
             rlPolicy: widget.rlPolicy,
             browserGuest: widget.browserGuest,
             repository: widget.repository,
+            adminClientFactory: widget.adminClientFactory,
           ),
         ),
       ),
@@ -205,6 +210,7 @@ class GameShell extends StatefulWidget {
     this.initialRoomCode,
     this.repository,
     this.asyncRoomCode,
+    this.adminClientFactory,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
@@ -212,6 +218,7 @@ class GameShell extends StatefulWidget {
   final String? initialRoomCode;
   final FirebaseRoomRepository? repository;
   final String? asyncRoomCode;
+  final AsyncGamesClient Function()? adminClientFactory;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -2038,13 +2045,14 @@ class _GameShellState extends State<GameShell> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    const Align(
+                    Align(
                       alignment: Alignment.centerRight,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          ThemePicker(),
-                          LanguagePicker(showName: true),
+                          _rulesIcon,
+                          const ThemePicker(),
+                          const LanguagePicker(showName: true),
                         ],
                       ),
                     ),
@@ -2116,6 +2124,18 @@ class _GameShellState extends State<GameShell> {
     );
   }
 
+  void _openRules() => Navigator.push(
+    context,
+    MaterialPageRoute<void>(builder: (_) => const GameRulesScreen()),
+  );
+
+  Widget get _rulesIcon => IconButton(
+    key: const ValueKey('game-rules'),
+    tooltip: _l.gameRules,
+    onPressed: _openRules,
+    icon: const Icon(Icons.menu_book_outlined),
+  );
+
   Widget get _asyncButton => OutlinedButton.icon(
     key: const ValueKey('async-games'),
     onPressed: _openAsyncGames,
@@ -2123,13 +2143,100 @@ class _GameShellState extends State<GameShell> {
     label: Text(_l.asyncGames),
   );
 
+  Future<void> _unlockDeveloperMode() async {
+    String key = '';
+    final client =
+        widget.adminClientFactory?.call() ??
+        AsyncGamesClient(identity: AsyncIdentity());
+    try {
+      final unlocked = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          bool busy = false;
+          String? error;
+          return StatefulBuilder(
+            builder: (context, update) {
+              Future<void> verify() async {
+                update(() {
+                  busy = true;
+                  error = null;
+                });
+                try {
+                  await client.adminCall(
+                    key.trim().toLowerCase(),
+                    '/lobbies?offset=0',
+                  );
+                  if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                } catch (e) {
+                  if (dialogContext.mounted) {
+                    update(() {
+                      busy = false;
+                      error = e is AsyncApiException && e.status == 403
+                          ? tr(dialogContext).asyncInvalidAdminKey
+                          : tr(dialogContext).developerVerificationFailed;
+                    });
+                  }
+                }
+              }
+
+              return AlertDialog(
+                title: Text(tr(context).developerMode),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(tr(context).developerKeyHelp),
+                    TextField(
+                      onChanged: (value) => key = value,
+                      obscureText: true,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      enabled: !busy,
+                      decoration: InputDecoration(
+                        labelText: tr(context).asyncAdminKey,
+                        errorText: error,
+                      ),
+                      onSubmitted: (_) {
+                        if (!busy) verify();
+                      },
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: busy
+                        ? null
+                        : () => Navigator.pop(dialogContext, false),
+                    child: Text(tr(context).cancelAction),
+                  ),
+                  FilledButton(
+                    onPressed: busy ? null : verify,
+                    child: Text(tr(context).asyncAdminUnlock),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      if (mounted && unlocked == true) setState(() => _developerMode = true);
+    } finally {
+      client.close();
+    }
+  }
+
   Widget get _developerSwitch => SwitchListTile(
     key: const ValueKey('developer-mode'),
     contentPadding: EdgeInsets.zero,
     title: Text(_l.developerMode),
     subtitle: Text(_l.developerModeHelp),
     value: _developerMode,
-    onChanged: (value) => setState(() => _developerMode = value),
+    onChanged: (value) {
+      if (!value) {
+        setState(() => _developerMode = false);
+      } else {
+        _unlockDeveloperMode();
+      }
+    },
   );
 
   Widget _debugDeck(GameState? state) => Card(
@@ -2180,13 +2287,14 @@ class _GameShellState extends State<GameShell> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      const Align(
+                      Align(
                         alignment: Alignment.centerRight,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            ThemePicker(),
-                            LanguagePicker(showName: true),
+                            _rulesIcon,
+                            const ThemePicker(),
+                            const LanguagePicker(showName: true),
                           ],
                         ),
                       ),
@@ -2275,6 +2383,7 @@ class _GameShellState extends State<GameShell> {
             actions: <Widget>[
               const ThemePicker(),
               const LanguagePicker(),
+              _rulesIcon,
               if (_serverHosted)
                 IconButton(
                   tooltip: _l.asyncRefresh,
@@ -2551,6 +2660,7 @@ class _GameShellState extends State<GameShell> {
         actions: <Widget>[
           const ThemePicker(),
           const LanguagePicker(),
+          _rulesIcon,
           if (_serverHosted)
             IconButton(
               tooltip: _l.asyncRefresh,

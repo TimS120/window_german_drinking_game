@@ -924,4 +924,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get asyncLoadMore => 'Load more';
+
+  @override
+  String get developerKeyHelp =>
+      'Enter the admin key to enable developer mode.';
+
+  @override
+  String get developerVerificationFailed =>
+      'Could not verify the admin key. Check the server connection.';
+
+  @override
+  String get gameRules => 'Game rules';
 }

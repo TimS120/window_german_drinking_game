@@ -157,7 +157,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('six-character room code'), findsOneWidget);
       await chooseLanguage(tester, 'Choose language', 'Deutsch');
-      expect(find.text('Window beitreten'), findsOneWidget);
+      expect(find.text('Fenster beitreten'), findsOneWidget);
       expect(find.textContaining('sechsstelligen Raumcode'), findsOneWidget);
       expect(
         tester

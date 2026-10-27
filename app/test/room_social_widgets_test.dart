@@ -704,7 +704,7 @@ void main() {
       );
       expect(find.text('Window lobby'), findsOneWidget);
       await chooseLanguage(tester, 'Choose language', 'Deutsch');
-      expect(find.text('Window-Lobby'), findsOneWidget);
+      expect(find.text('Fenster-Lobby'), findsOneWidget);
       expect(find.text('Raum ABC234'), findsOneWidget);
       expect(find.textContaining('Lobby ABC234: Warte'), findsOneWidget);
       expect(find.text('Max'), findsOneWidget);

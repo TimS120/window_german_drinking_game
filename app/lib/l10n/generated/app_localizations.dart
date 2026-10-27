@@ -1616,6 +1616,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Load more'**
   String get asyncLoadMore;
+
+  /// No description provided for @developerKeyHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the admin key to enable developer mode.'**
+  String get developerKeyHelp;
+
+  /// No description provided for @developerVerificationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not verify the admin key. Check the server connection.'**
+  String get developerVerificationFailed;
+
+  /// No description provided for @gameRules.
+  ///
+  /// In en, this message translates to:
+  /// **'Game rules'**
+  String get gameRules;
 }
 
 class _AppLocalizationsDelegate

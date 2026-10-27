@@ -10,7 +10,7 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
-  String get appTitle => 'Window';
+  String get appTitle => 'Fenster';
 
   @override
   String get language => 'Sprache';
@@ -167,7 +167,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get redealCards => 'Karten neu verteilen';
 
   @override
-  String get joinWindow => 'Window beitreten';
+  String get joinWindow => 'Fenster beitreten';
 
   @override
   String get browserDescription =>
@@ -213,7 +213,7 @@ class AppLocalizationsDe extends AppLocalizations {
       'Online-Räume benötigen eine Firebase-Einrichtung';
 
   @override
-  String get windowLobby => 'Window-Lobby';
+  String get windowLobby => 'Fenster-Lobby';
 
   @override
   String get leaveLobby => 'Lobby verlassen und zum Menü zurückkehren';
@@ -939,4 +939,15 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get asyncLoadMore => 'Weitere laden';
+
+  @override
+  String get developerKeyHelp =>
+      'Gib den Admin-Schlüssel ein, um den Entwicklermodus zu aktivieren.';
+
+  @override
+  String get developerVerificationFailed =>
+      'Der Admin-Schlüssel konnte nicht überprüft werden. Prüfe die Verbindung zum Server.';
+
+  @override
+  String get gameRules => 'Spielregeln';
 }

@@ -1,6 +1,6 @@
 {
   "@@locale": "de",
-  "appTitle": "Window",
+  "appTitle": "Fenster",
   "language": "Sprache",
   "chooseLanguage": "Sprache wählen",
   "choosePlayers": "Gib die Spielernamen ein, um ein lokales Spiel zu starten.",
@@ -47,7 +47,7 @@
   "wrongRedeal": "Falscher Tipp. Die aufgedeckte Karte und alle rot umrandeten Karten werden neu verteilt.",
   "wrongGuess": "Falscher Tipp",
   "redealCards": "Karten neu verteilen",
-  "joinWindow": "Window beitreten",
+  "joinWindow": "Fenster beitreten",
   "browserDescription": "Spiele mit Freunden direkt im Browser. Keine Installation nötig.",
   "askHost": "Bitte den Gastgeber, in der Smartphone- oder PC-App eine Lobby zu erstellen und den Raumcode zu teilen.",
   "roomCode": "Raumcode",
@@ -61,7 +61,7 @@
   "startLocal": "Lokales Spiel starten",
   "createLobby": "Online-Lobby erstellen",
   "firebaseSetupNeeded": "Online-Räume benötigen eine Firebase-Einrichtung",
-  "windowLobby": "Window-Lobby",
+  "windowLobby": "Fenster-Lobby",
   "leaveLobby": "Lobby verlassen und zum Menü zurückkehren",
   "shareCode": "Teile diesen Code. Spieler können beitreten, bis du das Spiel startest.",
   "waitingStart": "Du bist in der Lobby. Warte auf den Spielstart durch den Gastgeber.",
@@ -300,5 +300,8 @@
   "asyncInProgress": "Läuft",
   "asyncFinished": "Beendet",
   "asyncNoLobbies": "Keine Lobbys vorhanden.",
-  "asyncLoadMore": "Weitere laden"
+  "asyncLoadMore": "Weitere laden",
+  "developerKeyHelp": "Gib den Admin-Schlüssel ein, um den Entwicklermodus zu aktivieren.",
+  "developerVerificationFailed": "Der Admin-Schlüssel konnte nicht überprüft werden. Prüfe die Verbindung zum Server.",
+  "gameRules": "Spielregeln"
 }

@@ -52,6 +52,16 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "Window");
   }
 
+  // The icon is installed alongside the executable in the Flutter bundle.
+  g_autofree gchar* executable = g_file_read_link("/proc/self/exe", nullptr);
+  if (executable != nullptr) {
+    g_autofree gchar* directory = g_path_get_dirname(executable);
+    g_autofree gchar* icon = g_build_filename(directory, "data", "window-icon.png", nullptr);
+    g_autoptr(GError) icon_error = nullptr;
+    if (!gtk_window_set_icon_from_file(window, icon, &icon_error)) {
+      g_warning("Could not load window icon: %s", icon_error->message);
+    }
+  }
   gtk_window_set_default_size(window, 1280, 720);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

@@ -12,7 +12,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["build", "deploy"])
     parser.add_argument("--config", type=Path, default=root / "firebase-options.json")
+    parser.add_argument("--local-only", action="store_true", help="Build without publishing (build action only).")
     args = parser.parse_args()
+    if args.local_only and args.action != "build":
+        parser.error("--local-only is available only with build")
     config_path = args.config.resolve()
     if not config_path.is_file():
         parser.error(f"Firebase configuration not found: {config_path}")
@@ -29,12 +32,12 @@ def main():
          f"--dart-define-from-file={config_path}"],
         cwd=root / "app", check=True,
     )
-    if args.action == "deploy":
+    if not args.local_only:
         env = os.environ.copy()
         # Flutter ships sizable WASM assets; avoid saturating slower uplinks.
         env.setdefault("FIREBASE_HOSTING_UPLOAD_CONCURRENCY", "4")
         subprocess.run(
-            ["npx", "--yes", "firebase-tools", "deploy", "--only", "database,hosting",
+            ["npx", "--yes", "firebase-tools", "deploy", "--only", "database,hosting" if args.action == "deploy" else "hosting",
              "--project", config["FIREBASE_PROJECT_ID"], "--non-interactive"],
             cwd=root, check=True, env=env,
         )

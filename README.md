@@ -97,6 +97,16 @@ The Linux runner is included. Local play also works without Firebase: omit the
 that same configuration argument. Keep the entire generated desktop bundle
 together when distributing it.
 
+For a Linux desktop task-list icon, build the release bundle and register its
+application ID with your desktop (repeat after moving the project):
+
+```bash
+python3 tools/install_linux_launcher.py
+```
+
+Browser icon changes become visible on the hosted game after running the browser
+build command; browsers may retain older icons in their cache.
+
 On Linux, the app prefers X11 (or XWayland in a Wayland desktop session) to
 avoid GTK crashes when legacy GNOME font-settings keys are unavailable. This
 choice only affects the app; native Wayland remains a fallback when X11 is
@@ -167,6 +177,11 @@ the device language (English for unsupported languages), then remembers the
 selected language on that device. Switching languages preserves the game,
 shared turn view, player names, messages, and chat draft.
 
+The in-app rules are editable Markdown files: `app/assets/rules/en.md` and
+`app/assets/rules/de.md`. Edit both when the rules change, then rebuild the app
+(or rebuild and publish the browser client). The rules screen supports `#` section
+headings, plain paragraphs, and `-` list items and follows the selected app language.
+
 Translations use Flutter's official `gen-l10n` workflow: edit
 `app/lib/l10n/app_en.arb` and `app/lib/l10n/app_de.arb`, then run
 `flutter gen-l10n` from `app/`. Generated files in `lib/l10n/generated/` should
@@ -175,19 +190,29 @@ text; display numbers use the selected locale. The resource-coverage test
 checks that both languages contain every key. Shared game enum values and
 existing host proposal descriptions remain compatible across languages.
 
-From the repository root, build and deploy the browser client:
+From the repository root, build the browser client and publish it to Firebase
+Hosting automatically:
+
+```bash
+python3 tools/browser.py build
+```
+
+The helper reads the local Firebase configuration and publishes Hosting only
+after a successful build. Firebase CLI login, Node.js/npm, Python 3, and Flutter
+are required. To build without publishing, run:
+
+```bash
+python3 tools/browser.py build --local-only
+```
+
+When database rules also need to be published, use the explicit command:
 
 ```bash
 python3 tools/browser.py deploy
 ```
 
-The helper reads the local Firebase configuration, builds the Flutter guest
-client, and deploys **Database rules and Hosting** to that project. A Firebase CLI login,
-Node.js/npm, Python 3, and Flutter are required. Build without publishing with:
-
-```bash
-python3 tools/browser.py build
-```
+That command deploys both Database rules and Hosting. Running Flutter's own
+`flutter build web` directly still builds locally without publishing.
 
 After a successful deployment, the browser client is available at
 `https://YOUR_PROJECT_ID.web.app` (also `https://YOUR_PROJECT_ID.firebaseapp.com`).

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:window_game/async_games.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_game/main.dart';
 import 'package:window_game/game_engine.dart';
@@ -8,6 +11,13 @@ import 'package:window_game/rl_policy.dart';
 class _TestPolicy extends WindowRlPolicy {
   @override
   Future<void> preload() async {}
+}
+
+class _IdentityStore implements AsyncIdentityStore {
+  @override
+  Future<String?> read() async => null;
+  @override
+  Future<void> write(String secret) async {}
 }
 
 class _Preferences implements LanguagePreferenceStore {
@@ -130,10 +140,34 @@ void main() {
           firebaseEnabled: false,
           rlPolicy: _TestPolicy(),
           browserGuest: false,
+          adminClientFactory: () => AsyncGamesClient(
+            identity: AsyncIdentity(store: _IdentityStore()),
+            endpoint: 'https://example.invalid',
+            client: MockClient(
+              (request) async =>
+                  request.headers['Authorization'] == 'Bearer ${'b' * 64}'
+                  ? http.Response('{"lobbies":[]}', 200)
+                  : http.Response('{"error":"Invalid admin key."}', 403),
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('developer-mode')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Admin key'),
+        'wrong',
+      );
+      await tester.tap(find.text('Open management'));
+      await tester.pumpAndSettle();
+      expect(find.text('The admin key is invalid.'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Admin key'),
+        'b' * 64,
+      );
+      await tester.tap(find.text('Open management'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Start local game'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 3));
