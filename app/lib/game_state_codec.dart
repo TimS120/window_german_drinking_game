@@ -1,10 +1,7 @@
 import 'game_engine.dart';
 
-/// Stable JSON representation shared with the Firebase Cloud Functions.
-///
-/// Keep this deliberately boring: Firebase Realtime Database stores JSON, not
-/// Dart objects.  The function validates every requested mutation and writes a
-/// new state version; clients only decode the result.
+/// Stable JSON state shared by the app and server-compiled Dart game engine.
+/// Transports decode snapshots; game rules remain in WindowGameEngine.
 class GameStateCodec {
   static Map<String, dynamic> encode(GameState state) => <String, dynamic>{
     'players': state.players,

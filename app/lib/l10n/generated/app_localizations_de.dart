@@ -814,4 +814,129 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get restartLocalExplanation =>
       'Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten.';
+
+  @override
+  String get asyncGames => 'Zeitversetzte Spiele';
+
+  @override
+  String get asyncDescription =>
+      'Spielt gemeinsam in eurem Tempo. Züge haben keine Frist und Spiele bleiben bestehen, wenn der Host die App schließt.';
+
+  @override
+  String get asyncRecovery => 'Spieler-Wiederherstellungscode';
+
+  @override
+  String get asyncRecoveryHelp =>
+      'Bewahre diesen Code privat auf. Er gewährt Zugriff auf deine Spieleridentität und Spiele. Gib ihn auf einem anderen Gerät ein, um den Zugriff wiederherzustellen. Dabei wird die Identität dieses Geräts ersetzt; sichere vorher deren Code.';
+
+  @override
+  String get asyncRestoreCode => 'Wiederherstellungscode eines anderen Geräts';
+
+  @override
+  String get asyncRestore => 'Spieler wiederherstellen';
+
+  @override
+  String get asyncRefresh => 'Gespeicherte Spiele aktualisieren';
+
+  @override
+  String get asyncNotificationsEnabled => 'Zugbenachrichtigungen aktiviert';
+
+  @override
+  String get asyncEnableNotifications => 'Zugbenachrichtigungen aktivieren';
+
+  @override
+  String get asyncCreate => 'Zeitversetzte Lobby erstellen';
+
+  @override
+  String get asyncCode => 'Code für zeitversetztes Spiel';
+
+  @override
+  String get asyncCodeHelp => 'Gib den 10-stelligen Code des Hosts ein.';
+
+  @override
+  String get asyncJoin => 'Zeitversetztem Spiel beitreten';
+
+  @override
+  String get asyncOngoing => 'Deine gespeicherten Spiele';
+
+  @override
+  String get asyncEmpty =>
+      'Noch keine gespeicherten Spiele. Erstelle ein Spiel oder tritt einem bei.';
+
+  @override
+  String get asyncLobby => 'Warten in der Lobby';
+
+  @override
+  String get asyncCopyCode => 'Wiederherstellungscode kopieren';
+
+  @override
+  String get asyncCopyInvite => 'Einladung kopieren';
+
+  @override
+  String get asyncTurnNotification =>
+      'Du bist in einem gespeicherten Spiel an der Reihe.';
+
+  @override
+  String get asyncManageLobbies => 'Alle Lobbys verwalten';
+
+  @override
+  String get asyncAdminKey => 'Admin-Schlüssel';
+
+  @override
+  String get asyncAdminHelp =>
+      'Gib den privaten Admin-Schlüssel ein, um alle zeitversetzten Lobbys anzuzeigen und zu löschen. Der Schlüssel bleibt nur gespeichert, solange diese Ansicht geöffnet ist.';
+
+  @override
+  String get asyncManagementHelp =>
+      'Älteste Aktivität zuerst. Datumsangaben verwenden UTC. Akzeptierte Züge, Beitritte, Nachrichten und Lobbyänderungen aktualisieren das Datum; Öffnen und Aktualisieren nicht. Eine gelöschte Lobby wird für alle entfernt.';
+
+  @override
+  String get asyncInvalidAdminKey => 'Der Admin-Schlüssel ist ungültig.';
+
+  @override
+  String get asyncAdminUnlock => 'Verwaltung öffnen';
+
+  @override
+  String get asyncAdminLock => 'Verwaltung sperren';
+
+  @override
+  String get asyncDeleteLobby => 'Lobby löschen';
+
+  @override
+  String asyncDeleteQuestion(String code) {
+    return 'Lobby $code löschen?';
+  }
+
+  @override
+  String get asyncDeleteHelp =>
+      'Dieses Spiel mit seinem Spielfeld und Chat für alle Spieler dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.';
+
+  @override
+  String get asyncDeleted =>
+      'Diese Lobby wurde gelöscht. Kehre zu deinen gespeicherten Spielen zurück.';
+
+  @override
+  String asyncLastActive(String date) {
+    return 'Letzte Aktivität (UTC): $date';
+  }
+
+  @override
+  String asyncCreated(String date) {
+    return 'Erstellt (UTC): $date';
+  }
+
+  @override
+  String get asyncUnknownDate => 'Unbekannt (ältere Lobby)';
+
+  @override
+  String get asyncInProgress => 'Läuft';
+
+  @override
+  String get asyncFinished => 'Beendet';
+
+  @override
+  String get asyncNoLobbies => 'Keine Lobbys vorhanden.';
+
+  @override
+  String get asyncLoadMore => 'Weitere laden';
 }

@@ -1,0 +1,17 @@
+{
+  "name": "window-async-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:engine": "python3 ../tools/build_async_engine.py",
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "pretest": "npm run build:engine",
+    "predev": "npm run build:engine",
+    "predeploy": "npm run build:engine"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

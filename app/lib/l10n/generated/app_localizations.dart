@@ -1394,6 +1394,228 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This resets the board and scores and keeps your players.'**
   String get restartLocalExplanation;
+
+  /// No description provided for @asyncGames.
+  ///
+  /// In en, this message translates to:
+  /// **'Asynchronous games'**
+  String get asyncGames;
+
+  /// No description provided for @asyncDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Play together at your own pace. Turns have no deadline, and games continue even when the host closes the app.'**
+  String get asyncDescription;
+
+  /// No description provided for @asyncRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Player recovery code'**
+  String get asyncRecovery;
+
+  /// No description provided for @asyncRecoveryHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Save this code privately. It gives full access to your player identity and games. Enter it on another device to restore access. Restoring replaces this device’s current identity; save its code first.'**
+  String get asyncRecoveryHelp;
+
+  /// No description provided for @asyncRestoreCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery code from another device'**
+  String get asyncRestoreCode;
+
+  /// No description provided for @asyncRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore player'**
+  String get asyncRestore;
+
+  /// No description provided for @asyncRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh saved games'**
+  String get asyncRefresh;
+
+  /// No description provided for @asyncNotificationsEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn notifications enabled'**
+  String get asyncNotificationsEnabled;
+
+  /// No description provided for @asyncEnableNotifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable turn notifications'**
+  String get asyncEnableNotifications;
+
+  /// No description provided for @asyncCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create asynchronous lobby'**
+  String get asyncCreate;
+
+  /// No description provided for @asyncCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Asynchronous game code'**
+  String get asyncCode;
+
+  /// No description provided for @asyncCodeHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 10-character code shared by the host.'**
+  String get asyncCodeHelp;
+
+  /// No description provided for @asyncJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Join asynchronous game'**
+  String get asyncJoin;
+
+  /// No description provided for @asyncOngoing.
+  ///
+  /// In en, this message translates to:
+  /// **'Your saved games'**
+  String get asyncOngoing;
+
+  /// No description provided for @asyncEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved games yet. Create or join one above.'**
+  String get asyncEmpty;
+
+  /// No description provided for @asyncLobby.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting in lobby'**
+  String get asyncLobby;
+
+  /// No description provided for @asyncCopyCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy recovery code'**
+  String get asyncCopyCode;
+
+  /// No description provided for @asyncCopyInvite.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy invitation'**
+  String get asyncCopyInvite;
+
+  /// No description provided for @asyncTurnNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'It’s your turn in a saved game.'**
+  String get asyncTurnNotification;
+
+  /// No description provided for @asyncManageLobbies.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage all lobbies'**
+  String get asyncManageLobbies;
+
+  /// No description provided for @asyncAdminKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin key'**
+  String get asyncAdminKey;
+
+  /// No description provided for @asyncAdminHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the private admin key to view and delete all asynchronous lobbies. The key is kept only while this screen is open.'**
+  String get asyncAdminHelp;
+
+  /// No description provided for @asyncManagementHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest activity first. Dates use UTC. Accepted moves, joins, messages and lobby changes update the activity date; opening or refreshing does not. Deleting a lobby removes it for everyone.'**
+  String get asyncManagementHelp;
+
+  /// No description provided for @asyncInvalidAdminKey.
+  ///
+  /// In en, this message translates to:
+  /// **'The admin key is invalid.'**
+  String get asyncInvalidAdminKey;
+
+  /// No description provided for @asyncAdminUnlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Open management'**
+  String get asyncAdminUnlock;
+
+  /// No description provided for @asyncAdminLock.
+  ///
+  /// In en, this message translates to:
+  /// **'Lock management'**
+  String get asyncAdminLock;
+
+  /// No description provided for @asyncDeleteLobby.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete lobby'**
+  String get asyncDeleteLobby;
+
+  /// No description provided for @asyncDeleteQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete lobby {code}?'**
+  String asyncDeleteQuestion(String code);
+
+  /// No description provided for @asyncDeleteHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Permanently delete this game, its board and chat for every player? This cannot be undone.'**
+  String get asyncDeleteHelp;
+
+  /// No description provided for @asyncDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'This lobby was deleted. Return to your saved games.'**
+  String get asyncDeleted;
+
+  /// No description provided for @asyncLastActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Last activity (UTC): {date}'**
+  String asyncLastActive(String date);
+
+  /// No description provided for @asyncCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Created (UTC): {date}'**
+  String asyncCreated(String date);
+
+  /// No description provided for @asyncUnknownDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown (older lobby)'**
+  String get asyncUnknownDate;
+
+  /// No description provided for @asyncInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'In progress'**
+  String get asyncInProgress;
+
+  /// No description provided for @asyncFinished.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get asyncFinished;
+
+  /// No description provided for @asyncNoLobbies.
+  ///
+  /// In en, this message translates to:
+  /// **'No lobbies to manage.'**
+  String get asyncNoLobbies;
+
+  /// No description provided for @asyncLoadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get asyncLoadMore;
 }
 
 class _AppLocalizationsDelegate

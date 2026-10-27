@@ -1,0 +1,43 @@
+{
+  "name": "window-async",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-27",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GAMES",
+        "class_name": "GameRoom"
+      },
+      {
+        "name": "PLAYERS",
+        "class_name": "PlayerIndex"
+      },
+      {
+        "name": "CATALOG",
+        "class_name": "LobbyCatalog"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "GameRoom",
+        "PlayerIndex"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "LobbyCatalog"
+      ]
+    }
+  ],
+  "vars": {
+    "BROWSER_URL": "https://YOUR_FIREBASE_PROJECT.web.app"
+  },
+  "observability": {
+    "enabled": false
+  }
+}

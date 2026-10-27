@@ -801,4 +801,127 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get restartLocalExplanation =>
       'This resets the board and scores and keeps your players.';
+
+  @override
+  String get asyncGames => 'Asynchronous games';
+
+  @override
+  String get asyncDescription =>
+      'Play together at your own pace. Turns have no deadline, and games continue even when the host closes the app.';
+
+  @override
+  String get asyncRecovery => 'Player recovery code';
+
+  @override
+  String get asyncRecoveryHelp =>
+      'Save this code privately. It gives full access to your player identity and games. Enter it on another device to restore access. Restoring replaces this device’s current identity; save its code first.';
+
+  @override
+  String get asyncRestoreCode => 'Recovery code from another device';
+
+  @override
+  String get asyncRestore => 'Restore player';
+
+  @override
+  String get asyncRefresh => 'Refresh saved games';
+
+  @override
+  String get asyncNotificationsEnabled => 'Turn notifications enabled';
+
+  @override
+  String get asyncEnableNotifications => 'Enable turn notifications';
+
+  @override
+  String get asyncCreate => 'Create asynchronous lobby';
+
+  @override
+  String get asyncCode => 'Asynchronous game code';
+
+  @override
+  String get asyncCodeHelp => 'Enter the 10-character code shared by the host.';
+
+  @override
+  String get asyncJoin => 'Join asynchronous game';
+
+  @override
+  String get asyncOngoing => 'Your saved games';
+
+  @override
+  String get asyncEmpty => 'No saved games yet. Create or join one above.';
+
+  @override
+  String get asyncLobby => 'Waiting in lobby';
+
+  @override
+  String get asyncCopyCode => 'Copy recovery code';
+
+  @override
+  String get asyncCopyInvite => 'Copy invitation';
+
+  @override
+  String get asyncTurnNotification => 'It’s your turn in a saved game.';
+
+  @override
+  String get asyncManageLobbies => 'Manage all lobbies';
+
+  @override
+  String get asyncAdminKey => 'Admin key';
+
+  @override
+  String get asyncAdminHelp =>
+      'Enter the private admin key to view and delete all asynchronous lobbies. The key is kept only while this screen is open.';
+
+  @override
+  String get asyncManagementHelp =>
+      'Oldest activity first. Dates use UTC. Accepted moves, joins, messages and lobby changes update the activity date; opening or refreshing does not. Deleting a lobby removes it for everyone.';
+
+  @override
+  String get asyncInvalidAdminKey => 'The admin key is invalid.';
+
+  @override
+  String get asyncAdminUnlock => 'Open management';
+
+  @override
+  String get asyncAdminLock => 'Lock management';
+
+  @override
+  String get asyncDeleteLobby => 'Delete lobby';
+
+  @override
+  String asyncDeleteQuestion(String code) {
+    return 'Delete lobby $code?';
+  }
+
+  @override
+  String get asyncDeleteHelp =>
+      'Permanently delete this game, its board and chat for every player? This cannot be undone.';
+
+  @override
+  String get asyncDeleted =>
+      'This lobby was deleted. Return to your saved games.';
+
+  @override
+  String asyncLastActive(String date) {
+    return 'Last activity (UTC): $date';
+  }
+
+  @override
+  String asyncCreated(String date) {
+    return 'Created (UTC): $date';
+  }
+
+  @override
+  String get asyncUnknownDate => 'Unknown (older lobby)';
+
+  @override
+  String get asyncInProgress => 'In progress';
+
+  @override
+  String get asyncFinished => 'Finished';
+
+  @override
+  String get asyncNoLobbies => 'No lobbies to manage.';
+
+  @override
+  String get asyncLoadMore => 'Load more';
 }

@@ -23,6 +23,7 @@ def main():
         missing.append("FIREBASE_WEB_API_KEY or FIREBASE_API_KEY")
     if missing:
         parser.error("Missing configuration: " + ", ".join(missing))
+    subprocess.run([os.sys.executable, str(root / 'tools/configure_async_notifications.py')], check=True)
     subprocess.run(
         ["flutter", "build", "web", "--release", "--no-wasm-dry-run",
          f"--dart-define-from-file={config_path}"],

@@ -3,6 +3,10 @@ import 'game_state_codec.dart';
 import 'windows_firebase_rest.dart';
 import 'room_social.dart';
 
+class RoomDeletedException implements Exception {
+  const RoomDeletedException();
+}
+
 class RoomSeat {
   const RoomSeat({required this.index, required this.name, this.ownerUid});
   final int index;
@@ -35,6 +39,9 @@ class OnlineRoom {
     this.devices = const {},
     this.controlId = 0,
     this.controlNotice,
+    this.revision,
+    this.createdDate,
+    this.lastActiveDate,
   });
 
   final String code;
@@ -50,6 +57,9 @@ class OnlineRoom {
   final Map<String, String> devices;
   final int controlId;
   final String? controlNotice;
+  final int? revision;
+  final String? createdDate;
+  final String? lastActiveDate;
   Map<String, String> get deviceLabels {
     final labels = Map<String, String>.from(devices);
     for (final uid in [
@@ -89,6 +99,9 @@ class OnlineRoom {
           : const {},
       controlId: (raw['controlId'] as num?)?.toInt() ?? 0,
       controlNotice: raw['controlNotice'] as String?,
+      revision: (raw['revision'] as num?)?.toInt(),
+      createdDate: raw['createdDate'] as String?,
+      lastActiveDate: raw['lastActiveDate'] as String?,
       debugState: raw['debugState'] is Map
           ? GameStateCodec.decode(
               Map<Object?, Object?>.from(raw['debugState'] as Map),
@@ -108,6 +121,9 @@ class OnlineRoom {
     'devices': deviceLabels,
     'controlId': controlId,
     'controlNotice': controlNotice,
+    if (revision != null) 'revision': revision,
+    if (createdDate != null) 'createdDate': createdDate,
+    if (lastActiveDate != null) 'lastActiveDate': lastActiveDate,
   };
 }
 
@@ -165,6 +181,17 @@ class FirebaseRoomRepository {
     : _rest = transport ?? WindowsFirebaseRestRoomRepository();
 
   final WindowsFirebaseRestRoomRepository _rest;
+
+  bool get serverHosted => false;
+  Future<void> refreshRoom() async {}
+  Future<void> controlRoom(String type, int version) =>
+      throw UnsupportedError('Client-hosted room.');
+  Future<void> editPlayers(
+    String uid,
+    List<String> names,
+    String label,
+    int version,
+  ) => throw UnsupportedError('Client-hosted room.');
 
   Future<void> publishTurnUi(String code, Map<String, dynamic> ui) =>
       _rest.publishTurnUi(code, ui);

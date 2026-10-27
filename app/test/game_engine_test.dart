@@ -126,6 +126,12 @@ void main() {
         isTrue,
         reason: 'The wrong card stays revealed until removal is confirmed.',
       );
+      expect(game.hasPendingAction, isTrue);
+      expect(game.validSelectablePositions(), isEmpty);
+      expect(game.getValidOptionsForCard(const Position(2, 3)), isEmpty);
+      expect(game.applyGuess(target, option, wrong).invalidReason, isNotNull);
+      game.endTurn();
+      expect(game.currentPlayer, 'Anna');
       expect(game.snapshot().stats['Anna']!.wrong, 1);
       expect(
         game.snapshot().stats['Anna']!.drinks,
@@ -159,6 +165,8 @@ void main() {
         GuessType.same,
       );
       expect(pending.requiresSameConfirmation, isTrue);
+      expect(game.hasPendingAction, isTrue);
+      expect(game.validSelectablePositions(), isEmpty);
       expect(game.snapshot().stats['Ben']!.drinks, 0);
       final GuessResult result = game.confirmSameGuess();
       expect(result.correct, isTrue);

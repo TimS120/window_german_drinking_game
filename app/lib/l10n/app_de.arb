@@ -242,5 +242,63 @@
   "keepOnePlayer": "Mindestens ein Spieler muss in der Lobby bleiben.",
   "lobbyEditOnly": "Kehre vor dem Bearbeiten der Spieler zur Lobby zurück.",
   "deckShort": "Stapel",
-  "restartLocalExplanation": "Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten."
+  "restartLocalExplanation": "Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten.",
+  "asyncGames": "Zeitversetzte Spiele",
+  "asyncDescription": "Spielt gemeinsam in eurem Tempo. Züge haben keine Frist und Spiele bleiben bestehen, wenn der Host die App schließt.",
+  "asyncRecovery": "Spieler-Wiederherstellungscode",
+  "asyncRecoveryHelp": "Bewahre diesen Code privat auf. Er gewährt Zugriff auf deine Spieleridentität und Spiele. Gib ihn auf einem anderen Gerät ein, um den Zugriff wiederherzustellen. Dabei wird die Identität dieses Geräts ersetzt; sichere vorher deren Code.",
+  "asyncRestoreCode": "Wiederherstellungscode eines anderen Geräts",
+  "asyncRestore": "Spieler wiederherstellen",
+  "asyncRefresh": "Gespeicherte Spiele aktualisieren",
+  "asyncNotificationsEnabled": "Zugbenachrichtigungen aktiviert",
+  "asyncEnableNotifications": "Zugbenachrichtigungen aktivieren",
+  "asyncCreate": "Zeitversetzte Lobby erstellen",
+  "asyncCode": "Code für zeitversetztes Spiel",
+  "asyncCodeHelp": "Gib den 10-stelligen Code des Hosts ein.",
+  "asyncJoin": "Zeitversetztem Spiel beitreten",
+  "asyncOngoing": "Deine gespeicherten Spiele",
+  "asyncEmpty": "Noch keine gespeicherten Spiele. Erstelle ein Spiel oder tritt einem bei.",
+  "asyncLobby": "Warten in der Lobby",
+  "asyncCopyCode": "Wiederherstellungscode kopieren",
+  "asyncCopyInvite": "Einladung kopieren",
+  "asyncTurnNotification": "Du bist in einem gespeicherten Spiel an der Reihe.",
+  "asyncManageLobbies": "Alle Lobbys verwalten",
+  "asyncAdminKey": "Admin-Schlüssel",
+  "asyncAdminHelp": "Gib den privaten Admin-Schlüssel ein, um alle zeitversetzten Lobbys anzuzeigen und zu löschen. Der Schlüssel bleibt nur gespeichert, solange diese Ansicht geöffnet ist.",
+  "asyncManagementHelp": "Älteste Aktivität zuerst. Datumsangaben verwenden UTC. Akzeptierte Züge, Beitritte, Nachrichten und Lobbyänderungen aktualisieren das Datum; Öffnen und Aktualisieren nicht. Eine gelöschte Lobby wird für alle entfernt.",
+  "asyncInvalidAdminKey": "Der Admin-Schlüssel ist ungültig.",
+  "asyncAdminUnlock": "Verwaltung öffnen",
+  "asyncAdminLock": "Verwaltung sperren",
+  "asyncDeleteLobby": "Lobby löschen",
+  "asyncDeleteQuestion": "Lobby {code} löschen?",
+  "@asyncDeleteQuestion": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncDeleteHelp": "Dieses Spiel mit seinem Spielfeld und Chat für alle Spieler dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.",
+  "asyncDeleted": "Diese Lobby wurde gelöscht. Kehre zu deinen gespeicherten Spielen zurück.",
+  "asyncLastActive": "Letzte Aktivität (UTC): {date}",
+  "@asyncLastActive": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncCreated": "Erstellt (UTC): {date}",
+  "@asyncCreated": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncUnknownDate": "Unbekannt (ältere Lobby)",
+  "asyncInProgress": "Läuft",
+  "asyncFinished": "Beendet",
+  "asyncNoLobbies": "Keine Lobbys vorhanden.",
+  "asyncLoadMore": "Weitere laden"
 }

@@ -1,0 +1,8 @@
+# Optional local notification testing only. Never commit real credentials.
+# Copy to .dev.vars, then replace this placeholder with the service-account JSON.
+# Production uses: npx wrangler secret put FCM_SERVICE_ACCOUNT
+FCM_SERVICE_ACCOUNT='REPLACE_WITH_SERVICE_ACCOUNT_JSON'
+
+# Optional local admin testing: SHA-256 of a private 64-hex admin key.
+# Production: python3 tools/configure_async_admin.py --upload (from project root).
+ADMIN_KEY_HASH='REPLACE_WITH_SHA256_HASH'

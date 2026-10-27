@@ -22,6 +22,10 @@ import 'localization.dart';
 import 'appearance.dart';
 import 'game_feedback.dart';
 import 'hosting_service.dart';
+import 'async_games_screen.dart';
+import 'async_notifications.dart';
+
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 // The board has six portrait-card columns and five rows.  Its aspect ratio is
 // calculated from the card aspect ratio and the grid gaps, rather than from
@@ -76,6 +80,58 @@ class WindowGameApp extends StatefulWidget {
 class _WindowGameAppState extends State<WindowGameApp> {
   late final LanguageController _language;
   late final ThemeController _appearance;
+  StreamSubscription<String>? _notificationOpens;
+  StreamSubscription<RemoteMessage>? _foregroundMessages;
+
+  Future<void> _setupNotifications() async {
+    final linked = kIsWeb ? Uri.base.queryParameters['async'] : null;
+    if (linked != null && mounted) {
+      navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              AsyncGamesScreen(rlPolicy: widget.rlPolicy, initialCode: linked),
+        ),
+      );
+    }
+    if (!AsyncNotifications.supported) return;
+    try {
+      final code = await AsyncNotifications.initialGame();
+      if (!mounted) return;
+      void open(String code) {
+        if (!mounted) return;
+        navigatorKey.currentState?.push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                AsyncGamesScreen(rlPolicy: widget.rlPolicy, initialCode: code),
+          ),
+        );
+      }
+
+      _notificationOpens = AsyncNotifications.openedGames.listen(open);
+      _foregroundMessages = FirebaseMessaging.onMessage.listen((message) {
+        final context = navigatorKey.currentContext;
+        final code = message.data['gameCode'];
+        if (context != null && context.mounted && code is String) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(tr(context).asyncTurnNotification),
+              action: SnackBarAction(
+                label: tr(context).continueGame,
+                onPressed: () => open(code),
+              ),
+            ),
+          );
+        }
+      });
+      if (code != null) open(code);
+      unawaited(
+        AsyncNotifications.restoreRegistration().catchError((Object _) {}),
+      );
+    } catch (_) {
+      // Notification setup is optional; local/live/saved games remain usable.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -83,10 +139,15 @@ class _WindowGameAppState extends State<WindowGameApp> {
     if (widget.themeController == null) unawaited(_appearance.load());
     _language = widget.languageController ?? LanguageController();
     if (widget.languageController == null) unawaited(_language.load());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_setupNotifications()),
+    );
   }
 
   @override
   void dispose() {
+    unawaited(_notificationOpens?.cancel());
+    unawaited(_foregroundMessages?.cancel());
     if (widget.languageController == null) _language.dispose();
     if (widget.themeController == null) _appearance.dispose();
     super.dispose();
@@ -143,12 +204,14 @@ class GameShell extends StatefulWidget {
     this.browserGuest = kIsWeb,
     this.initialRoomCode,
     this.repository,
+    this.asyncRoomCode,
   });
   final bool firebaseEnabled;
   final WindowRlPolicy rlPolicy;
   final bool browserGuest;
   final String? initialRoomCode;
   final FirebaseRoomRepository? repository;
+  final String? asyncRoomCode;
   @override
   State<GameShell> createState() => _GameShellState();
 }
@@ -224,6 +287,10 @@ class _GameShellState extends State<GameShell> {
     super.initState();
     _rlPolicy = widget.rlPolicy;
     _rooms = widget.repository;
+    if (widget.asyncRoomCode != null) {
+      _busy = true;
+      unawaited(_watchRoom(widget.asyncRoomCode!));
+    }
     if (widget.browserGuest) {
       _roomCode.text =
           (widget.initialRoomCode ?? Uri.base.queryParameters['room'] ?? '')
@@ -249,7 +316,7 @@ class _GameShellState extends State<GameShell> {
 
   @override
   void dispose() {
-    unawaited(HostingService.stop());
+    if (!_serverHosted) unawaited(HostingService.stop());
     _roomNoticeTimer?.cancel();
     _players.dispose();
     _roomCode.dispose();
@@ -393,7 +460,12 @@ class _GameShellState extends State<GameShell> {
         .listen(
           (OnlineRoom? room) {
             if (!mounted || room == null) return;
-            final bool isHost = room.hostUid == _rooms?.uid;
+            final bool isHost = room.hostUid == _rooms?.uid && !_serverHosted;
+            final updateEngine =
+                !isHost &&
+                (!_serverHosted ||
+                    _game == null ||
+                    _room?.version != room.version);
             if (isHost && room.version < _hostVersion) return;
             setState(() {
               if (_room?.version != room.version) {
@@ -406,7 +478,7 @@ class _GameShellState extends State<GameShell> {
               _hostVersion = isHost
                   ? math.max(_hostVersion, room.version)
                   : room.version;
-              if (!isHost) _game = WindowGameEngine.fromState(room.state);
+              if (updateEngine) _game = WindowGameEngine.fromState(room.state);
               _busy = false;
               _message = (l) => !room.started
                   ? l.lobbyWaiting(room.code)
@@ -423,6 +495,15 @@ class _GameShellState extends State<GameShell> {
             }
           },
           onError: (Object error) {
+            if (mounted && error is RoomDeletedException) {
+              setState(() {
+                _game = null;
+                _room = null;
+                _busy = false;
+                _message = (l) => l.asyncDeleted;
+              });
+              return;
+            }
             if (mounted) {
               setState(() {
                 _busy = false;
@@ -434,6 +515,10 @@ class _GameShellState extends State<GameShell> {
   }
 
   Future<void> _returnToMenu() async {
+    if (_serverHosted) {
+      Navigator.pop(context);
+      return;
+    }
     await HostingService.stop();
     await _roomSubscription?.cancel();
     await _requestSubscription?.cancel();
@@ -504,6 +589,7 @@ class _GameShellState extends State<GameShell> {
   }
 
   bool get _isOnline => _room != null;
+  bool get _serverHosted => _rooms?.serverHosted ?? false;
 
   Map<String, dynamic> get _turnUi => !_isOnline
       ? {}
@@ -693,10 +779,14 @@ class _GameShellState extends State<GameShell> {
   Widget _onlineFrame(Widget child) {
     _measureFooter();
     final dialog = _sharedTurnDialog();
+    final pendingAction = _game?.hasPendingAction ?? false;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (dialog != null && _canControlCurrentTurn && !_proposing) {
+          if (dialog != null &&
+              _canControlCurrentTurn &&
+              !_proposing &&
+              !pendingAction) {
             _shareUi('idle');
           }
         },
@@ -704,7 +794,10 @@ class _GameShellState extends State<GameShell> {
       child: PopScope(
         canPop: dialog == null || !_canControlCurrentTurn,
         onPopInvokedWithResult: (didPop, result) {
-          if (!didPop && dialog != null && _canControlCurrentTurn) {
+          if (!didPop &&
+              dialog != null &&
+              _canControlCurrentTurn &&
+              !pendingAction) {
             _shareUi('idle');
           }
         },
@@ -723,7 +816,10 @@ class _GameShellState extends State<GameShell> {
                         ignoring: !_canControlCurrentTurn,
                         child: ModalBarrier(
                           color: Colors.black54,
-                          dismissible: _canControlCurrentTurn && !_proposing,
+                          dismissible:
+                              _canControlCurrentTurn &&
+                              !_proposing &&
+                              !pendingAction,
                           onDismiss: () => _shareUi(
                             'idle',
                             clicked: 'close',
@@ -911,6 +1007,47 @@ class _GameShellState extends State<GameShell> {
     final ui = _turnUi;
     final stage = ui['stage'];
     final active = _canControlCurrentTurn && !_busy;
+    final game = _game!;
+    // Confirmations come from the durable game state, not an ephemeral dialog
+    // stage. Reopening an async game therefore restores this required step.
+    if (game.hasPendingAction) {
+      final removal = game.pendingRemovals.isNotEmpty;
+      return _MovableGameDialog(
+        key: ValueKey('pending-action:${_room!.version}'),
+        title: removal ? _l.wrongGuess : _l.sameCorrect,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!_canControlCurrentTurn)
+              Text(_l.watchingPlayer(game.currentPlayer)),
+            Text(
+              removal
+                  ? _l.wrongPenalty(
+                      game.currentPlayer,
+                      game.pendingPenalty,
+                      game.pendingRemovals.length,
+                    )
+                  : _l.samePenalty(game.currentPlayer),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            key: const ValueKey('confirm-pending-action'),
+            onPressed: active
+                ? () => _turnAction(
+                    {'type': removal ? 'confirmRemovals' : 'confirmSame'},
+                    removal
+                        ? 'confirmed the redeal'
+                        : 'confirmed the same-rank penalty',
+                  )
+                : null,
+            child: Text(removal ? _l.redealCards : _l.continueGame),
+          ),
+        ],
+      );
+    }
     final proposal = _visibleProposal;
     Position? position;
     List<GuessOption> options = [];
@@ -1091,7 +1228,7 @@ class _GameShellState extends State<GameShell> {
         _proposal = null;
         _message = (l) => l.submittingMove;
       });
-      if (_isHost) {
+      if (_isHost && !_serverHosted) {
         await _queueHostOperation(() => _applyHostAction(action));
       } else {
         await _rooms!.requestAction(
@@ -1099,7 +1236,7 @@ class _GameShellState extends State<GameShell> {
           expectedVersion: room.version,
           action: action,
         );
-        if (mounted) {
+        if (mounted && _room?.code == room.code) {
           setState(() {
             _busy = false;
             _message = (l) => l.moveSent;
@@ -1107,7 +1244,7 @@ class _GameShellState extends State<GameShell> {
         }
       }
     } catch (error) {
-      if (mounted) {
+      if (mounted && _room?.code == room.code) {
         setState(() {
           _busy = false;
           _message = (l) => l.moveRejected(localizedError(l, error));
@@ -1118,7 +1255,13 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _proposeMove() async {
     final WindowGameEngine? game = _game;
-    if (game == null || !_canControlCurrentTurn || _busy || _proposing) return;
+    if (game == null ||
+        game.hasPendingAction ||
+        !_canControlCurrentTurn ||
+        _busy ||
+        _proposing) {
+      return;
+    }
     if (_isOnline) {
       _shareUi(
         'adviser',
@@ -1160,7 +1303,13 @@ class _GameShellState extends State<GameShell> {
 
   Future<void> _calculateProposal(_AdvisorMethod method) async {
     final game = _game;
-    if (game == null || !_canControlCurrentTurn || _busy || _proposing) return;
+    if (game == null ||
+        game.hasPendingAction ||
+        !_canControlCurrentTurn ||
+        _busy ||
+        _proposing) {
+      return;
+    }
     final requestId = ++_advisorRequestId;
     final requestState = jsonEncode(
       GameStateCodec.encode(game.publicObservation()),
@@ -1216,6 +1365,10 @@ class _GameShellState extends State<GameShell> {
         _busy) {
       return;
     }
+    if (_serverHosted) {
+      await _serverControl(restart ? 'restart' : 'start');
+      return;
+    }
     final previousGame = _game;
     try {
       setState(() {
@@ -1243,8 +1396,25 @@ class _GameShellState extends State<GameShell> {
     }
   }
 
+  Future<void> _serverControl(String type) async {
+    setState(() => _busy = true);
+    try {
+      await _rooms!.controlRoom(type, _room!.version);
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = (l) => l.requestFailed(localizedError(l, error)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _restartGame() async {
-    if (_game == null || _busy || (_isOnline && (!_isHost || !_room!.started))) {
+    if (_game == null ||
+        _busy ||
+        (_isOnline && (!_isHost || !_room!.started))) {
       return;
     }
     final game = _game!;
@@ -1332,6 +1502,10 @@ class _GameShellState extends State<GameShell> {
       ),
     );
     if (!mounted || accepted != true || _room?.code != code || !_isHost) return;
+    if (_serverHosted) {
+      await _serverControl('lobby');
+      return;
+    }
     await _queueHostOperation(() async {
       if (!_isHost || _room?.code != code || !_room!.started) return;
       final previous = _game;
@@ -1386,6 +1560,20 @@ class _GameShellState extends State<GameShell> {
       return;
     }
     try {
+      if (_serverHosted) {
+        setState(() => _busy = true);
+        try {
+          await _rooms!.editPlayers(
+            uid,
+            edit.names,
+            edit.label,
+            _room!.version,
+          );
+        } finally {
+          if (mounted) setState(() => _busy = false);
+        }
+        return;
+      }
       await _queueHostOperation(() async {
         if (!_isHost || _room?.code != room.code || _room!.started) return;
         final seats = replaceDevicePlayers(_room!, uid, edit.names);
@@ -1460,8 +1648,13 @@ class _GameShellState extends State<GameShell> {
     return messages;
   }
 
-  String? _browserInvite(String code) =>
-      WindowFirebaseOptions.browserInvite(code);
+  String? _browserInvite(String code) {
+    if (!_serverHosted) return WindowFirebaseOptions.browserInvite(code);
+    final base = WindowFirebaseOptions.browserUrl;
+    return base == null
+        ? null
+        : Uri.parse(base).replace(queryParameters: {'async': code}).toString();
+  }
 
   Future<void> _queueHostOperation(Future<void> Function() action) {
     final Future<void> operation = _hostRequestQueue.then((_) => action());
@@ -1861,6 +2054,7 @@ class _GameShellState extends State<GameShell> {
                     ),
                     const SizedBox(height: 12),
                     Text(tr(context).browserDescription),
+                    _asyncButton,
                     _developerSwitch,
                     const SizedBox(height: 12),
                     Text(tr(context).askHost),
@@ -1913,6 +2107,22 @@ class _GameShellState extends State<GameShell> {
     ),
   );
 
+  Future<void> _openAsyncGames() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => AsyncGamesScreen(rlPolicy: _rlPolicy),
+      ),
+    );
+  }
+
+  Widget get _asyncButton => OutlinedButton.icon(
+    key: const ValueKey('async-games'),
+    onPressed: _openAsyncGames,
+    icon: const Icon(Icons.schedule),
+    label: Text(_l.asyncGames),
+  );
+
   Widget get _developerSwitch => SwitchListTile(
     key: const ValueKey('developer-mode'),
     contentPadding: EdgeInsets.zero,
@@ -1947,6 +2157,14 @@ class _GameShellState extends State<GameShell> {
   @override
   Widget build(BuildContext context) {
     final WindowGameEngine? game = _game;
+    if (game == null && widget.asyncRoomCode != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(_l.asyncGames)),
+        body: Center(
+          child: _busy ? const CircularProgressIndicator() : Text(_message(_l)),
+        ),
+      );
+    }
     if (game == null && widget.browserGuest) return _buildBrowserEntry();
     if (game == null) {
       return Scaffold(
@@ -1983,6 +2201,7 @@ class _GameShellState extends State<GameShell> {
                         _l.browserReminder,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                      _asyncButton,
                       _developerSwitch,
                       const SizedBox(height: 24),
                       TextField(
@@ -2056,9 +2275,17 @@ class _GameShellState extends State<GameShell> {
             actions: <Widget>[
               const ThemePicker(),
               const LanguagePicker(),
+              if (_serverHosted)
+                IconButton(
+                  tooltip: _l.asyncRefresh,
+                  onPressed: () => _rooms!.refreshRoom(),
+                  icon: const Icon(Icons.refresh),
+                ),
               if (_isOnline && _chatMinimized) _reopenChat,
               IconButton(
-                tooltip: tr(context).leaveLobby,
+                tooltip: _serverHosted
+                    ? _l.asyncOngoing
+                    : tr(context).leaveLobby,
                 icon: const Icon(Icons.home_outlined),
                 onPressed: _returnToMenu,
               ),
@@ -2193,7 +2420,7 @@ class _GameShellState extends State<GameShell> {
     final GameSnapshot snapshot = game.snapshot();
     final debugState = !_developerMode
         ? null
-        : (!_isOnline || _isHost)
+        : (!_isOnline || (_isHost && !_serverHosted))
         ? game.exportState()
         : _room!.debugState;
     final portrait =
@@ -2224,7 +2451,9 @@ class _GameShellState extends State<GameShell> {
           : null,
       portrait: portrait,
       roomCode: _room?.code,
-      deckSize: _isOnline && !_isHost ? _room!.deckSize : snapshot.deckSize,
+      deckSize: _isOnline && (!_isHost || _serverHosted)
+          ? _room!.deckSize
+          : snapshot.deckSize,
       busy: _busy,
       canControl: _canControlCurrentTurn,
       onEndTurn: endTurn,
@@ -2242,7 +2471,7 @@ class _GameShellState extends State<GameShell> {
     final Widget board = _Board(
       game: game,
       snapshot: snapshot,
-      enabled: _canControlCurrentTurn && !_busy,
+      enabled: _canControlCurrentTurn && !_busy && !game.hasPendingAction,
       onSelect: _select,
       proposal: _visibleProposal,
       selectedPosition: _turnUi['row'] is int && _turnUi['column'] is int
@@ -2264,7 +2493,7 @@ class _GameShellState extends State<GameShell> {
                       children: [
                         const Icon(Icons.style, size: 18),
                         Text(
-                          '${(_isOnline && !_isHost ? _room!.deckSize : snapshot.deckSize) ?? '?'}',
+                          '${(_isOnline && (!_isHost || _serverHosted) ? _room!.deckSize : snapshot.deckSize) ?? '?'}',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Text(
@@ -2290,6 +2519,7 @@ class _GameShellState extends State<GameShell> {
               onPressed:
                   _canControlCurrentTurn &&
                       snapshot.turnCanEnd &&
+                      !game.hasPendingAction &&
                       !_busy &&
                       !snapshot.gameEnded
                   ? endTurn
@@ -2307,6 +2537,7 @@ class _GameShellState extends State<GameShell> {
                   _canControlCurrentTurn &&
                       !_busy &&
                       !_proposing &&
+                      !game.hasPendingAction &&
                       !snapshot.gameEnded
                   ? _proposeMove
                   : null,
@@ -2320,6 +2551,12 @@ class _GameShellState extends State<GameShell> {
         actions: <Widget>[
           const ThemePicker(),
           const LanguagePicker(),
+          if (_serverHosted)
+            IconButton(
+              tooltip: _l.asyncRefresh,
+              onPressed: () => _rooms!.refreshRoom(),
+              icon: const Icon(Icons.refresh),
+            ),
           if (_isOnline && _chatMinimized) _reopenChat,
           if (_isHost)
             PopupMenuButton<String>(
@@ -2343,7 +2580,11 @@ class _GameShellState extends State<GameShell> {
                   : () => unawaited(_restartGame().catchError((Object _) {})),
             ),
           IconButton(
-            tooltip: _isOnline ? tr(context).leaveRoom : tr(context).returnMenu,
+            tooltip: _serverHosted
+                ? _l.asyncOngoing
+                : _isOnline
+                ? tr(context).leaveRoom
+                : tr(context).returnMenu,
             icon: const Icon(Icons.home_outlined),
             onPressed: _returnToMenu,
           ),
@@ -2507,7 +2748,11 @@ class _Info extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: snapshot.turnCanEnd && canControl && !busy
+              onPressed:
+                  snapshot.turnCanEnd &&
+                      !game.hasPendingAction &&
+                      canControl &&
+                      !busy
                   ? onEndTurn
                   : null,
               style:
@@ -2549,7 +2794,10 @@ class _Info extends StatelessWidget {
           const Divider(height: 30),
           if (!portrait) ...[
             OutlinedButton.icon(
-              onPressed: canControl && !busy && !proposing ? onPropose : null,
+              onPressed:
+                  canControl && !busy && !proposing && !game.hasPendingAction
+                  ? onPropose
+                  : null,
               icon: const Icon(Icons.psychology_outlined),
               label: Text(
                 proposing ? tr(context).findingMove : tr(context).proposeMove,

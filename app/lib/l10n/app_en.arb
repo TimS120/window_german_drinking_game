@@ -570,5 +570,63 @@
   "keepOnePlayer": "Keep at least one player in the lobby.",
   "lobbyEditOnly": "Return to the lobby before editing players.",
   "deckShort": "Deck",
-  "restartLocalExplanation": "This resets the board and scores and keeps your players."
+  "restartLocalExplanation": "This resets the board and scores and keeps your players.",
+  "asyncGames": "Asynchronous games",
+  "asyncDescription": "Play together at your own pace. Turns have no deadline, and games continue even when the host closes the app.",
+  "asyncRecovery": "Player recovery code",
+  "asyncRecoveryHelp": "Save this code privately. It gives full access to your player identity and games. Enter it on another device to restore access. Restoring replaces this device’s current identity; save its code first.",
+  "asyncRestoreCode": "Recovery code from another device",
+  "asyncRestore": "Restore player",
+  "asyncRefresh": "Refresh saved games",
+  "asyncNotificationsEnabled": "Turn notifications enabled",
+  "asyncEnableNotifications": "Enable turn notifications",
+  "asyncCreate": "Create asynchronous lobby",
+  "asyncCode": "Asynchronous game code",
+  "asyncCodeHelp": "Enter the 10-character code shared by the host.",
+  "asyncJoin": "Join asynchronous game",
+  "asyncOngoing": "Your saved games",
+  "asyncEmpty": "No saved games yet. Create or join one above.",
+  "asyncLobby": "Waiting in lobby",
+  "asyncCopyCode": "Copy recovery code",
+  "asyncCopyInvite": "Copy invitation",
+  "asyncTurnNotification": "It’s your turn in a saved game.",
+  "asyncManageLobbies": "Manage all lobbies",
+  "asyncAdminKey": "Admin key",
+  "asyncAdminHelp": "Enter the private admin key to view and delete all asynchronous lobbies. The key is kept only while this screen is open.",
+  "asyncManagementHelp": "Oldest activity first. Dates use UTC. Accepted moves, joins, messages and lobby changes update the activity date; opening or refreshing does not. Deleting a lobby removes it for everyone.",
+  "asyncInvalidAdminKey": "The admin key is invalid.",
+  "asyncAdminUnlock": "Open management",
+  "asyncAdminLock": "Lock management",
+  "asyncDeleteLobby": "Delete lobby",
+  "asyncDeleteQuestion": "Delete lobby {code}?",
+  "@asyncDeleteQuestion": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncDeleteHelp": "Permanently delete this game, its board and chat for every player? This cannot be undone.",
+  "asyncDeleted": "This lobby was deleted. Return to your saved games.",
+  "asyncLastActive": "Last activity (UTC): {date}",
+  "@asyncLastActive": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncCreated": "Created (UTC): {date}",
+  "@asyncCreated": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "asyncUnknownDate": "Unknown (older lobby)",
+  "asyncInProgress": "In progress",
+  "asyncFinished": "Finished",
+  "asyncNoLobbies": "No lobbies to manage.",
+  "asyncLoadMore": "Load more"
 }

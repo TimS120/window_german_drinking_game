@@ -1,5 +1,7 @@
 package com.timss.window.window_game
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -16,6 +18,11 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (Build.VERSION.SDK_INT >= 26) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel("window_turns", "Window turns", NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "window/hosting")
             .setMethodCallHandler { call, result ->
                 try {

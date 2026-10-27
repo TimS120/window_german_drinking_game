@@ -392,3 +392,46 @@ and also handles unavailable models or inference failures.
 ## Comparing the advisers
 
 Run `python3 tools/compare_advisers.py` from the repository root to compare the current RL and statistics advisers through full games in parallel headless Dart workers using the same app rules engine. Unchanged code reuses a cached executable; model inference uses persistent ONNX workers. The default runs 240 games, with a hard 250-game limit. Read `benchmark-results/YYYY-MM-DD_HH-MM-SS/report.md` (the same timestamp format as RL training). See [BENCHMARK_README.md](BENCHMARK_README.md) for scenario selection, runtime, interpretation, and failure handling.
+
+### Asynchronous cooperative games
+
+Open **Asynchronous games** from the home screen (installed app or browser).
+Create a lobby, share its 10-character game code or invitation, and start after
+the players have joined. It uses the same cooperative rules, board, adviser,
+chat, host-only restart confirmation and lobby editing as live play.
+
+Players can close the app between turns. The Cloudflare server saves and
+validates moves, so no host device has to remain online. There is no turn
+deadline or automatic lobby expiry, including after winning. Creating more
+lobbies adds stored data and saved-game entries; idle servers can sleep while
+their data stays saved. The saved-games list restores after restarting the app. Its key button
+shows a private recovery code: save it to restore the same player and games on
+another device. Anyone with that code can act as that player. Invitations contain
+only the game code, never the recovery code.
+
+Enable turn notifications on Android or supported browsers. Notifications need
+permission; Linux/Windows can check the saved-games list. While a room is open,
+changes refresh within 30 seconds, immediately after your own move, on manual
+refresh, and when the app returns from the background. Push delivery is subject
+to the device/browser's background restrictions and does not determine whether
+the game is saved.
+
+This mode uses **Cloudflare Workers Free** with SQLite-backed Durable Objects and
+**Firebase Spark** for messaging. It does not require a billing account or paid
+plan. Setup, deployment, notification configuration and tests are documented in
+[backend/README.md](backend/README.md). Local and live online modes keep their
+existing behavior.
+
+For a new checkout, copy `firebase-options.example.json` to
+`firebase-options.json`, and `backend/wrangler.example.jsonc` to
+`backend/wrangler.jsonc`. Fill in the local copies only. Real configs, local
+secret files, generated Firebase resources and Wrangler state are excluded from
+Git; the example files contain placeholders.
+
+
+Asynchronous lobbies can be deleted by their host from **Your saved games**, with
+confirmation. **Manage all lobbies** provides an admin-key-protected overview of
+all rooms, players, status and last activity date (UTC), plus confirmed deletion.
+Playing daily keeps a lobby available indefinitely; there is no automatic expiry.
+See [backend lobby management](backend/README.md#lobby-management) for private key
+setup and indexing older lobbies. Only example configs belong in Git.

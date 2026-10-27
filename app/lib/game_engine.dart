@@ -181,8 +181,8 @@ class GameSnapshot {
 
 /// The canonical Window rules engine for every Flutter platform.
 class WindowGameEngine {
-  WindowGameEngine(List<String> players, {int? seed})
-    : _random = Random(seed),
+  WindowGameEngine(List<String> players, {int? seed, Random? random})
+    : _random = random ?? Random(seed),
       recordHistory = true,
       _players = List<String>.unmodifiable(
         players.where((String name) => name.trim().isNotEmpty).toList().isEmpty
@@ -198,8 +198,9 @@ class WindowGameEngine {
   WindowGameEngine.fromState(
     GameState state, {
     int? seed,
+    Random? random,
     this.recordHistory = true,
-  }) : _random = Random(seed) {
+  }) : _random = random ?? Random(seed) {
     _players = List<String>.unmodifiable(state.players);
     restore(state);
   }
@@ -284,6 +285,8 @@ class WindowGameEngine {
   );
 
   Position? get pendingSamePosition => _pendingSamePosition;
+  bool get hasPendingAction =>
+      _pendingSamePosition != null || _pendingRemovals.isNotEmpty;
 
   GameState exportState() => GameState(
     players: List<String>.from(_players),
@@ -384,7 +387,7 @@ class WindowGameEngine {
       List<Position>.of(_neighbors(position));
 
   List<GuessOption> getValidOptionsForCard(Position position) {
-    if (!isValidSlot(position) || isFaceUp(position)) {
+    if (hasPendingAction || !isValidSlot(position) || isFaceUp(position)) {
       return const <GuessOption>[];
     }
     if (_mustSelectAdjacentToHandle &&
