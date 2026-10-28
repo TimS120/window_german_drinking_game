@@ -119,6 +119,104 @@ void main() {
     }
   });
 
+  test(
+    'untouched cards in the same cohort have identical rank probabilities',
+    () {
+      final before = blank();
+      before[0][0] = 0;
+      before[0][4] = 4;
+      before[4][0] = 8;
+      before[4][4] = 12;
+      before[2][5] = 33;
+      final removed = blank();
+      removed[2][4] = 32;
+      removed[2][5] = 33;
+      final now = before.map((row) => List<int?>.from(row)).toList();
+      now[2][5] = 16;
+      final game = WindowGameEngine.fromState(
+        publicState(
+          now,
+          events: [
+            PublicMoveEvent(
+              boardBefore: before,
+              actionIndex: 160,
+              outcome: 'wrong',
+              removedCards: removed,
+              mustSelectAdjacentToHandle: true,
+              turnCanEnd: false,
+            ),
+          ],
+        ),
+      );
+      final ranks = WindowRlPolicy.statisticsRankProbabilities(game);
+      final expected = ranks[const Position(0, 1)]!;
+      for (final entry in ranks.entries) {
+        if (entry.key == const Position(2, 4)) continue;
+        expect(
+          entry.value,
+          expected,
+          reason: 'Geometry provides no rank evidence for untouched cards',
+        );
+      }
+    },
+  );
+
+  test('equivalent orientations retain the same future estimate', () {
+    final board = blank();
+    board[0][0] = 0;
+    board[0][4] = 4;
+    board[4][0] = 8;
+    board[4][4] = 12;
+    board[2][5] = 16;
+    board[2][1] = 1;
+    board[2][3] = 32;
+    board[1][2] = 2;
+    board[3][2] = 33;
+    final game = WindowGameEngine.fromState(publicState(board, canPass: true));
+    final actions = WindowRlCodec.validActions(game)
+        .where(
+          (action) =>
+              action.position == const Position(2, 2) &&
+              action.guess == GuessType.inBetween,
+        )
+        .toList();
+    expect(actions, hasLength(2));
+    final shared = WindowRlPolicy.statisticsProposal(
+      game,
+      actions: actions,
+      fixedRounds: 3,
+    );
+    for (final action in actions) {
+      final single = WindowRlPolicy.statisticsProposal(
+        game,
+        actions: [action],
+        fixedRounds: 3,
+      );
+      expect(shared.confidence, single.confidence);
+      expect(shared.expectedDrinks, single.expectedDrinks);
+    }
+  });
+
+  test('uncertain simulated gains do not trigger a risky extra turn', () {
+    final game = WindowGameEngine(['Ada', 'Ben', 'Cat', 'Dan'], seed: 2);
+    final target = game.validSelectablePositions().first;
+    final option = game.getValidOptionsForCard(target).first;
+    // Reveal one correct move to reach a public decision where passing is legal.
+    final rank = game.cardAt(target)! ~/ 4;
+    final boundary = game.cardAt(option.neighbors.first)! ~/ 4;
+    final guess = rank == boundary
+        ? GuessType.same
+        : rank > boundary
+        ? GuessType.higher
+        : GuessType.lower;
+    final result = game.applyGuess(target, option, guess);
+    if (result.requiresSameConfirmation) game.confirmSameGuess();
+    expect(game.turnCanEnd, isTrue);
+    final proposal = WindowRlPolicy.statisticsProposal(game, fixedRounds: 3);
+    expect(proposal.action.isPass, isTrue);
+    expect(proposal.explanation, 'Pass; benefit of guessing is unclear');
+  });
+
   test('public observation keeps only sixteen events and no private cards', () {
     final game = WindowGameEngine(['Ada'], seed: 2);
     final state = GameStateCodec.encode(game.exportState());

@@ -1,4 +1,4 @@
-part of 'policy_core.dart';
+part of '../policy_core.dart';
 
 /// Sequential importance sampling over physical cards. Cohorts contain cards
 /// which are exchangeable given public observations; after a shuffle only the
@@ -38,12 +38,30 @@ class _CardBeliefs {
       final total = counts.reduce((a, b) => a + b);
       return counts.map((count) => count / total).toList();
     }
-    return List.generate(
-      9,
-      (rank) =>
-          particles.where((p) => p.cards[index]! ~/ 4 == rank).length /
-          particles.length,
-    );
+    // Cards in one cohort are exchangeable. Integrate their possible ranks
+    // inside each particle before averaging particles, rather than promoting
+    // random sampled placements to evidence about individual board positions.
+    final result = List<double>.filled(9, 0);
+    for (final particle in particles) {
+      final group = particle.groups[index];
+      final counts = List<int>.filled(9, 0);
+      int total = 0;
+      for (int slot = 0; slot < particle.cards.length; slot++) {
+        if (particle.groups[slot] != group) continue;
+        counts[particle.cards[slot]! ~/ 4]++;
+        total++;
+      }
+      if (group == particle.deckGroup) {
+        for (final card in particle.deck) {
+          counts[card ~/ 4]++;
+          total++;
+        }
+      }
+      for (int rank = 0; rank < 9; rank++) {
+        result[rank] += counts[rank] / total / particles.length;
+      }
+    }
+    return result;
   }
 
   void _reset() {
@@ -214,6 +232,8 @@ class _StatisticsAdvisor {
     this.state, {
     this.budgetMilliseconds = 180,
     this.fixedRounds,
+    this.historyLength = StatisticsPolicy.defaultHistoryLength,
+    this.scenarioSeed,
   }) {
     if (fixedRounds != null &&
         (fixedRounds! < 3 || fixedRounds! > 12 || fixedRounds! % 3 != 0)) {
@@ -226,22 +246,40 @@ class _StatisticsAdvisor {
   }
   final int budgetMilliseconds;
   final int? fixedRounds;
+  final int historyLength;
+  final int? scenarioSeed;
   final GameState state;
 
   AiMoveProposal propose({List<PolicyAction>? actions}) {
     final stopwatch = Stopwatch()..start();
     final random = math.Random(1701);
     final publicGame = WindowGameEngine.fromState(state);
+    final table = StatisticsTableModel(state.players.length);
     final legal = WindowRlCodec.validActions(publicGame);
     final requested = actions == null
         ? legal
         : legal.where((a) => actions.any((b) => a.index == b.index)).toList();
+    // Passing in solo play returns to the same player and changes no card or
+    // drink outcome. Keep an explicitly requested pass-only restriction legal,
+    // but never spend normal advice/search effort on that dominated action.
+    if (!table.hasOpponents && requested.any((action) => !action.isPass)) {
+      requested.removeWhere((action) => action.isPass);
+    }
     if (requested.isEmpty) throw StateError('No legal action can be proposed.');
+    final beliefWatch = Stopwatch()..start();
     final beliefs = _CardBeliefs(state, random);
+    final beliefMicros = beliefWatch.elapsedMicroseconds;
+    // Optional independent stream for matched history-length experiments.
+    // Null preserves the deployed search sequence and its current default.
+    final scenarioRandom = scenarioSeed == null
+        ? random
+        : math.Random(scenarioSeed);
+
     final publicRisks = _publicRisks(publicGame);
     final baseline = {for (final c in publicRisks) c.action.index: c};
     final options = <(Position, Orientation), GuessOption>{};
     final candidates = <_Candidate>[];
+    final rankCache = <Position, List<double>>{};
     for (final action in requested) {
       if (action.isPass) {
         candidates.add(_Candidate(action, 1, 0));
@@ -263,13 +301,15 @@ class _StatisticsAdvisor {
           (rank) => _matches(rank, first, last, action.guess!),
         );
         final position = action.position!.row * 6 + action.position!.column;
-        success =
-            (beliefs.particles
-                        .where((p) => matchingRanks[p.cards[position]! ~/ 4])
-                        .length /
-                    beliefs.particles.length)
-                .clamp(0.01, 0.99)
-                .toDouble();
+        final ranks = rankCache.putIfAbsent(
+          action.position!,
+          () => beliefs.ranksAt(position),
+        );
+        success = 0;
+        for (int rank = 0; rank < 9; rank++) {
+          if (matchingRanks[rank]) success += ranks[rank];
+        }
+        success = success.clamp(0.01, 0.99);
       }
       candidates.add(_Candidate(action, success, known.penalty));
     }
@@ -292,7 +332,15 @@ class _StatisticsAdvisor {
         shortlist.add(candidate);
       }
     }
+    // Orientation has no effect on a move's result when its target and rank
+    // predicate and same-rank drink effects are identical. Reuse those rollouts without changing candidate
+    // order, tie breaking, or how many paired scenario rounds are evaluated.
+    final effects = [
+      for (final candidate in shortlist) _effect(publicGame, candidate.action),
+    ];
     final totals = List<double>.filled(shortlist.length, 0);
+    final passIndex = shortlist.indexWhere((c) => c.action.isPass);
+    final differenceSquares = List<double>.filled(shortlist.length, 0);
     int rounds = 0;
     // Finish complete paired rounds to avoid giving earlier candidates a larger
     // budget. Native Flutter runs this in compute(); web keeps this bound small.
@@ -302,16 +350,32 @@ class _StatisticsAdvisor {
             rounds % 3 != 0 ||
             stopwatch.elapsedMilliseconds < budgetMilliseconds)) {
       final particle =
-          beliefs.particles[random.nextInt(beliefs.particles.length)];
-      final seed = random.nextInt(1 << 30);
+          beliefs.particles[scenarioRandom.nextInt(beliefs.particles.length)];
+      final seed = scenarioRandom.nextInt(1 << 30);
+      final opponentStyles = table.opponentStyles(
+        ownerIndex: state.currentPlayerIndex,
+        scenario: rounds,
+      );
+      final scenarioCosts = <(int, int, bool), double>{};
+      final costs = List<double>.filled(shortlist.length, 0);
       for (int i = 0; i < shortlist.length; i++) {
-        totals[i] += _rollout(
-          particle.world(state),
-          shortlist[i].action,
-          seed,
-          rounds % 3,
-          shortlist[i].risk,
+        costs[i] = scenarioCosts.putIfAbsent(
+          effects[i],
+          () => _rollout(
+            particle.world(state),
+            shortlist[i].action,
+            seed,
+            opponentStyles,
+            shortlist[i].risk,
+          ),
         );
+      }
+      for (int i = 0; i < shortlist.length; i++) {
+        totals[i] += costs[i];
+        if (passIndex >= 0) {
+          final difference = costs[i] - costs[passIndex];
+          differenceSquares[i] += difference * difference;
+        }
       }
       rounds++;
     }
@@ -326,26 +390,117 @@ class _StatisticsAdvisor {
         best = i;
       }
     }
+    bool uncertainContinuation = false;
+    if (state.players.length > 1 &&
+        passIndex >= 0 &&
+        best != passIndex &&
+        shortlist[best].success < 1) {
+      final meanDifference = (totals[best] - totals[passIndex]) / rounds;
+      final variance = math.max(
+        0.0,
+        (differenceSquares[best] - rounds * meanDifference * meanDifference) /
+            (rounds - 1),
+      );
+      final standardError = math.sqrt(variance / rounds);
+      // Prefer the zero-immediate-cost alternative unless the simulated gain
+      // exceeds one paired standard error. This is a conservative decision
+      // heuristic, not a calibrated confidence interval (styles are fixed).
+      if (-meanDifference <= standardError) {
+        best = passIndex;
+        uncertainContinuation = true;
+      }
+    }
+    // Keep the validated search/ranking untouched. Exact public constraints
+    // improve the reported probability after search, without consuming its RNG.
+    final probabilityWatch = Stopwatch()..start();
+    final exact = _ExactCardBeliefs(state);
+    double probability(PolicyAction action) {
+      if (action.isPass) return 1;
+      final option = publicGame
+          .getValidOptionsForCard(action.position!)
+          .firstWhere((o) => o.orientation == action.orientation);
+      final first = publicGame.cardAt(option.neighbors.first)! ~/ 4;
+      final last = publicGame.cardAt(option.neighbors.last)! ~/ 4;
+      final ranks = exact.ranksAt(
+        action.position!.row * 6 + action.position!.column,
+      );
+      double success = 0;
+      bool certain = true;
+      for (int rank = 0; rank < 9; rank++) {
+        if (_matches(rank, first, last, action.guess!)) {
+          success += ranks[rank];
+        } else if (ranks[rank] > 0) {
+          certain = false;
+        }
+      }
+      return certain ? 1 : success.clamp(0.0, 1.0);
+    }
+
+    // A certain final reveal has zero remaining personal drinks. This is the
+    // only strategy override: it is provably optimal, not a noisy rollout gain.
+    PolicyAction? guaranteedFinish;
+    if (state.cardGrid.expand((row) => row).whereType<int>().length == 21) {
+      for (final action in requested) {
+        if (!action.isPass && probability(action) == 1) {
+          guaranteedFinish = action;
+          break;
+        }
+      }
+    }
     final selected = shortlist[best];
-    final explanation = selected.action.isPass
+    final action = guaranteedFinish ?? selected.action;
+    final confidence = probability(action);
+    final reportedRisk = (1 - confidence) * selected.penalty;
+    final explanation = guaranteedFinish != null
+        ? 'Certain finish, no more drinks'
+        : uncertainContinuation
+        ? 'Pass; benefit of guessing is unclear'
+        : action.isPass
         ? 'Pass to avoid more risk'
-        : selected.success == 1
+        : confidence == 1
         ? 'Certain guess, no immediate drinks'
-        : selected.risk < 0.5 && selected.penalty <= 3
+        : reportedRisk < 0.5 && selected.penalty <= 3
         ? 'Low risk, small penalty'
-        : selected.success < bySuccess.first.success
-        ? 'Lower expected future drinks'
-        : selected.success >= 0.75
+        : confidence >= 0.75
         ? 'Strong odds, lower future risk'
         : 'Lower expected future drinks';
     return AiMoveProposal(
-      action: selected.action,
-      confidence: selected.success,
-      expectedDrinks: totals[best] / rounds,
-      explanation: beliefs.historyConsistent
+      action: action,
+      confidence: confidence,
+      expectedDrinks: guaranteedFinish != null ? 0 : totals[best] / rounds,
+      explanation: exact.historyConsistent
           ? explanation
           : '$explanation (current board only)',
       source: 'Pure statistics',
+      statisticsDiagnostics: StatisticsDiagnostics(
+        historyLimit: historyLength,
+        historyEvents: state.recentEvents.length,
+        historyFallback: !exact.historyConsistent,
+        searchHistoryFallback: !beliefs.historyConsistent,
+        guaranteedFinish: guaranteedFinish != null,
+        probabilityMicros: probabilityWatch.elapsedMicroseconds,
+        beliefMicros: beliefMicros + probabilityWatch.elapsedMicroseconds,
+        searchRounds: rounds,
+        elapsedMicros: stopwatch.elapsedMicroseconds,
+      ),
+    );
+  }
+
+  static (int, int, bool) _effect(WindowGameEngine game, PolicyAction action) {
+    if (action.isPass) return (-1, 0, false);
+    final option = game
+        .getValidOptionsForCard(action.position!)
+        .firstWhere((option) => option.orientation == action.orientation);
+    final first = game.cardAt(option.neighbors.first)! ~/ 4;
+    final last = game.cardAt(option.neighbors.last)! ~/ 4;
+    int mask = 0;
+    for (int rank = 0; rank < 9; rank++) {
+      if (_matches(rank, first, last, action.guess!)) mask |= 1 << rank;
+    }
+    return (
+      action.position!.row * 6 + action.position!.column,
+      mask,
+      action.guess == GuessType.same,
     );
   }
 
@@ -479,7 +634,7 @@ class _StatisticsAdvisor {
     GameState world,
     PolicyAction root,
     int seed,
-    int style,
+    List<int> opponentStyles,
     double immediateRisk,
   ) {
     final game = WindowGameEngine.fromState(
@@ -488,6 +643,7 @@ class _StatisticsAdvisor {
       recordHistory: false,
     );
     final random = math.Random(seed);
+    final table = StatisticsTableModel(world.players.length);
     final owner = world.players[world.currentPlayerIndex];
     _play(game, root);
     final immediateDrinks = game.playerStats(owner).drinks;
@@ -495,6 +651,7 @@ class _StatisticsAdvisor {
       final risks = _publicRisks(game);
       if (risks.isEmpty) break;
       final self = game.currentPlayer == owner;
+      final style = opponentStyles[world.players.indexOf(game.currentPlayer)];
       risks.sort((a, b) => a.risk.compareTo(b.risk));
       // Public-only rollout policies: no sampled answer is consulted in choosing
       // an action. Fixed opponent styles never adapt to observed human behavior.
@@ -502,7 +659,8 @@ class _StatisticsAdvisor {
       final certain = risks.where((c) => c.success == 1).toList();
       if (certain.isNotEmpty) {
         action = certain.first.action;
-      } else if (game.turnCanEnd &&
+      } else if (table.hasOpponents &&
+          game.turnCanEnd &&
           (self || random.nextDouble() < [0.45, 0.7, 0.95][style])) {
         action = const PolicyAction.pass();
       } else if (!self && style == 0 && random.nextDouble() < 0.6) {
@@ -525,15 +683,49 @@ class _StatisticsAdvisor {
     final remaining =
         windowLayout.expand((r) => r).where((v) => v).length -
         game.countFaceUpCards();
-    // Explicit horizon approximation: remaining successful guesses, weighted
-    // by equal seat exposure and the current safest failure/success odds. This
-    // prevents truncation from treating an unfinished game as free of risk.
+    final reveals = table.scheduledReveals(
+      remaining: remaining,
+      currentIndex: world.players.indexOf(game.currentPlayer),
+      canEnd: game.turnCanEnd,
+    );
     final safest = risks.first;
-    final tail =
-        remaining *
+    final ownTail =
+        reveals[world.currentPlayerIndex] *
         safest.risk /
-        math.max(0.15, safest.success) /
-        world.players.length;
-    return drinks + tail;
+        math.max(0.15, safest.success);
+    double sameTail = 0;
+    for (int seat = 0; seat < world.players.length; seat++) {
+      if (seat == world.currentPlayerIndex || reveals[seat] == 0) continue;
+      sameTail += reveals[seat] * _samePerSuccess(risks, opponentStyles[seat]);
+    }
+    return drinks + ownTail + sameTail;
+  }
+
+  /// Approximate public same-rank charges per successful opponent reveal in the
+  /// tail's one-success-per-turn model. This includes drinking without taking
+  /// another turn, rather than assuming all future penalties are self-inflicted.
+  static double _samePerSuccess(List<_Candidate> risks, int style) {
+    final certain = risks.where((candidate) => candidate.success == 1);
+    if (certain.isNotEmpty) {
+      return certain.first.action.guess == GuessType.same ? 1 : 0;
+    }
+    final safest = risks.first;
+    if (style == 1) {
+      final best = risks.reduce((a, b) => b.success > a.success ? b : a);
+      return best.action.guess == GuessType.same ? 1 : 0;
+    }
+    if (style == 2) return safest.action.guess == GuessType.same ? 1 : 0;
+    final randomSuccess =
+        risks.fold<double>(0, (s, c) => s + c.success) / risks.length;
+    final randomSame =
+        risks
+            .where((c) => c.action.guess == GuessType.same)
+            .fold<double>(0, (s, c) => s + c.success) /
+        risks.length;
+    final success = 0.6 * randomSuccess + 0.4 * safest.success;
+    final same =
+        0.6 * randomSame +
+        0.4 * (safest.action.guess == GuessType.same ? safest.success : 0);
+    return success == 0 ? 0 : (same / success).clamp(0.0, 1.0);
   }
 }

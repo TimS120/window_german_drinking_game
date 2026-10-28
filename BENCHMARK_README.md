@@ -75,7 +75,7 @@ A failure report includes the scenario, deal, focal seat and method; the JSON al
 
 ```bash
 cd app
-flutter test test/advisor_benchmark_test.dart test/rl_policy_test.dart test/statistics_advisor_test.dart
+flutter test test/advisor_benchmark_test.dart test/rl_policy_test.dart test/statistics/statistics_advisor_test.dart
 flutter analyze
 ```
 

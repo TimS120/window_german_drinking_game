@@ -18,7 +18,7 @@ import venv
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ('solo', 'head-to-head', 'focal-2', 'focal-3', 'focal-4')
-CORE = ['game_engine.dart', 'policy_core.dart', 'statistics_advisor.dart', 'advisor_benchmark.dart']
+CORE = ['game_engine.dart', 'policy_core.dart', 'statistics/statistics_advisor.dart', 'statistics/statistics_card_beliefs.dart', 'statistics/statistics_table_model.dart', 'statistics/statistics_policy.dart', 'advisor_benchmark.dart']
 
 
 def positive(value):
@@ -64,7 +64,9 @@ def prepare_runtime(provenance, log):
         (snapshot / 'lib').mkdir(parents=True, exist_ok=True)
         (snapshot / 'bin').mkdir(exist_ok=True)
         for name in CORE:
-            shutil.copyfile(ROOT / 'app/lib' / name, snapshot / 'lib' / name)
+            destination = snapshot / 'lib' / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / 'app/lib' / name, destination)
         shutil.copyfile(ROOT / 'app/bin/benchmark_cli.dart', snapshot / 'bin/benchmark_cli.dart')
         shutil.copyfile(ROOT / 'tools/benchmark_onnx.py', snapshot / 'benchmark_onnx.py')
         temporary_binary = snapshot / 'benchmark.tmp'

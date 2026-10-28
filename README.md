@@ -386,7 +386,8 @@ player's device, move authoritative validation to a server in a future change.
 ## Documentation
 
 - [Game rules](GAME_README.md) — setup, valid guesses, redeals, and scoring.
-- [Statistics adviser](STATISTICS_README.md) — public-history beliefs, bounded simulations, and explanations.
+- [Statistics adviser](STATISTICS_README.md) — public-information probabilities,
+  move proposals, and history evaluation.
 - [ML development](ML_README.md) — CUDA training, evaluation, export, and
   deployment.
 - [ML agent specification](ml/ml_move_prediction_plan.txt) — target,
@@ -401,10 +402,12 @@ player's device, move authoritative validation to a server in a future change.
 | `app/lib/main.dart` | Responsive local and online game interface. |
 | `app/lib/firebase_room_repository.dart` | Host-authoritative Firebase room transport. |
 | `app/lib/rl_policy.dart` | ONNX inference, legal-action masking, and explicit adviser errors. |
+| `app/lib/statistics/` | Runtime statistics adviser, public-card beliefs, and player models. |
 | `app/assets/` | Card artwork and bundled ONNX policy. |
 | `app/test/` | Game-engine, policy, browser entry, and lobby transport tests. |
 | `tools/browser.py` | Build and publish the browser guest client to Firebase Hosting. |
 | `ml/` | GPU-native masked-PPO trainer, simulator, and ONNX exporter. |
+| `statistics/` | Statistics evaluation tools, headless experiments, and supporting findings. |
 | `firebase-database.rules.json` | Firebase Realtime Database access rules. |
 | `resources/docs/` | Documentation imagery. |
 

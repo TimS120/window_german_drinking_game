@@ -11,8 +11,12 @@ import 'onnx_session_loader.dart';
 import 'policy_core.dart';
 export 'policy_core.dart';
 
-AiMoveProposal _statisticsFromPublicState(GameState state) =>
-    StatisticsPolicy.proposeFromState(state);
+AiMoveProposal _statisticsFromPublicState(
+  ({GameState state, int historyLength}) request,
+) => StatisticsPolicy.proposeFromState(
+  request.state,
+  historyLength: request.historyLength,
+);
 
 /// Availability of the exported policy/value ONNX model.
 enum PolicyAvailability {
@@ -172,19 +176,30 @@ class WindowRlPolicy {
     }
   }
 
-  static Future<AiMoveProposal> proposeStatistics(WindowGameEngine game) =>
-      compute(_statisticsFromPublicState, game.publicObservation());
+  static Future<AiMoveProposal> proposeStatistics(
+    WindowGameEngine game, {
+    int historyLength = StatisticsPolicy.defaultHistoryLength,
+  }) => compute(_statisticsFromPublicState, (
+    state: game.publicObservation(
+      maxEvents: StatisticsPolicy.checkHistoryLength(historyLength),
+    ),
+    historyLength: historyLength,
+  ));
 
   static AiMoveProposal statisticsProposal(
     WindowGameEngine game, {
     List<PolicyAction>? actions,
     int budgetMilliseconds = 180,
     int? fixedRounds,
+    int historyLength = StatisticsPolicy.defaultHistoryLength,
+    int? scenarioSeed,
   }) => StatisticsPolicy.propose(
     game,
     actions: actions,
     budgetMilliseconds: budgetMilliseconds,
     fixedRounds: fixedRounds,
+    historyLength: historyLength,
+    scenarioSeed: scenarioSeed,
   );
 
   static List<({PolicyAction action, double success, int penalty})>
@@ -192,8 +207,9 @@ class WindowRlPolicy {
       StatisticsPolicy.immediateMoveRisks(game);
 
   static Map<Position, List<double>> statisticsRankProbabilities(
-    WindowGameEngine game,
-  ) => StatisticsPolicy.rankProbabilities(game);
+    WindowGameEngine game, {
+    int historyLength = StatisticsPolicy.defaultHistoryLength,
+  }) => StatisticsPolicy.rankProbabilities(game, historyLength: historyLength);
 
   double _maskedConfidence(
     PolicyAction selected,

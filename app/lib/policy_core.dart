@@ -1,7 +1,10 @@
 import 'dart:math' as math;
 
 import 'game_engine.dart';
-part 'statistics_advisor.dart';
+part 'statistics/statistics_advisor.dart';
+part 'statistics/statistics_card_beliefs.dart';
+part 'statistics/statistics_table_model.dart';
+part 'statistics/statistics_policy.dart';
 
 /// Versioned recurrent observation/action contract shared with the trainer.
 class WindowRlContract {
@@ -83,6 +86,7 @@ class AiMoveProposal {
     this.valueEstimate,
     this.explanation,
     this.expectedDrinks,
+    this.statisticsDiagnostics,
   });
 
   final PolicyAction action;
@@ -91,6 +95,7 @@ class AiMoveProposal {
   final double? valueEstimate;
   final String? explanation;
   final double? expectedDrinks;
+  final StatisticsDiagnostics? statisticsDiagnostics;
 }
 
 class WindowRlCodec {
@@ -227,46 +232,5 @@ class WindowRlCodec {
     }
     if (game.turnCanEnd) actions.add(const PolicyAction.pass());
     return actions;
-  }
-}
-
-class StatisticsPolicy {
-  static AiMoveProposal proposeFromState(
-    GameState publicState, {
-    int? fixedRounds,
-  }) => _StatisticsAdvisor(publicState, fixedRounds: fixedRounds).propose();
-
-  static AiMoveProposal propose(
-    WindowGameEngine game, {
-    List<PolicyAction>? actions,
-    int budgetMilliseconds = 180,
-    int? fixedRounds,
-  }) => _StatisticsAdvisor(
-    game.publicObservation(),
-    budgetMilliseconds: budgetMilliseconds,
-    fixedRounds: fixedRounds,
-  ).propose(actions: actions);
-
-  static List<({PolicyAction action, double success, int penalty})>
-  immediateMoveRisks(WindowGameEngine game) => [
-    for (final candidate in _StatisticsAdvisor._publicRisks(
-      WindowGameEngine.fromState(game.publicObservation()),
-    ))
-      (
-        action: candidate.action,
-        success: candidate.success,
-        penalty: candidate.penalty,
-      ),
-  ];
-
-  static Map<Position, List<double>> rankProbabilities(WindowGameEngine game) {
-    final public = game.publicObservation();
-    final beliefs = _CardBeliefs(public, math.Random(1701));
-    return {
-      for (int r = 0; r < 5; r++)
-        for (int c = 0; c < 6; c++)
-          if (windowLayout[r][c] && !public.faceUp[r][c])
-            Position(r, c): beliefs.ranksAt(r * 6 + c),
-    };
   }
 }
