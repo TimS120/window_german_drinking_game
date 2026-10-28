@@ -314,6 +314,11 @@ mode**, or **Dark mode**. New installations follow the system's theme, including
 changes while the app is running. Selecting a mode overrides that default until
 you change it again. Dark mode retains the original green/gold design.
 
+The language menu offers **Use system language**, **English**, and **Deutsch**.
+New installations follow the device language, including changes while the app is
+running. An explicit choice stays in effect until changed; select the system
+option to follow the device again.
+
 Theme and language choices are saved on that device or browser profile and
 restored on later launches. Browser preferences persist until site data is
 cleared; they are independent of the host and other players' preferences.

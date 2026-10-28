@@ -1,6 +1,7 @@
 {
   "@@locale": "en",
   "appTitle": "Window",
+  "languageSystem": "Use system language",
   "language": "Language",
   "chooseLanguage": "Choose language",
   "choosePlayers": "Choose player names to begin a local game.",

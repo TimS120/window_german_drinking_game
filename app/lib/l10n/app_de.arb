@@ -1,6 +1,7 @@
 {
   "@@locale": "de",
   "appTitle": "Fenster",
+  "languageSystem": "Systemsprache verwenden",
   "language": "Sprache",
   "chooseLanguage": "Sprache wählen",
   "choosePlayers": "Gib die Spielernamen ein, um ein lokales Spiel zu starten.",

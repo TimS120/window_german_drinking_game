@@ -104,6 +104,12 @@ abstract class AppLocalizations {
   /// **'Window'**
   String get appTitle;
 
+  /// No description provided for @languageSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'Use system language'**
+  String get languageSystem;
+
   /// No description provided for @language.
   ///
   /// In en, this message translates to:

@@ -97,6 +97,46 @@ void main() {
     },
   );
 
+  testWidgets('system language follows device changes and can be restored', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryLanguages();
+    final controller = LanguageController(store: store);
+    addTearDown(controller.dispose);
+    addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+    tester.binding.platformDispatcher.localesTestValue = [const Locale('de')];
+    await tester.pumpWidget(
+      WindowGameApp(
+        firebaseEnabled: false,
+        rlPolicy: _Policy(),
+        languageController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Sprache wählen'), findsWidgets);
+    await chooseLanguage(tester, 'Sprache wählen', 'English');
+    expect(controller.locale, const Locale('en'));
+    tester.binding.platformDispatcher.localesTestValue = [const Locale('en')];
+    await tester.pumpAndSettle();
+    tester.binding.platformDispatcher.localesTestValue = [const Locale('de')];
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Choose language'), findsWidgets);
+    await chooseLanguage(tester, 'Choose language', 'Use system language');
+    expect(controller.locale, isNull);
+    expect(find.byTooltip('Sprache wählen'), findsWidgets);
+    final restarted = LanguageController(store: store);
+    await restarted.load();
+    expect(restarted.locale, isNull);
+    restarted.dispose();
+    tester.binding.platformDispatcher.localesTestValue = [const Locale('en')];
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Choose language'), findsWidgets);
+  });
+
   test('German plural rules, action descriptions and decimal formatting', () {
     final de = lookupAppLocalizations(const Locale('de'));
     expect(de.wrongPenalty('Max', 1, 1), contains('einen Schluck'));

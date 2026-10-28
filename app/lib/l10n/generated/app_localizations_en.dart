@@ -13,6 +13,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'Window';
 
   @override
+  String get languageSystem => 'Use system language';
+
+  @override
   String get language => 'Language';
 
   @override

@@ -13,6 +13,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get appTitle => 'Fenster';
 
   @override
+  String get languageSystem => 'Systemsprache verwenden';
+
+  @override
   String get language => 'Sprache';
 
   @override

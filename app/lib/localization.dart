@@ -64,11 +64,11 @@ class LanguageController extends ChangeNotifier {
   }
 
   Future<void> select(String language) {
-    if (language != 'en' && language != 'de') {
+    if (language != 'system' && language != 'en' && language != 'de') {
       throw ArgumentError.value(language, 'language');
     }
     _revision++;
-    _locale = Locale(language);
+    _locale = language == 'system' ? null : Locale(language);
     notifyListeners();
     final save = _saveQueue.then((_) => _store.write(language));
     _saveQueue = save.catchError((Object error) {
@@ -101,15 +101,27 @@ class LanguagePicker extends StatelessWidget {
       tooltip: tr(context).chooseLanguage,
       onSelected: (language) => unawaited(controller.select(language)),
       itemBuilder: (context) => [
-        for (final code in ['en', 'de'])
+        for (final code in ['system', 'en', 'de'])
           PopupMenuItem(
             value: code,
             child: Row(
               children: [
-                _LanguageFlag(language: code),
+                if (code == 'system')
+                  const Icon(Icons.language, size: 24)
+                else
+                  _LanguageFlag(language: code),
                 const SizedBox(width: 12),
-                Expanded(child: Text(code == 'de' ? 'Deutsch' : 'English')),
-                if (language == code) const Icon(Icons.check, size: 18),
+                Expanded(
+                  child: Text(
+                    code == 'system'
+                        ? tr(context).languageSystem
+                        : code == 'de'
+                        ? 'Deutsch'
+                        : 'English',
+                  ),
+                ),
+                if ((controller.locale?.languageCode ?? 'system') == code)
+                  const Icon(Icons.check, size: 18),
               ],
             ),
           ),
