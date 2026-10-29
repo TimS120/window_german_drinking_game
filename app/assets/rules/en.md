@@ -12,10 +12,10 @@ Choose a face-down card directly beside a face-up card, horizontally or vertical
 - Horizontal and vertical neighbours cannot be combined. If both lines are available, choose one. If either line has two face-up neighbours, an in-between or outside guess is required.
 
 # Correct guess
-The card turns face-up. You may guess again or pass. A correct same-rank guess makes every other player take one drink; confirm the result before continuing. The game ends immediately if every window card is face-up.
+The card turns face-up. You may guess again or, with two or more players, pass. A correct same-rank guess makes every other player take one drink; confirm the result before continuing. The game ends immediately if every window card is face-up.
 
 # Wrong guess
 Take one drink for each card removed. The guessed card and every face-up card connected to it horizontally or vertically are removed, including cards connected indirectly. Return them to the deck and shuffle; fill the empty places with new cards. The corners and handle are face-up after the redeal, and other replacement cards are face-down. If the handle was removed, the handle restriction applies again. The same player continues; a wrong guess does not pass the turn.
 
 # Passing and finishing
-You may pass only after a correct guess in your current turn. Passing gives the next player the turn. The game ends when the whole window is face-up; aim to finish with as few drinks as possible.
+You may pass only after a correct guess in your current turn. Passing gives the next player the turn. In a one-player game, passing is disabled; keep guessing until the game ends. The game ends when the whole window is face-up; aim to finish with as few drinks as possible.

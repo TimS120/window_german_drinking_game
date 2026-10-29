@@ -67,7 +67,7 @@ class RecurrentPolicyTest(unittest.TestCase):
         self.assertTrue(torch.equal(mask, env.action_mask()))
 
     def test_masks_and_visible_ranks_match_reference_over_rollout(self):
-        env = self.env()
+        env = self.env(player_count=1)
         reference = WindowTrainingEnv(REWARD)
         for _ in range(20):
             for i in range(8):
@@ -121,8 +121,9 @@ class RecurrentPolicyTest(unittest.TestCase):
         self.assertGreater(float(model.local_policy[0].weight.grad.abs().sum()), 0.)
 
     def test_local_and_legacy_checkpoints_round_trip(self):
-        config = json.loads((Path(__file__).parent / 'configs/recurrent_local_validation.json').read_text())
+        config = json.loads((Path(__file__).parent / 'configs/training_config.json').read_text())
         config['algorithm']['hidden_size'] = 32
+        config['algorithm']['history_attention'] = False
         for enabled in (False, True):
             config['algorithm']['local_action_head'] = enabled
             model = WindowPolicyValueNet(32, local_action_head=enabled).eval()
@@ -147,26 +148,28 @@ class RecurrentPolicyTest(unittest.TestCase):
         self.assertFalse(obviously_impossible_guesses(history, torch.full((8,), 300)).any())
 
     def test_time_limit_bootstraps_final_state_without_crossing_reset(self):
-        env = BatchedWindowEnv(REWARD, 1, 1, torch.device('cpu'), 17, player_count=1)
+        env = BatchedWindowEnv(REWARD, 1, 1, torch.device('cpu'), 17, player_count=2)
         env.turn_can_end[:] = True
         _, _, done, _, completed = env.step(torch.tensor([PASS_ACTION_INDEX]))
         self.assertTrue(bool(done[0]))
         self.assertFalse(bool(completed[0]))
         rewards = env.last_player_rewards.clone()
-        final_values = torch.tensor([[-7., 0., 0., 0.]])
-        rewards += physical_seat_values(final_values, env.current_player)
+        final_values = torch.tensor([[0., -7., 0., 0.]])
+        rewards += physical_seat_values(final_values, env.current_player, 2)
         env.reset()
         _, returns = calculate_competitive_gae(
             rewards.unsqueeze(0), done.unsqueeze(0), torch.zeros(1, 1, 4),
             torch.full((1, 4), 999.), torch.zeros(1, 1, dtype=torch.long),
-            env.current_player, gamma=1., gae_lambda=1.,
+            env.current_player, gamma=1., gae_lambda=1., player_count=2,
         )
         self.assertEqual(float(returns[0, 0, 0]), -7.)
 
-    def test_single_player_pass_keeps_seat_and_rewards_are_only_own_drinks(self):
+    def test_single_player_rejects_pass_and_rewards_are_only_own_drinks(self):
         env = self.env(player_count=1)
         env.turn_can_end[:] = True
-        env.step(torch.full((8,), PASS_ACTION_INDEX))
+        self.assertFalse(env.action_mask()[:, PASS_ACTION_INDEX].any())
+        with self.assertRaisesRegex(ValueError, "Illegal action"):
+            env.step(torch.full((8,), PASS_ACTION_INDEX))
         self.assertTrue((env.current_player == 0).all())
         for _ in range(10):
             _, reward, _, drinks, _ = env.step(torch.multinomial(env.action_mask().float(), 1).squeeze(1))

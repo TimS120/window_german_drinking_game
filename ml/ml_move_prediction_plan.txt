@@ -44,4 +44,4 @@ That is different from giving it privileged engineered statistics.
 
 - Automatic gameplay or autonomous drinking decisions
 - Hidden-information/deck-aware oracle features
-- Multiplayer strategy (competitive --> cooperative), collusion, opponent modelling
+- Multiplayer strategy; The game stays competitive instead of cooperative (each player tries to minimize their number of drinks in the whole game). Also collusion is omitted

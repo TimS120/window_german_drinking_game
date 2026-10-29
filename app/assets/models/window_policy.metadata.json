@@ -1,13 +1,26 @@
 {
-  "format": 4,
+  "trainingRun": "2026-10-29_08-31-48",
+  "checkpointName": "best_window_policy.pt",
+  "checkpointSha256": "7fd63d662027918d2cca2cc4d10d799bb0a1c547ad1ff0eb174d6fb839449f2e",
+  "modelSha256": "181cfcaaaacda97a1b4629621c343473b6e33fe1af09644a7f7f4030d0693619",
+  "trainingTimesteps": 22020096,
+  "trainingCumulativeTimesteps": 51380224,
+  "format": 5,
   "actionSize": 301,
-  "historyLength": 16,
-  "historyFeatureSize": 130,
+  "historyLength": 33,
+  "historyFeatureSize": 134,
+  "historyAttention": true,
+  "trainingPlayerCounts": [
+    1,
+    2,
+    3,
+    4
+  ],
   "trained": true,
-  "observationRevision": 2,
+  "observationRevision": 3,
   "trainingRewardScale": 0.01,
   "stateValueUnits": "unscaled training reward",
   "localActionHead": true,
-  "trainingPlayerCount": 1,
+  "trainingPlayerCount": null,
   "description": "Window recurrent policy exported from the PyTorch RecurrentMaskedPPO pipeline."
 }

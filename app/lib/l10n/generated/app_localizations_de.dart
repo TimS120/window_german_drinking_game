@@ -953,4 +953,9 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get gameRules => 'Spielregeln';
+
+  @override
+  String secondBestMove(String move) {
+    return 'Zweitbeste Empfehlung: $move.';
+  }
 }

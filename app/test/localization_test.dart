@@ -30,6 +30,12 @@ class _Policy extends WindowRlPolicy {
 
 class _UnavailablePolicy extends _Policy {
   @override
+  Future<List<AiMoveProposal>> rankedProposals(WindowGameEngine game) async {
+    final proposal = await propose(game);
+    return [?proposal];
+  }
+
+  @override
   Future<AiMoveProposal?> propose(WindowGameEngine game) async {
     throw const RlPolicyException('Test runtime unavailable');
   }

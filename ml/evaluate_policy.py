@@ -23,7 +23,7 @@ def rank_sanity(model, config, device, seed=8675309):
     for rank, bad_guess in [(0, 2), (8, 0)]:
         env = BatchedWindowEnv(config['reward'], 256, 1000, device, seed,
                                config['environment']['history_length'],
-                               config['environment']['player_count'])
+                               config['environment'].get('player_count', 1))
         for i in range(env.num_envs):
             wanted = rank * 4
             old = env.cards[i, 2, 5].clone()
@@ -35,7 +35,7 @@ def rank_sanity(model, config, device, seed=8675309):
                 env.deck[i, :env.deck_size[i]][env.deck[i, :env.deck_size[i]] == wanted] = old
             env.cards[i, 2, 5] = wanted
         env._append_current_record()
-        probabilities = masked_distribution(model(env.history_observation())[0], env.action_mask()).probs
+        probabilities = masked_distribution(model(env.history_observation()[..., :model.history_encoder.input_size])[0], env.action_mask()).probs
         bad_action = action_index(2, 4, 0, bad_guess)
         results['lowest' if rank == 0 else 'highest'] = {
             'impossible_greedy_fraction': float((probabilities.argmax(1) == bad_action).float().mean().cpu()),
@@ -53,24 +53,32 @@ def main():
     parser.add_argument('--max-steps', type=int, help='Evaluation-only game horizon; never changes model inputs.')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--seeds', type=int, nargs='+', default=[1729, 271828])
+    parser.add_argument('--players', type=int, nargs='+', choices=range(1, 5), default=[1, 2, 3, 4])
+    parser.add_argument('--history-length', type=int, help='Ablation: input records including current board (1-64).')
     parser.add_argument('--probe-seed', type=int, default=8675309)
     args = parser.parse_args()
     device = select_device(args.device)
     config = load_json(args.config)
+    if args.history_length is not None and not 1 <= args.history_length <= 64:
+        parser.error('history-length must be between 1 and 64')
     if args.episodes < 1 or (args.max_steps is not None and args.max_steps < 1):
         parser.error("episodes and max-steps must be positive")
     if args.max_steps is not None:
         config["environment"]["max_steps"] = args.max_steps
+        config["evaluation"]["max_steps"] = args.max_steps
     config['evaluation']['episodes_per_seed'] = args.episodes
     # These are independent of the checkpoint-selection board sets.
     config['evaluation']['seeds'] = args.seeds
     model, payload = load_checkpoint(args.checkpoint)
     model.to(device).eval()
-    config['environment']['history_length'] = payload['training'].get('history_length', 16)
-    result = {'checkpoint': str(args.checkpoint), 'player_count': config['environment']['player_count'],
+    config['environment']['history_length'] = args.history_length or payload['training'].get('history_length', 16)
+    config['evaluation']['player_counts'] = args.players
+    config['environment']['player_count'] = args.players[0]
+    result = {'checkpoint': str(args.checkpoint), 'player_counts': args.players, 'history_length': config['environment']['history_length'],
+              'training': payload['training'],
               'seeds': config['evaluation']['seeds'], 'episodes_per_seed': args.episodes,
-              'max_steps': config['environment']['max_steps'],
-              **evaluate_held_out(model, config, device), 'probe_seed': args.probe_seed, 'rank_sanity': rank_sanity(model, config, device, args.probe_seed)}
+              'max_steps': config['evaluation'].get('max_steps', config['environment']['max_steps']),
+              **evaluate_held_out(model, config, device), 'probe_seed': args.probe_seed, 'rank_sanity': {str(count): rank_sanity(model, {**config, 'environment': {**config['environment'], 'player_count': count}}, device, args.probe_seed) for count in args.players}}
     output = json.dumps(result, indent=2)
     print(output)
     if args.output:

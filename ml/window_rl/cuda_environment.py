@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import torch
 
-from .contract import ACTION_SIZE, ACTION_FEATURE_SIZE, BOARD_FEATURE_SIZE, COLUMNS, FEATURE_SIZE, GUESS_TYPES, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, MAX_HISTORY_LENGTH, ORIENTATIONS, OUTCOME_FEATURE_SIZE, PASS_ACTION_INDEX, PLAYER_COUNT, REMOVED_FEATURE_SIZE, ROWS
+from .contract import ACTION_SIZE, ACTION_FEATURE_SIZE, BOARD_FEATURE_SIZE, COLUMNS, FEATURE_SIZE, GUESS_TYPES, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, LEGACY_HISTORY_FEATURE_SIZE, MAX_HISTORY_LENGTH, ORIENTATIONS, OUTCOME_FEATURE_SIZE, PASS_ACTION_INDEX, PLAYER_COUNT, REMOVED_FEATURE_SIZE, ROWS
 from .environment import CORNERS, HANDLE, LAYOUT
 
 
@@ -26,8 +26,8 @@ class BatchedWindowEnv:
             raise ValueError("num_envs must be at least 1")
         if not 1 <= history_length <= MAX_HISTORY_LENGTH:
             raise ValueError(f"history_length must be between 1 and {MAX_HISTORY_LENGTH}")
-        if player_count not in (1, PLAYER_COUNT):
-            raise ValueError(f"player_count must be 1 or {PLAYER_COUNT}.")
+        if player_count not in range(1, PLAYER_COUNT + 1):
+            raise ValueError(f"player_count must be between 1 and {PLAYER_COUNT}.")
         self.device = device
         self.num_envs = int(num_envs)
         self.max_steps = int(max_steps)
@@ -58,7 +58,7 @@ class BatchedWindowEnv:
         self.steps = torch.empty(self.num_envs, dtype=torch.long, device=device)
         self.drinks = torch.empty(self.num_envs, dtype=torch.long, device=device)
         self.current_player = torch.empty(self.num_envs, dtype=torch.long, device=device)
-        self.player_drinks = torch.empty((self.num_envs, self.player_count), dtype=torch.long, device=device)
+        self.player_drinks = torch.empty((self.num_envs, PLAYER_COUNT), dtype=torch.long, device=device)
         self.last_player_rewards = torch.zeros((self.num_envs, PLAYER_COUNT), dtype=torch.float32, device=device)
         self.last_actors = torch.zeros(self.num_envs, dtype=torch.long, device=device)
         self.history = torch.zeros((self.num_envs, self.history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32, device=device)
@@ -137,6 +137,7 @@ class BatchedWindowEnv:
         flags_start = removed_start + REMOVED_FEATURE_SIZE
         record[:, flags_start] = self.must_select_adjacent[indices].to(torch.float32)
         record[:, flags_start + 1] = self.turn_can_end[indices].to(torch.float32)
+        record[:, LEGACY_HISTORY_FEATURE_SIZE + self.player_count - 1] = 1
         self.history[indices, -1] = record
 
     def history_observation(self) -> torch.Tensor:
@@ -201,7 +202,7 @@ class BatchedWindowEnv:
             options[..., orientation, HIGHER] = higher_lower
             options[..., orientation, SAME] = higher_lower
             options[..., orientation, LOWER] = higher_lower
-        passes = self.turn_can_end.unsqueeze(1)
+        passes = (self.turn_can_end & (self.player_count > 1)).unsqueeze(1)
         return torch.cat((options.flatten(1), passes), dim=1).reshape(self.num_envs, ACTION_SIZE)
 
     def _connected(self, start: torch.Tensor) -> torch.Tensor:
@@ -321,7 +322,7 @@ class BatchedWindowEnv:
         self.player_drinks[batch, acting_player] += drinks
         same_correct = correct & (guess == SAME)
         if self.player_count > 1:
-            other_players = torch.arange(self.player_count, device=self.device)[None, :] != acting_player[:, None]
+            other_players = (torch.arange(PLAYER_COUNT, device=self.device)[None, :] != acting_player[:, None]) & (torch.arange(PLAYER_COUNT, device=self.device)[None, :] < self.player_count)
             self.player_drinks += (same_correct[:, None] & other_players).to(torch.long)
             self.last_player_rewards += (same_correct[:, None] & other_players).to(torch.float32) * self.wrong_reward
         self.last_player_rewards[batch, acting_player] += reward

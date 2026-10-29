@@ -227,7 +227,13 @@ class WindowGameEngine {
   List<String> get players => _players;
   String get currentPlayer => _players[_currentPlayerIndex];
   bool get mustSelectAdjacentToHandle => _mustSelectAdjacentToHandle;
+
+  /// Public success flag retained for saved games and model observations.
   bool get turnCanEnd => _turnCanEnd;
+
+  /// Passing requires another player to receive the turn.
+  bool get canEndTurn =>
+      _players.length > 1 && _turnCanEnd && !hasPendingAction && !gameEnded;
   int get pendingPenalty => _pendingPenalty;
   Set<Position> get pendingRemovals =>
       Set<Position>.unmodifiable(_pendingRemovals);
@@ -579,12 +585,7 @@ class WindowGameEngine {
   }
 
   void endTurn() {
-    if (gameEnded ||
-        !_turnCanEnd ||
-        _pendingRemovals.isNotEmpty ||
-        _pendingSamePosition != null) {
-      return;
-    }
+    if (!canEndTurn) return;
     final List<List<int?>> boardBefore = recordHistory
         ? _publicBoard()
         : const [];
@@ -633,7 +634,7 @@ class WindowGameEngine {
     currentPlayer: currentPlayer,
     deckSize: _deck.length,
     mustSelectAdjacentToHandle: _mustSelectAdjacentToHandle,
-    turnCanEnd: _turnCanEnd,
+    turnCanEnd: canEndTurn,
     validSelectable: validSelectablePositions(),
     stats: Map<String, PlayerStats>.unmodifiable(_stats),
     pendingRemovals: pendingRemovals,
@@ -648,6 +649,15 @@ class WindowGameEngine {
       _stats[currentPlayer] = stats.copyWith(correct: stats.correct + 1);
       _mustSelectAdjacentToHandle = false;
       _turnCanEnd = true;
+      if (_players.length == 1 && gameEnded) {
+        // Solo has one continuous turn: account for its progress at completion.
+        final current = _stats[currentPlayer]!;
+        _stats[currentPlayer] = current.copyWith(
+          changedCards:
+              current.changedCards + countFaceUpCards() - _turnStartFaceUp,
+        );
+        _turnStartFaceUp = countFaceUpCards();
+      }
       return GuessResult(correct: true, gameEnded: gameEnded);
     }
     _faceUp[position.row][position.column] = true;

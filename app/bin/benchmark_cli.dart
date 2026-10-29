@@ -47,6 +47,9 @@ class OnnxBridge {
         'history': WindowRlCodec.encodeHistory(
           game,
           historyLength: historyLength,
+          featureSize:
+              info['historyFeatureSize'] as int? ??
+              WindowRlContract.legacyHistoryFeatureSize,
         ),
         'legal': actions.map((a) => a.index).toList(),
       }),

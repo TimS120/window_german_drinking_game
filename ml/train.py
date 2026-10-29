@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import random
+import sys
 import time
 
 import numpy as np
@@ -15,7 +18,7 @@ import torch
 from torch import nn
 
 from plot_training import write_learning_curve
-from window_rl.contract import CHECKPOINT_FORMAT, HISTORY_LENGTH, MAX_HISTORY_LENGTH, PASS_ACTION_INDEX, PLAYER_COUNT
+from window_rl.contract import CHECKPOINT_FORMAT, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, MAX_HISTORY_LENGTH, PASS_ACTION_INDEX, PLAYER_COUNT
 from window_rl.cuda_environment import BatchedWindowEnv
 from window_rl.model import WindowPolicyValueNet
 from window_rl.diagnostics import obviously_impossible_guesses
@@ -90,11 +93,14 @@ def evaluate(model: WindowPolicyValueNet, config: dict, episodes: int, seed: int
     pass_count = torch.zeros((), device=device)
     episode_steps = torch.zeros(episodes, device=device)
     while not bool(finished.all()):
-        history = env.history_observation()
+        history = env.history_observation()[..., :model.history_encoder.input_size]
         logits, _ = model(history)
         actions = masked_distribution(logits, env.action_mask()).probs.argmax(dim=1)
         impossible = obviously_impossible_guesses(history, actions)
-        _, reward, done, step_drinks, did_complete = env.step(actions)
+        previous_drinks = env.player_drinks[:, 0].clone()
+        _, _, done, _, did_complete = env.step(actions)
+        step_drinks = env.player_drinks[:, 0] - previous_drinks
+        reward = env.last_player_rewards[:, 0]
         active = ~finished
         episode_steps += active
         pass_count += ((actions == PASS_ACTION_INDEX) & active).sum()
@@ -109,10 +115,10 @@ def evaluate(model: WindowPolicyValueNet, config: dict, episodes: int, seed: int
         # valid state; ``active`` above ensures its replacement is not counted.
         env.reset(done.nonzero(as_tuple=False).squeeze(1))
     model.train(was_training)
-    return {"eval_reward": scalar(rewards.mean()), "eval_drinks": scalar(drinks.mean()), "completion_rate": scalar(completed.float().mean()), "eval_impossible_guess_rate": scalar(impossible_count / guess_count.clamp_min(1)), "eval_steps": scalar(episode_steps.mean()), "eval_pass_rate": scalar(pass_count / (pass_count + guess_count).clamp_min(1))}
+    return {"eval_drinks_standard_error": scalar(drinks.std(unbiased=True) / math.sqrt(episodes) if episodes > 1 else torch.full((), float("nan"), device=device)), "eval_reward": scalar(rewards.mean()), "eval_drinks": scalar(drinks.mean()), "completion_rate": scalar(completed.float().mean()), "eval_impossible_guess_rate": scalar(impossible_count / guess_count.clamp_min(1)), "eval_steps": scalar(episode_steps.mean()), "eval_pass_rate": scalar(pass_count / (pass_count + guess_count).clamp_min(1))}
 
 
-def evaluate_held_out(model: WindowPolicyValueNet, config: dict, device: torch.device) -> dict:
+def evaluate_held_out(model: WindowPolicyValueNet, config: dict, device: torch.device, report_progress: bool = False) -> dict:
     """Evaluate on the same independent board sets at every checkpoint.
 
     Fixed held-out seeds make comparisons meaningful: a model is no longer
@@ -121,11 +127,31 @@ def evaluate_held_out(model: WindowPolicyValueNet, config: dict, device: torch.d
     evaluation = config["evaluation"]
     seeds = [int(seed) for seed in evaluation.get("seeds", [config["seed"]])]
     episodes = int(evaluation.get("episodes_per_seed", evaluation.get("episodes", 128)))
-    results = [evaluate(model, config, episodes, seed, device) for seed in seeds]
-    return {
-        metric: sum(float(result[metric]) for result in results) / len(results)
-        for metric in results[0]
-    }
+    counts = training_player_counts({"environment": {"player_counts": evaluation.get("player_counts", training_player_counts(config))}})
+    if not seeds or episodes < 1:
+        raise ValueError("Evaluation requires seeds and positive episodes_per_seed")
+    groups = {}
+    for count in counts:
+        local = {**config, "environment": {**config["environment"], "player_count": count, "max_steps": int(evaluation.get("max_steps", config["environment"]["max_steps"]))}}
+        results = [evaluate(model, local, episodes, seed, device) for seed in seeds]
+        groups[count] = {metric: sum(float(r[metric]) for r in results) / len(results) for metric in results[0]}
+        groups[count]["eval_drinks_standard_error"] = math.sqrt(sum(r["eval_drinks_standard_error"] ** 2 for r in results)) / len(results)
+        if report_progress:
+            print(f"Evaluation: players={count} games={episodes * len(seeds)} drinks={groups[count]['eval_drinks']:.2f} completion={groups[count]['completion_rate']:.2%}", file=sys.stderr, flush=True)
+    result = {metric: sum(g[metric] for g in groups.values()) / len(groups) for metric in next(iter(groups.values()))}
+    result["eval_drinks_standard_error"] = sum(g["eval_drinks_standard_error"] for g in groups.values()) / len(groups)
+    result["minimum_completion_rate"] = min(g["completion_rate"] for g in groups.values())
+    for count, group in groups.items():
+        for metric in ("eval_drinks", "completion_rate", "eval_impossible_guess_rate", "eval_drinks_standard_error"):
+            result[f"players_{count}_{metric}"] = group[metric]
+    return result
+
+
+def training_player_counts(config: dict) -> list[int]:
+    counts = config["environment"].get("player_counts", [config["environment"].get("player_count", 4)])
+    if not counts or any(type(n) is not int or n not in range(1, 5) for n in counts) or len(set(counts)) != len(counts):
+        raise ValueError("player_counts must contain unique integers from 1 through 4")
+    return counts
 
 
 def save_checkpoint(path: Path, model: WindowPolicyValueNet, config: dict, timesteps: int, device: torch.device) -> None:
@@ -134,10 +160,33 @@ def save_checkpoint(path: Path, model: WindowPolicyValueNet, config: dict, times
     # receive the original deployment model's names.
     deployment_model = getattr(model, "_orig_mod", model)
     state = {name: tensor.detach().cpu() for name, tensor in deployment_model.state_dict().items()}
-    torch.save({"format": CHECKPOINT_FORMAT, "hidden_size": config["algorithm"]["hidden_size"], "local_action_head": bool(config["algorithm"].get("local_action_head", False)), "model_state_dict": state, "training": {"status": "trained", "timesteps": timesteps, "algorithm": "RecurrentMaskedPPO", "parallel_environments": config["environment"]["parallel_environments"], "player_count": config["environment"].get("player_count", 4), "history_length": config["environment"].get("history_length", HISTORY_LENGTH), "observation_revision": 2, "reward_scale": float(config["algorithm"].get("reward_scale", 1.0)), "gamma": config["algorithm"].get("gamma", 1.0), "reward": config["reward"], "device": str(device)}}, path)
+    torch.save({
+        "format": CHECKPOINT_FORMAT,
+        "hidden_size": config["algorithm"]["hidden_size"],
+        "local_action_head": bool(config["algorithm"].get("local_action_head", False)),
+        "history_attention": bool(config["algorithm"].get("history_attention", False)),
+        "feature_size": deployment_model.history_encoder.input_size,
+        "model_state_dict": state,
+        "training": {
+            "status": "trained",
+            "timesteps": timesteps,
+            "initialization": config.get("initialization"),
+            "cumulative_timesteps": timesteps + (config.get("initialization") or {}).get("cumulative_timesteps", 0),
+            "algorithm": "RecurrentMaskedPPO",
+            "parallel_environments": config["environment"]["parallel_environments"],
+            "player_count": config["environment"].get("player_count"),
+            "player_counts": training_player_counts(config),
+            "history_length": config["environment"].get("history_length", HISTORY_LENGTH),
+            "observation_revision": 3,
+            "reward_scale": float(config["algorithm"].get("reward_scale", 1.0)),
+            "gamma": config["algorithm"].get("gamma", 1.0),
+            "reward": config["reward"],
+            "device": str(device),
+        },
+    }, path)
 
 
-def physical_seat_values(relative_values: torch.Tensor, current_players: torch.Tensor) -> torch.Tensor:
+def physical_seat_values(relative_values: torch.Tensor, current_players: torch.Tensor, player_count: int = PLAYER_COUNT) -> torch.Tensor:
     """Convert relative critic heads to stable physical-seat order.
 
     The critic's heads are ``current, next, ...`` at every state.  A pass
@@ -145,15 +194,15 @@ def physical_seat_values(relative_values: torch.Tensor, current_players: torch.T
     differences are calculated for each actual player.
     """
     seats = torch.arange(PLAYER_COUNT, device=relative_values.device)
-    relative_indices = (seats - current_players.unsqueeze(-1)) % PLAYER_COUNT
-    return relative_values.gather(-1, relative_indices)
+    relative_indices = (seats - current_players.unsqueeze(-1)) % player_count
+    return relative_values.gather(-1, relative_indices) * (seats < player_count)
 
 
-def relative_seat_values(physical_values: torch.Tensor, current_players: torch.Tensor) -> torch.Tensor:
+def relative_seat_values(physical_values: torch.Tensor, current_players: torch.Tensor, player_count: int = PLAYER_COUNT) -> torch.Tensor:
     """Express physical-seat targets as ``current, next, ...`` critic heads."""
     relative_seats = torch.arange(PLAYER_COUNT, device=physical_values.device)
-    physical_indices = (current_players.unsqueeze(-1) + relative_seats) % PLAYER_COUNT
-    return physical_values.gather(-1, physical_indices)
+    physical_indices = (current_players.unsqueeze(-1) + relative_seats) % player_count
+    return physical_values.gather(-1, physical_indices) * (relative_seats < player_count)
 
 
 def calculate_competitive_gae(
@@ -165,6 +214,7 @@ def calculate_competitive_gae(
     bootstrap_current_players: torch.Tensor,
     gamma: float,
     gae_lambda: float,
+    player_count: int = PLAYER_COUNT,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """GAE for every physical player, including rollouts crossing a pass.
 
@@ -172,10 +222,10 @@ def calculate_competitive_gae(
     supplies a per-seat bootstrap at the rollout boundary without exposing
     hidden cards; seat zero is the only actor in single-player mode.
     """
-    values = physical_seat_values(relative_values, current_players)
+    values = physical_seat_values(relative_values, current_players, player_count)
     next_values = physical_seat_values(
         bootstrap_relative_values,
-        bootstrap_current_players,
+        bootstrap_current_players, player_count,
     )
     advantages = torch.empty_like(player_rewards)
     advantage = torch.zeros_like(next_values)
@@ -189,9 +239,9 @@ def calculate_competitive_gae(
 
 
 def active_value_loss(values: torch.Tensor, targets: torch.Tensor, player_count: int) -> torch.Tensor:
-    """Unused compatibility heads must not dilute or distort a solo critic."""
-    if player_count not in (1, PLAYER_COUNT):
-        raise ValueError(f"player_count must be 1 or {PLAYER_COUNT}")
+    """Train existing seats only, without gradients for unused critic heads."""
+    if player_count not in range(1, PLAYER_COUNT + 1):
+        raise ValueError(f"player_count must be between 1 and {PLAYER_COUNT}")
     return nn.functional.smooth_l1_loss(values[..., :player_count], targets[..., :player_count])
 
 
@@ -211,8 +261,58 @@ def select_device(requested: str) -> torch.device:
     return device
 
 
-def main(training_path: Path, requested_device: str, compile_model: bool) -> None:
+def initialize_model(config: dict, device: torch.device) -> WindowPolicyValueNet:
+    """Warm-start compatible weights with a fresh optimizer and auditable lineage."""
+    algo = config["algorithm"]
+    checkpoint = config.get("initialization_checkpoint")
+    if checkpoint:
+        from export_onnx import load_checkpoint
+        path = Path(checkpoint)
+        if not path.is_absolute():
+            path = ROOT / path
+        model, payload = load_checkpoint(path)
+        training = payload.get("training", {})
+        expected = (
+            algo["hidden_size"], bool(algo.get("local_action_head", False)),
+            bool(algo.get("history_attention", False)),
+            int(config["environment"].get("history_length", HISTORY_LENGTH)),
+        )
+        actual = (
+            payload["hidden_size"], bool(payload.get("local_action_head", False)),
+            bool(payload.get("history_attention", False)), training.get("history_length"),
+        )
+        if (actual != expected or model.history_encoder.input_size != HISTORY_FEATURE_SIZE
+                or training.get("status") != "trained"
+                or training.get("reward") != config["reward"]
+                or training.get("reward_scale", 1.) != algo.get("reward_scale", 1.)
+                or training.get("gamma", 1.) != algo.get("gamma", 1.)
+                or sorted(training.get("player_counts", [])) != sorted(training_player_counts(config))):
+            raise ValueError("Initialization checkpoint must match architecture, history, players, and reward units")
+        with path.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        config["initialization"] = {
+            "checkpoint": str(path.resolve()), "sha256": digest,
+            "cumulative_timesteps": training.get("cumulative_timesteps", training.get("timesteps", 0)),
+            "optimizer_restored": False,
+        }
+    else:
+        config["initialization"] = None
+        model = WindowPolicyValueNet(
+            hidden_size=algo["hidden_size"], local_action_head=bool(algo.get("local_action_head", False)),
+            history_attention=bool(algo.get("history_attention", False)),
+        )
+    # Export loading returns eval mode; cuDNN LSTM backward needs training mode.
+    return model.to(device).train()
+
+
+def linear_schedule(start: float, end: float, progress: float) -> float:
+    return start + (end - start) * min(1., max(0., progress))
+
+
+def main(training_path: Path, requested_device: str, compile_model: bool, from_scratch: bool = False) -> None:
     config = load_json(training_path)
+    if from_scratch:
+        config["initialization_checkpoint"] = None
     algo, environment, seed = config["algorithm"], config["environment"], int(config["seed"])
     parallel, rollout_steps = int(environment["parallel_environments"]), int(algo["rollout_steps"])
     if algo["name"] != "RecurrentMaskedPPO":
@@ -221,14 +321,18 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
         raise ValueError("rollout_steps must be a positive multiple of environment.parallel_environments.")
     if int(algo["total_timesteps"]) % rollout_steps:
         raise ValueError("total_timesteps must be a multiple of algorithm.rollout_steps.")
-    if int(environment.get("player_count", PLAYER_COUNT)) not in (1, PLAYER_COUNT):
-        raise ValueError(f"environment.player_count must be 1 or {PLAYER_COUNT}.")
+    counts = training_player_counts(config)
+    training_player_counts({"environment": {"player_counts": config["evaluation"].get("player_counts", counts)}})
+    if (int(algo["total_timesteps"]) // rollout_steps) % len(counts):
+        raise ValueError("total_timesteps must include complete cycles of player_counts.")
     if not 1 <= int(environment.get("history_length", HISTORY_LENGTH)) <= MAX_HISTORY_LENGTH:
         raise ValueError(f"environment.history_length must be between 1 and {MAX_HISTORY_LENGTH}.")
     evaluation_interval = int(config["evaluation"].get("every_timesteps", rollout_steps))
     checkpoint_interval = int(config["checkpoint"]["save_every_timesteps"])
     if evaluation_interval < rollout_steps or evaluation_interval % rollout_steps:
         raise ValueError("evaluation.every_timesteps must be a multiple of algorithm.rollout_steps.")
+    if evaluation_interval % (rollout_steps * len(counts)):
+        raise ValueError("evaluation.every_timesteps must include complete cycles of player_counts.")
     if checkpoint_interval < rollout_steps or checkpoint_interval % rollout_steps:
         raise ValueError("checkpoint.save_every_timesteps must be a multiple of algorithm.rollout_steps.")
     if float(algo.get("outcome_coefficient", 0.0)) and not algo.get("local_action_head", False):
@@ -244,23 +348,27 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
         torch.cuda.manual_seed_all(seed)
         torch.set_float32_matmul_precision("high")
 
+    model = initialize_model(config, device)
     run_dir = ROOT / config["output"]["base_dir"] / time.strftime("%Y-%m-%d_%H-%M-%S")
     checkpoints = run_dir / "checkpoints"
     checkpoints.mkdir(parents=True)
     (run_dir / "training_config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    model: WindowPolicyValueNet = WindowPolicyValueNet(hidden_size=algo["hidden_size"], local_action_head=bool(algo.get("local_action_head", False))).to(device)
     if compile_model:
         model = torch.compile(model)  # type: ignore[assignment]
+    initial_entropy = float(algo["entropy_coefficient"])
+    final_entropy = float(algo.get("final_entropy_coefficient", initial_entropy))
+    if not all(np.isfinite(n) and n >= 0 for n in (initial_entropy, final_entropy)):
+        raise ValueError("Entropy coefficients must be finite and nonnegative")
     initial_learning_rate = float(algo["learning_rate"])
     final_learning_rate = float(algo.get("final_learning_rate", initial_learning_rate))
     optimizer = torch.optim.Adam(model.parameters(), lr=initial_learning_rate)
-    env = BatchedWindowEnv(config["reward"], parallel, environment["max_steps"], device, seed, int(environment.get("history_length", HISTORY_LENGTH)), int(environment.get("player_count", 4)))
+    envs = [BatchedWindowEnv(config["reward"], parallel, environment["max_steps"], device, seed + count, int(environment.get("history_length", HISTORY_LENGTH)), count) for count in counts]
     timesteps, next_save = 0, checkpoint_interval
     iterations_per_rollout = rollout_steps // parallel
     metrics_path = run_dir / "metrics.csv"
     learning_curve_path = run_dir / "learning_curve.svg"
     summary_path = run_dir / "training_summary.json"
-    best_selection = (-1.0, float("-inf"))
+    best_selection = (-1.0, -1.0, float("-inf"))
     evaluations_without_improvement = 0
     stopped_early = False
     started_at = datetime.now(timezone.utc).isoformat()
@@ -277,14 +385,24 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
         compiled=compile_model,
     )
 
+    if config.get("initialization"):
+        baseline = evaluate_held_out(model, config, device, report_progress=True)
+        best_selection = (baseline["minimum_completion_rate"], baseline["completion_rate"], -baseline["eval_drinks"])
+        save_checkpoint(run_dir / "best_window_policy.pt", model, config, 0, device)
+        (run_dir / "best_evaluation.json").write_text(json.dumps({"timesteps": 0, **baseline}, indent=2) + "\n", encoding="utf-8")
+        (run_dir / "initial_evaluation.json").write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
+        print(f"Initial checkpoint: drinks={baseline['eval_drinks']:.2f}, completion={baseline['completion_rate']:.2%}")
+
     with metrics_path.open("w", newline="", encoding="utf-8") as metrics_file:
-        fields = ("timesteps", "learning_rate", "mean_reward", "mean_drinks", "policy_loss", "value_loss", "entropy", "approx_kl", "eval_reward", "eval_drinks", "completion_rate", "outcome_loss", "eval_impossible_guess_rate", "explained_variance", "mean_value", "mean_return", "eval_steps", "eval_pass_rate")
+        fields = ("timesteps", "learning_rate", "entropy_coefficient", "mean_reward", "mean_drinks", "policy_loss", "value_loss", "entropy", "approx_kl", "eval_reward", "eval_drinks", "completion_rate", "outcome_loss", "eval_impossible_guess_rate", "explained_variance", "mean_value", "mean_return", "eval_steps", "eval_pass_rate", "minimum_completion_rate", "training_player_count", "eval_drinks_standard_error") + tuple(f"players_{count}_{metric}" for count in config["evaluation"].get("player_counts", counts) for metric in ("eval_drinks", "completion_rate", "eval_impossible_guess_rate", "eval_drinks_standard_error"))
         writer = csv.DictWriter(metrics_file, fieldnames=fields)
         writer.writeheader()
         write_learning_curve(metrics_path, learning_curve_path, 0)
         while timesteps < algo["total_timesteps"]:
-            progress = timesteps / int(algo["total_timesteps"])
-            learning_rate = initial_learning_rate + (final_learning_rate - initial_learning_rate) * progress
+            env = envs[(timesteps // rollout_steps) % len(envs)]
+            progress = timesteps / max(1, int(algo["total_timesteps"]) - rollout_steps)
+            learning_rate = linear_schedule(initial_learning_rate, final_learning_rate, progress)
+            entropy_coefficient = linear_schedule(initial_entropy, final_entropy, progress)
             for parameter_group in optimizer.param_groups:
                 parameter_group["lr"] = learning_rate
             observations, masks, actions, log_probs, values, rewards, dones, drink_counts, player_rewards, actors = ([] for _ in range(10))
@@ -305,7 +423,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                     with torch.no_grad():
                         _, final_values = model(env.history_observation()[truncated])
                     step_player_rewards[truncated] += algo["gamma"] * physical_seat_values(
-                        final_values, env.current_player[truncated],
+                        final_values, env.current_player[truncated], env.player_count,
                     )
                 observations.append(observation)
                 masks.append(mask)
@@ -329,7 +447,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                 torch.stack(actors),
                 env.current_player,
                 algo["gamma"],
-                algo["gae_lambda"],
+                algo["gae_lambda"], env.player_count,
             )
             batch = torch.arange(parallel, device=device)
             actors_tensor = torch.stack(actors)
@@ -345,7 +463,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
             ]
             relative_returns = relative_seat_values(
                 returns_by_player,
-                actors_tensor,
+                actors_tensor, env.player_count,
             )
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             observations_tensor, masks_tensor = torch.stack(observations).flatten(0, 1), torch.stack(masks).flatten(0, 1)
@@ -372,7 +490,7 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                     policy_loss = -torch.minimum(ratio * advantages_tensor[index], clipped * advantages_tensor[index]).mean()
                     value_loss = active_value_loss(value, relative_returns_tensor[index], active_count)
                     entropy = distribution.entropy().mean()
-                    loss = policy_loss + algo["value_coefficient"] * value_loss - algo["entropy_coefficient"] * entropy
+                    loss = policy_loss + algo["value_coefficient"] * value_loss - entropy_coefficient * entropy
                     outcome_loss = torch.zeros((), device=device)
                     outcome_coefficient = float(algo.get("outcome_coefficient", 0.0))
                     if outcome_coefficient:
@@ -400,9 +518,9 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
             timesteps += rollout_steps
             evaluation = {}
             if timesteps % evaluation_interval == 0 or timesteps == int(algo["total_timesteps"]):
-                evaluation = evaluate_held_out(model, config, device)
+                evaluation = evaluate_held_out(model, config, device, report_progress=True)
             loss_values = torch.stack([torch.stack(item) for item in losses]).mean(dim=0)
-            row = {"timesteps": timesteps, "learning_rate": learning_rate, "mean_reward": scalar(torch.stack(rewards).mean()), "mean_drinks": scalar(torch.stack(drink_counts).float().mean()), "policy_loss": scalar(loss_values[0]), "value_loss": scalar(loss_values[1]), "entropy": scalar(loss_values[2]), "approx_kl": scalar(loss_values[3]), "outcome_loss": scalar(loss_values[4]), "explained_variance": scalar(explained_variance), "mean_value": scalar(rollout_values.mean()), "mean_return": scalar(active_returns.mean()), **evaluation}
+            row = {"training_player_count": env.player_count, "timesteps": timesteps, "learning_rate": learning_rate, "entropy_coefficient": entropy_coefficient, "mean_reward": scalar(torch.stack(rewards).mean()), "mean_drinks": scalar(torch.stack(drink_counts).float().mean()), "policy_loss": scalar(loss_values[0]), "value_loss": scalar(loss_values[1]), "entropy": scalar(loss_values[2]), "approx_kl": scalar(loss_values[3]), "outcome_loss": scalar(loss_values[4]), "explained_variance": scalar(explained_variance), "mean_value": scalar(rollout_values.mean()), "mean_return": scalar(active_returns.mean()), **evaluation}
             writer.writerow(row)
             metrics_file.flush()
             elapsed_seconds = time.perf_counter() - started_clock
@@ -430,8 +548,8 @@ def main(training_path: Path, requested_device: str, compile_model: bool) -> Non
                 next_save += int(config["checkpoint"]["save_every_timesteps"])
             if evaluation:
                 # Completion is the first quality gate; among policies that
-                # complete equally often, prefer fewer total drinks.
-                selection = (evaluation["completion_rate"], -evaluation["eval_drinks"])
+                # complete equally often, prefer fewer personal drinks.
+                selection = (evaluation["minimum_completion_rate"], evaluation["completion_rate"], -evaluation["eval_drinks"])
                 if selection > best_selection:
                     best_selection = selection
                     evaluations_without_improvement = 0
@@ -467,5 +585,6 @@ if __name__ == "__main__":
     parser.add_argument("--training-config", type=Path, default=ROOT / "configs" / "training_config.json")
     parser.add_argument("--device", default="cuda", choices=("auto", "cpu", "cuda"), help="Training device; CUDA is the default.")
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile after validating a normal run.")
+    parser.add_argument("--from-scratch", action="store_true", help="Ignore initialization_checkpoint and start with random weights.")
     arguments = parser.parse_args()
-    main(arguments.training_config, arguments.device, arguments.compile)
+    main(arguments.training_config, arguments.device, arguments.compile, arguments.from_scratch)

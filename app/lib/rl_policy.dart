@@ -18,6 +18,9 @@ AiMoveProposal _statisticsFromPublicState(
   historyLength: request.historyLength,
 );
 
+List<AiMoveProposal> _rankedStatisticsFromPublicState(GameState state) =>
+    StatisticsPolicy.rankedProposals(WindowGameEngine.fromState(state));
+
 /// Availability of the exported policy/value ONNX model.
 enum PolicyAvailability {
   ready,
@@ -44,6 +47,7 @@ class WindowRlPolicy {
   Future<void>? _loadFuture;
   bool _modelIsTrained = false;
   int _historyLength = WindowRlContract.defaultHistoryLength;
+  int _featureSize = WindowRlContract.historyFeatureSize;
   String? _inferenceError;
 
   /// Starts model initialization during app startup. Calls share one future,
@@ -51,8 +55,17 @@ class WindowRlPolicy {
   Future<void> preload() => _ensureSession();
 
   Future<AiMoveProposal?> propose(WindowGameEngine game) async {
+    final proposals = await rankedProposals(game);
+    return proposals.isEmpty ? null : proposals.first;
+  }
+
+  Future<List<AiMoveProposal>> rankedStatisticsProposals(
+    WindowGameEngine game,
+  ) => compute(_rankedStatisticsFromPublicState, game.publicObservation());
+
+  Future<List<AiMoveProposal>> rankedProposals(WindowGameEngine game) async {
     final List<PolicyAction> actions = WindowRlCodec.validActions(game);
-    if (actions.isEmpty) return null;
+    if (actions.isEmpty) return const [];
     await _ensureSession();
     final OrtSession? session = _session;
     if (session == null) {
@@ -62,8 +75,12 @@ class WindowRlPolicy {
     Map<String, OrtValue> outputs = <String, OrtValue>{};
     try {
       input = await OrtValue.fromList(
-        WindowRlCodec.encodeHistory(game, historyLength: _historyLength),
-        <int>[1, _historyLength, WindowRlContract.historyFeatureSize],
+        WindowRlCodec.encodeHistory(
+          game,
+          historyLength: _historyLength,
+          featureSize: _featureSize,
+        ),
+        <int>[1, _historyLength, _featureSize],
       );
       outputs = await session.run(<String, OrtValue>{
         session.inputNames.first: input,
@@ -88,19 +105,32 @@ class WindowRlPolicy {
       final double? value = valueOutput == null
           ? null
           : _toDoubles(await valueOutput.asFlattenedList()).firstOrNull;
-      final PolicyAction best = actions.reduce(
-        (PolicyAction current, PolicyAction candidate) =>
-            logits[candidate.index] > logits[current.index]
-            ? candidate
-            : current,
-      );
+      // Stable ties follow the original legal-action order.
+      final ordered = List<int>.generate(actions.length, (index) => index)
+        ..sort((a, b) {
+          final score = logits[actions[b].index].compareTo(
+            logits[actions[a].index],
+          );
+          return score != 0 ? score : a.compareTo(b);
+        });
+      final maximum = actions.map((a) => logits[a.index]).reduce(math.max);
+      final weights = [
+        for (final a in actions) math.exp(logits[a.index] - maximum),
+      ];
+      final denominator = weights.fold<double>(0, (sum, value) => sum + value);
       _inferenceError = null;
-      return AiMoveProposal(
-        action: best,
-        confidence: _maskedConfidence(best, actions, logits),
-        valueEstimate: value,
-        source: _modelIsTrained ? 'ONNX policy' : 'ONNX test model (untrained)',
-      );
+      return [
+        for (int rank = 0; rank < ordered.length; rank++)
+          AiMoveProposal(
+            action: actions[ordered[rank]],
+            confidence: weights[ordered[rank]] / denominator,
+            valueEstimate: value,
+            source: _modelIsTrained
+                ? 'ONNX policy'
+                : 'ONNX test model (untrained)',
+            rank: rank,
+          ),
+      ];
     } catch (error) {
       _inferenceError = '$error';
       throw RlPolicyException(_inferenceError!);
@@ -153,9 +183,12 @@ class WindowRlPolicy {
         await rootBundle.loadString(WindowRlContract.metadataAsset),
       );
       if (metadata is Map) {
-        if (metadata['format'] != WindowRlContract.checkpointFormat ||
-            metadata['historyFeatureSize'] !=
-                WindowRlContract.historyFeatureSize ||
+        if (!((metadata['format'] == WindowRlContract.checkpointFormat &&
+                    metadata['historyFeatureSize'] ==
+                        WindowRlContract.historyFeatureSize) ||
+                (metadata['format'] == 4 &&
+                    metadata['historyFeatureSize'] ==
+                        WindowRlContract.legacyHistoryFeatureSize)) ||
             metadata['historyLength'] is! num ||
             (metadata['historyLength'] as num).toInt() < 1 ||
             (metadata['historyLength'] as num).toInt() >
@@ -164,6 +197,7 @@ class WindowRlPolicy {
             'Bundled model does not match the recurrent policy contract.',
           );
         }
+        _featureSize = (metadata['historyFeatureSize'] as num).toInt();
         _historyLength = (metadata['historyLength'] as num).toInt();
         _modelIsTrained = metadata['trained'] == true;
       }
@@ -210,22 +244,6 @@ class WindowRlPolicy {
     WindowGameEngine game, {
     int historyLength = StatisticsPolicy.defaultHistoryLength,
   }) => StatisticsPolicy.rankProbabilities(game, historyLength: historyLength);
-
-  double _maskedConfidence(
-    PolicyAction selected,
-    List<PolicyAction> actions,
-    List<double> logits,
-  ) {
-    final double maximum = actions
-        .map((PolicyAction action) => logits[action.index])
-        .reduce(math.max);
-    final double denominator = actions.fold<double>(
-      0,
-      (double sum, PolicyAction action) =>
-          sum + math.exp(logits[action.index] - maximum),
-    );
-    return math.exp(logits[selected.index] - maximum) / denominator;
-  }
 
   List<double> _toDoubles(Object? value) {
     if (value is num) {

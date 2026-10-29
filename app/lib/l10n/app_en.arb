@@ -632,5 +632,13 @@
   "asyncLoadMore": "Load more",
   "developerKeyHelp": "Enter the admin key to enable developer mode.",
   "developerVerificationFailed": "Could not verify the admin key. Check the server connection.",
-  "gameRules": "Game rules"
+  "gameRules": "Game rules",
+  "secondBestMove": "Second-best suggestion: {move}.",
+  "@secondBestMove": {
+    "placeholders": {
+      "move": {
+        "type": "String"
+      }
+    }
+  }
 }

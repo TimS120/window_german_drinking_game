@@ -250,7 +250,10 @@ class _StatisticsAdvisor {
   final int? scenarioSeed;
   final GameState state;
 
-  AiMoveProposal propose({List<PolicyAction>? actions}) {
+  AiMoveProposal propose({List<PolicyAction>? actions}) =>
+      rankedProposals(actions: actions).first;
+
+  List<AiMoveProposal> rankedProposals({List<PolicyAction>? actions}) {
     final stopwatch = Stopwatch()..start();
     final random = math.Random(1701);
     final publicGame = WindowGameEngine.fromState(state);
@@ -259,9 +262,7 @@ class _StatisticsAdvisor {
     final requested = actions == null
         ? legal
         : legal.where((a) => actions.any((b) => a.index == b.index)).toList();
-    // Passing in solo play returns to the same player and changes no card or
-    // drink outcome. Keep an explicitly requested pass-only restriction legal,
-    // but never spend normal advice/search effort on that dominated action.
+    // Solo passing is already absent from the canonical legal-action list.
     if (!table.hasOpponents && requested.any((action) => !action.isPass)) {
       requested.removeWhere((action) => action.isPass);
     }
@@ -438,52 +439,98 @@ class _StatisticsAdvisor {
 
     // A certain final reveal has zero remaining personal drinks. This is the
     // only strategy override: it is provably optimal, not a noisy rollout gain.
-    PolicyAction? guaranteedFinish;
+    final guaranteedFinishes = <PolicyAction>[];
     if (state.cardGrid.expand((row) => row).whereType<int>().length == 21) {
       for (final action in requested) {
         if (!action.isPass && probability(action) == 1) {
-          guaranteedFinish = action;
-          break;
+          guaranteedFinishes.add(action);
         }
       }
     }
-    final selected = shortlist[best];
-    final action = guaranteedFinish ?? selected.action;
-    final confidence = probability(action);
-    final reportedRisk = (1 - confidence) * selected.penalty;
-    final explanation = guaranteedFinish != null
-        ? 'Certain finish, no more drinks'
-        : uncertainContinuation
-        ? 'Pass; benefit of guessing is unclear'
-        : action.isPass
-        ? 'Pass to avoid more risk'
-        : confidence == 1
-        ? 'Certain guess, no immediate drinks'
-        : reportedRisk < 0.5 && selected.penalty <= 3
-        ? 'Low risk, small penalty'
-        : confidence >= 0.75
-        ? 'Strong odds, lower future risk'
-        : 'Lower expected future drinks';
-    return AiMoveProposal(
-      action: action,
-      confidence: confidence,
-      expectedDrinks: guaranteedFinish != null ? 0 : totals[best] / rounds,
-      explanation: exact.historyConsistent
-          ? explanation
-          : '$explanation (current board only)',
-      source: 'Pure statistics',
-      statisticsDiagnostics: StatisticsDiagnostics(
-        historyLimit: historyLength,
-        historyEvents: state.recentEvents.length,
-        historyFallback: !exact.historyConsistent,
-        searchHistoryFallback: !beliefs.historyConsistent,
-        guaranteedFinish: guaranteedFinish != null,
-        probabilityMicros: probabilityWatch.elapsedMicroseconds,
-        beliefMicros: beliefMicros + probabilityWatch.elapsedMicroseconds,
-        searchRounds: rounds,
-        elapsedMicros: stopwatch.elapsedMicroseconds,
-      ),
-    );
+    AiMoveProposal build(
+      _Candidate selected,
+      double expected, {
+      bool certainFinish = false,
+      bool uncertain = false,
+    }) {
+      final action = selected.action;
+      final confidence = probability(action);
+      final reportedRisk = (1 - confidence) * selected.penalty;
+      final explanation = certainFinish
+          ? 'Certain finish, no more drinks'
+          : uncertain
+          ? 'Pass; benefit of guessing is unclear'
+          : action.isPass
+          ? 'Pass to avoid more risk'
+          : confidence == 1
+          ? 'Certain guess, no immediate drinks'
+          : reportedRisk < 0.5 && selected.penalty <= 3
+          ? 'Low risk, small penalty'
+          : confidence >= 0.75
+          ? 'Strong odds, lower future risk'
+          : 'Lower expected future drinks';
+      return AiMoveProposal(
+        action: action,
+        confidence: confidence,
+        expectedDrinks: certainFinish ? 0 : expected,
+        explanation: exact.historyConsistent
+            ? explanation
+            : '$explanation (current board only)',
+        source: 'Pure statistics',
+        statisticsDiagnostics: StatisticsDiagnostics(
+          historyLimit: historyLength,
+          historyEvents: state.recentEvents.length,
+          historyFallback: !exact.historyConsistent,
+          searchHistoryFallback: !beliefs.historyConsistent,
+          guaranteedFinish: certainFinish,
+          probabilityMicros: probabilityWatch.elapsedMicroseconds,
+          beliefMicros: beliefMicros + probabilityWatch.elapsedMicroseconds,
+          searchRounds: rounds,
+          elapsedMicros: stopwatch.elapsedMicroseconds,
+        ),
+      );
+    }
+
+    final order = List<int>.generate(shortlist.length, (index) => index)
+      ..sort((a, b) {
+        if ((totals[a] - totals[b]).abs() >= 1e-9) {
+          return totals[a].compareTo(totals[b]);
+        }
+        final success = shortlist[b].success.compareTo(shortlist[a].success);
+        if (success != 0) return success;
+        if (shortlist[a].action.isPass != shortlist[b].action.isPass) {
+          return shortlist[a].action.isPass ? 1 : -1;
+        }
+        return a.compareTo(b);
+      });
+    // Keep the existing first-choice heuristic exactly, then order alternatives
+    // by their costs from those same paired scenarios (never a rerun excluding #1).
+    final proposals = <AiMoveProposal>[
+      for (final action in guaranteedFinishes)
+        build(
+          _Candidate(action, 1, baseline[action.index]!.penalty),
+          0,
+          certainFinish: true,
+        ),
+      if (!guaranteedFinishes.any(
+        (action) => action.index == shortlist[best].action.index,
+      ))
+        build(
+          shortlist[best],
+          totals[best] / rounds,
+          uncertain: uncertainContinuation,
+        ),
+    ];
+    final seen = proposals.map((p) => p.action.index).toSet();
+    for (final index in order) {
+      if (seen.add(shortlist[index].action.index)) {
+        proposals.add(build(shortlist[index], totals[index] / rounds));
+      }
+    }
+    return [
+      for (int rank = 0; rank < proposals.length; rank++)
+        proposals[rank].withRank(rank),
+    ];
   }
 
   static (int, int, bool) _effect(WindowGameEngine game, PolicyAction action) {

@@ -1640,6 +1640,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Game rules'**
   String get gameRules;
+
+  /// No description provided for @secondBestMove.
+  ///
+  /// In en, this message translates to:
+  /// **'Second-best suggestion: {move}.'**
+  String secondBestMove(String move);
 }
 
 class _AppLocalizationsDelegate

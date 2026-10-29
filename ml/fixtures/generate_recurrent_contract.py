@@ -23,30 +23,33 @@ def fixture(env, name):
         events.append(dict(boardBefore=board(record[:60]), actionIndex=action_index,
                            outcome=['correct', 'wrong', 'pass'][record[65:68].argmax().item()],
                            removedCards=board(record[68:128]),
-                           mustSelectAdjacentToHandle=bool(record[-2]),turnCanEnd=bool(record[-1])))
-    state = dict(players=['Ada'], currentPlayerIndex=0,turnStartFaceUp=5,
+                           mustSelectAdjacentToHandle=bool(record[128]),turnCanEnd=bool(record[129])))
+    state = dict(players=['Ada','Ben','Cy','Dee'][:env.player_count], currentPlayerIndex=int(env.current_player[0]),turnStartFaceUp=5,
                  deck=env.deck[0,:env.deck_size[0]].tolist(),
                  cardGrid=[[None if v < 0 else v for v in row] for row in env.cards[0].tolist()],
                  faceUp=env.face_up[0].tolist(),pendingRemovals=[],pendingPenalty=0,
                  mustSelectAdjacentToHandle=bool(env.must_select_adjacent[0]),
-                 turnCanEnd=bool(env.turn_can_end[0]),stats={'Ada':{}}, recentEvents=events)
+                 turnCanEnd=bool(env.turn_can_end[0]),stats={name:{} for name in ['Ada','Ben','Cy','Dee'][:env.player_count]}, recentEvents=events)
     return dict(name=name,state=state,historyLength=env.history_length,
-                history=records.flatten().tolist(),legalActions=env.action_mask()[0].nonzero().flatten().tolist())
+                featureSize=records.shape[-1], history=records.flatten().tolist(),legalActions=env.action_mask()[0].nonzero().flatten().tolist())
 
 
 def main():
-    env=BatchedWindowEnv(dict(correct_guess=0,wrong_drink=-1,complete_game=0,**{'pass':0}),1,100,torch.device('cpu'),49,history_length=4,player_count=1)
-    result=[fixture(env,'initial')]
-    target,rank=env.cards[0,2,4]//4,env.cards[0,2,5]//4
-    guess=0 if target>rank else 2 if target<rank else 1
-    env.step(torch.tensor([160+guess]));result.append(fixture(env,'correct'))
-    env.step(torch.tensor([300]));result.append(fixture(env,'pass'))
-    # Exercise enough real transitions to wrap the bounded history, including
-    # wrong/redeal events. Choosing actions here is test setup only.
-    for index in range(8):
-        env.step(env.action_mask().long().argmax(1))
-        result.append(fixture(env,f'event_{index}'))
-    env.reset();result.append(fixture(env,'reset'))
-    Path('fixtures/recurrent_contract.json').write_text(json.dumps(result,separators=(',',':'))+'\n')
+    result = []
+    for count in range(1, 5):
+        env=BatchedWindowEnv(dict(correct_guess=0,wrong_drink=-1,complete_game=0,**{'pass':0}),1,100,torch.device('cpu'),49,history_length=5,player_count=count)
+        result.append(fixture(env,f'players_{count}_initial'))
+        target,rank=env.cards[0,2,4]//4,env.cards[0,2,5]//4
+        guess=0 if target>rank else 2 if target<rank else 1
+        env.step(torch.tensor([160+guess]));result.append(fixture(env,f'players_{count}_correct'))
+        if count > 1:
+            env.step(torch.tensor([300]));result.append(fixture(env,f'players_{count}_pass'))
+        else:
+            env.step(env.action_mask().long().argmax(1));result.append(fixture(env,'players_1_continue'))
+        for index in range(8):
+            env.step(env.action_mask().long().argmax(1))
+        result.append(fixture(env,f'players_{count}_wrapped'))
+        env.reset();result.append(fixture(env,f'players_{count}_reset'))
+    Path(__file__).with_name('recurrent_contract_v5.json').write_text(json.dumps(result,separators=(',',':'))+'\n')
 
 if __name__=='__main__': main()

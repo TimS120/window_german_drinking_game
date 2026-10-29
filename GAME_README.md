@@ -50,7 +50,7 @@ cannot be used instead.
 - The selected card turns face-up.
 - A correctly guessed **same** rank makes every other player take one drink;
   the app requests confirmation.
-- The current player may guess again or pass.
+- The current player may guess again or, with two or more players, pass.
 - The game ends immediately when all window cards are face-up.
 
 ### Wrong
@@ -71,3 +71,5 @@ cannot be used instead.
 A player may pass only after at least one correct guess in their turn. Passing
 moves play to the next player. The game finishes when every window position is
 face-up. Online rooms use these same rules; the host validates every move.
+
+In one-player games, passing is disabled in the rules, interface, and proposal/training masks. The player continues guessing until completion.

@@ -938,4 +938,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get gameRules => 'Game rules';
+
+  @override
+  String secondBestMove(String move) {
+    return 'Second-best suggestion: $move.';
+  }
 }

@@ -17,6 +17,7 @@ import 'lobby_players.dart';
 import 'player_names.dart';
 import 'lobby_device_editor.dart';
 import 'rl_policy.dart';
+import 'proposal_cycle.dart';
 import 'room_social.dart';
 import 'room_social_widgets.dart';
 import 'localization.dart';
@@ -259,6 +260,13 @@ class _GameShellState extends State<GameShell> {
   bool _developerMode = false;
   late final WindowRlPolicy _rlPolicy;
   AiMoveProposal? _proposal;
+  final _proposalCycle = ProposalCycle();
+
+  void _clearProposal() {
+    _proposal = null;
+    _proposalCycle.clear();
+  }
+
   bool _proposing = false;
   int _advisorRequestId = 0;
   int _localRound = 0;
@@ -350,7 +358,7 @@ class _GameShellState extends State<GameShell> {
     setState(() {
       _localRound++;
       _game = WindowGameEngine(names);
-      _proposal = null;
+      _clearProposal();
       _message = (l) => l.playerStarts(_game!.currentPlayer);
     });
   }
@@ -478,7 +486,7 @@ class _GameShellState extends State<GameShell> {
               if (_room?.version != room.version) {
                 _localTurnUi = {};
                 _localTurnVersion = -1;
-                _proposal = null;
+                _clearProposal();
               }
               _acceptControlNotice(room);
               _room = room;
@@ -554,7 +562,7 @@ class _GameShellState extends State<GameShell> {
       _social = RoomSocialSnapshot(null);
       _localTurnUi = {};
       _localTurnVersion = -1;
-      _proposal = null;
+      _clearProposal();
       _seenReactions.clear();
       _flyingReactions.clear();
       _pressedTarget = null;
@@ -991,7 +999,7 @@ class _GameShellState extends State<GameShell> {
     final position = Position(ui['row'] as int, ui['column'] as int);
     final orientation = Orientation.values.byName(ui['orientation'] as String);
     final version = _room!.version;
-    setState(() => _proposal = null);
+    setState(_clearProposal);
     _shareUi(
       'idle',
       clicked: guess.name,
@@ -1232,7 +1240,7 @@ class _GameShellState extends State<GameShell> {
     try {
       setState(() {
         _busy = true;
-        _proposal = null;
+        _clearProposal();
         _message = (l) => l.submittingMove;
       });
       if (_isHost && !_serverHosted) {
@@ -1319,8 +1327,14 @@ class _GameShellState extends State<GameShell> {
     }
     final requestId = ++_advisorRequestId;
     final requestState = jsonEncode(
-      GameStateCodec.encode(game.publicObservation()),
+      GameStateCodec.encode(
+        game.publicObservation(maxEvents: maxPublicHistoryEvents),
+      ),
     );
+    final positionKey =
+        '$_localRound:${_room?.code}:${_room?.version}:$requestState';
+    final rank = _proposalCycle.nextRank(positionKey, method.name);
+    final cached = _proposalCycle.cached(positionKey, method.name);
     setState(() => _proposing = true);
     _shareUi(
       'calculating',
@@ -1330,28 +1344,42 @@ class _GameShellState extends State<GameShell> {
           'selected ${method == _AdvisorMethod.statistics ? tr(context).pureStatistics : tr(context).rlModel}',
     );
     try {
-      final AiMoveProposal? proposal = method == _AdvisorMethod.rlModel
-          ? await _rlPolicy.propose(game)
-          : await WindowRlPolicy.proposeStatistics(game);
+      final proposals =
+          cached ??
+          (method == _AdvisorMethod.rlModel
+              ? await _rlPolicy.rankedProposals(game)
+              : await _rlPolicy.rankedStatisticsProposals(game));
       if (!mounted ||
           requestId != _advisorRequestId ||
           !identical(game, _game) ||
-          jsonEncode(GameStateCodec.encode(game.publicObservation())) !=
+          jsonEncode(
+                GameStateCodec.encode(
+                  game.publicObservation(maxEvents: maxPublicHistoryEvents),
+                ),
+              ) !=
               requestState) {
         return;
       }
+      final proposal = _proposalCycle.accept(
+        positionKey,
+        method.name,
+        proposals,
+        rank,
+      );
       setState(() {
         _advisorError = null;
         _proposal = proposal;
         _message = (l) => proposal == null
             ? l.finishPendingProposal
+            : proposal.rank == 1
+            ? l.secondBestMove(actionLabel(l, proposal.action))
             : l.suggestedMove(actionLabel(l, proposal.action));
       });
       _shareUi('suggestion', method: method, clearProposal: proposal == null);
     } catch (error) {
       if (mounted && requestId == _advisorRequestId && identical(game, _game)) {
         setState(() {
-          _proposal = null;
+          _clearProposal();
           _message = (l) => l.predictionFailed(localizedError(l, error));
           _recordAdvisorError(error);
         });
@@ -1379,7 +1407,7 @@ class _GameShellState extends State<GameShell> {
     final previousGame = _game;
     try {
       setState(() {
-        _proposal = null;
+        _clearProposal();
         _busy = true;
         _advisorRequestId++;
         _proposing = false;
@@ -1461,7 +1489,7 @@ class _GameShellState extends State<GameShell> {
         _localRound++;
         _advisorRequestId++;
         _proposing = false;
-        _proposal = null;
+        _clearProposal();
         _message = (l) => l.newGameStarts(game.currentPlayer);
       });
     }
@@ -1520,7 +1548,7 @@ class _GameShellState extends State<GameShell> {
         _advisorRequestId++;
         _proposing = false;
         _busy = true;
-        _proposal = null;
+        _clearProposal();
         _game = WindowGameEngine(_room!.seats.map((s) => s.name).toList());
       });
       try {
@@ -1807,7 +1835,7 @@ class _GameShellState extends State<GameShell> {
       if (game.pendingRemovals.isEmpty) return;
       game.confirmRemovals();
     } else if (type == 'endTurn') {
-      if (!game.turnCanEnd) return;
+      if (!game.canEndTurn) return;
       game.endTurn();
     } else {
       return;
@@ -1958,7 +1986,7 @@ class _GameShellState extends State<GameShell> {
     if (!mounted || guess == null) return;
     // A proposal is deliberately a one-move hint. It disappears as soon as
     // the player commits any guess, whether or not it was the suggested one.
-    setState(() => _proposal = null);
+    setState(_clearProposal);
     if (_isOnline) {
       await _submitOnline(<String, dynamic>{
         'type': 'guess',
@@ -2540,7 +2568,7 @@ class _GameShellState extends State<GameShell> {
       } else {
         game.endTurn();
         setState(() {
-          _proposal = null;
+          _clearProposal();
           _message = (l) => l.playerTurn(game.currentPlayer);
         });
       }
@@ -2918,8 +2946,12 @@ class _Info extends StatelessWidget {
           if (proposal != null) ...<Widget>[
             const SizedBox(height: 8),
             Text(
-              tr(context)
-                  .suggestion(actionLabel(tr(context), proposal!.action)),
+              proposal!.rank == 1
+                  ? tr(
+                      context,
+                    ).secondBestMove(actionLabel(tr(context), proposal!.action))
+                  : tr(context)
+                        .suggestion(actionLabel(tr(context), proposal!.action)),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             Text(

@@ -15,6 +15,7 @@ import 'package:window_game/main.dart';
 import 'package:window_game/localization.dart';
 
 import 'localization_test.dart' show MemoryLanguages, chooseLanguage;
+import 'proposal_cycle_widgets_test.dart' show RankedPolicy;
 
 import 'package:window_game/rl_policy.dart';
 import 'package:window_game/room_social.dart';
@@ -22,6 +23,12 @@ import 'package:window_game/room_social_widgets.dart';
 import 'package:window_game/windows_firebase_rest.dart';
 
 class _Policy extends WindowRlPolicy {
+  @override
+  Future<List<AiMoveProposal>> rankedProposals(WindowGameEngine game) async {
+    final proposal = await propose(game);
+    return [?proposal];
+  }
+
   @override
   Future<void> preload() async {}
   @override
@@ -433,6 +440,32 @@ Future<void> _joinTest(
 }
 
 void main() {
+  testWidgets('online suggestions share the second-best rank and action', (
+    tester,
+  ) async {
+    final rooms = _HostRooms();
+    await _joinTest(
+      tester,
+      rooms,
+      const Size(1400, 1000),
+      policy: RankedPolicy(),
+    );
+    for (final expectedRank in [0, 1, 0]) {
+      await tester.tap(find.text('Propose best move'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('RL model'));
+      await tester.pumpAndSettle();
+      final raw = rooms.social['turnViews']['host']['proposal'];
+      expect(raw['rank'], expectedRank);
+      expect(decodeSharedProposal(raw)!.rank, expectedRank);
+      expect(
+        find.text(expectedRank == 0 ? 'RL best' : 'RL second'),
+        findsOneWidget,
+      );
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('canceling a restart leaves the game unchanged', (tester) async {
     final rooms = _HostRooms();
     await _joinTest(tester, rooms, const Size(1400, 1000));

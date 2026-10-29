@@ -74,6 +74,22 @@ class StatisticsPolicy {
     scenarioSeed: scenarioSeed,
   ).propose(actions: actions);
 
+  /// Ranked alternatives from one shared, bounded paired search.
+  static List<AiMoveProposal> rankedProposals(
+    WindowGameEngine game, {
+    List<PolicyAction>? actions,
+    int budgetMilliseconds = 180,
+    int? fixedRounds,
+    int historyLength = defaultHistoryLength,
+    int? scenarioSeed,
+  }) => _StatisticsAdvisor(
+    game.publicObservation(maxEvents: checkHistoryLength(historyLength)),
+    budgetMilliseconds: budgetMilliseconds,
+    fixedRounds: fixedRounds,
+    historyLength: historyLength,
+    scenarioSeed: scenarioSeed,
+  ).rankedProposals(actions: actions);
+
   static List<({PolicyAction action, double success, int penalty})>
   immediateMoveRisks(WindowGameEngine game) => [
     for (final candidate in _StatisticsAdvisor._publicRisks(

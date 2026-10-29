@@ -1,4 +1,4 @@
-"""Small policy/value network intended for on-device Window inference."""
+"""Public-history policy/value network for Window inference."""
 
 import torch
 from torch import nn
@@ -9,13 +9,16 @@ from .contract import ACTION_SIZE, BOARD_FEATURE_SIZE, COLUMNS, HISTORY_FEATURE_
 class WindowPolicyValueNet(nn.Module):
     """Finite-window LSTM policy with relative-player critic heads."""
 
-    def __init__(self, hidden_size: int = 128, local_action_head: bool = False) -> None:
+    def __init__(self, hidden_size: int = 128, local_action_head: bool = False,
+                 history_attention: bool = False, feature_size: int = HISTORY_FEATURE_SIZE) -> None:
         super().__init__()
         self.history_encoder = nn.LSTM(
-            input_size=HISTORY_FEATURE_SIZE,
+            input_size=feature_size,
             hidden_size=hidden_size,
             batch_first=True,
         )
+        self.history_attention = nn.Linear(hidden_size, 1) if history_attention else None
+        self.context_projection = nn.Sequential(nn.Linear(hidden_size * 2, hidden_size), nn.Tanh()) if history_attention else None
         self.policy = nn.Linear(hidden_size, ACTION_SIZE)
         # Values are ordered relative to the player whose decision is being
         # made: current player, next player, and so on.  A scalar critic cannot
@@ -52,7 +55,16 @@ class WindowPolicyValueNet(nn.Module):
     def forward(self, history: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode an ordered public-history window with a real LSTM pass."""
         encoded, _ = self.history_encoder(history)
-        encoded = encoded[:, -1]
+        if self.history_attention is not None:
+            # Learned retrieval of older public records, with padding excluded.
+            scores = self.history_attention(encoded).squeeze(-1)
+            valid = history[:, :, :BOARD_FEATURE_SIZE].abs().sum(-1) > 0
+            valid[:, -1] = True
+            weights = scores.masked_fill(~valid, -1e9).softmax(-1)
+            context = (encoded * weights.unsqueeze(-1)).sum(1)
+            encoded = self.context_projection(torch.cat((encoded[:, -1], context), -1))
+        else:
+            encoded = encoded[:, -1]
         logits = self.policy(encoded)
         if self.local_policy is not None:
             logits = logits + self.local_action_logits(history)

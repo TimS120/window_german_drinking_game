@@ -12,10 +12,10 @@ Wähle eine verdeckte Karte, die waagerecht oder senkrecht direkt neben einer of
 - Waagerechte und senkrechte Nachbarn dürfen nicht kombiniert werden. Sind beide Linien möglich, wähle eine. Hat eine der Linien zwei offene Nachbarn, musst du dazwischen oder außerhalb tippen.
 
 # Richtiger Tipp
-Die Karte wird aufgedeckt. Du darfst weitertippen oder passen. Bei einem richtigen Tipp auf gleich trinken alle anderen je einen Schluck; bestätige das Ergebnis, bevor es weitergeht. Sind alle Fensterkarten offen, endet das Spiel sofort.
+Die Karte wird aufgedeckt. Du darfst weitertippen oder ab zwei Spielern passen. Bei einem richtigen Tipp auf gleich trinken alle anderen je einen Schluck; bestätige das Ergebnis, bevor es weitergeht. Sind alle Fensterkarten offen, endet das Spiel sofort.
 
 # Falscher Tipp
 Trinke für jede entfernte Karte einen Schluck. Entfernt werden die gewählte Karte und alle mit ihr waagerecht oder senkrecht verbundenen offenen Karten, auch indirekt verbundene Karten. Lege sie zurück in den Stapel, mische und fülle die leeren Plätze mit neuen Karten. Ecken und Griff liegen nach dem Nachlegen offen, alle anderen Ersatzkarten verdeckt. Wurde der Griff entfernt, gilt die Griffregel erneut. Dieselbe Person bleibt am Zug; ein falscher Tipp beendet den Zug nicht.
 
 # Passen und Spielende
-Du darfst erst passen, nachdem du in deinem aktuellen Zug richtig getippt hast. Danach ist die nächste Person am Zug. Das Spiel endet, sobald das gesamte Fenster offen liegt; Ziel ist es, möglichst wenig zu trinken.
+Du darfst erst passen, nachdem du in deinem aktuellen Zug richtig getippt hast. Danach ist die nächste Person am Zug. Im Einzelspiel ist Passen deaktiviert; du tippst weiter, bis das Spiel endet. Das Spiel endet, sobald das gesamte Fenster offen liegt; Ziel ist es, möglichst wenig zu trinken.

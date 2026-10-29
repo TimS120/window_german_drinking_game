@@ -416,12 +416,27 @@ player's device, move authoritative validation to a server in a future change.
 | `firebase-database.rules.json` | Firebase Realtime Database access rules. |
 | `resources/docs/` | Documentation imagery. |
 
+## Best and second-best proposals
+
+Choose RL or pure statistics to display that method's best move. Choose the same
+method again on the unchanged game position for its second-best proposal; further
+clicks alternate best and second-best. Switching methods starts with the selected
+method's best move. Playing a move or restarting resets the cycle. Second-best
+proposals are labeled, including in shared room views. Both choices remain
+advisory, and solo games never include passing.
+
 ## Current model status
 
-`app/assets/models/window_policy.onnx` is deliberately untrained and verifies
-only packaging and inference. Until a trained policy is exported, the app
-labels its proposal accordingly. Pure statistics is independently selectable
-and also handles unavailable models or inference failures.
+`app/assets/models/window_policy.onnx` contains the trained October 29 recurrent
+policy selected from `2026-10-29_08-31-48/best_window_policy.pt`. It uses 32 past
+public events plus the current board and public table size for 1–4 players.
+Matching metadata identifies the checkpoint and model fingerprints. Linux and
+Android use the same bundled graph and public-input/legal-action contract.
+In solo games, ending the turn is disabled and proposals always select a legal
+guess; with 2–4 players, passing remains available after a successful guess.
+Pure statistics is independently selectable; RL loading/inference errors are
+reported explicitly and never silently switch advisers. See `ML_README.md` for
+normal from-scratch training and native inference verification.
 
 ## Comparing the advisers
 

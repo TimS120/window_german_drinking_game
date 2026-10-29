@@ -304,5 +304,6 @@
   "asyncLoadMore": "Weitere laden",
   "developerKeyHelp": "Gib den Admin-Schlüssel ein, um den Entwicklermodus zu aktivieren.",
   "developerVerificationFailed": "Der Admin-Schlüssel konnte nicht überprüft werden. Prüfe die Verbindung zum Server.",
-  "gameRules": "Spielregeln"
+  "gameRules": "Spielregeln",
+  "secondBestMove": "Zweitbeste Empfehlung: {move}."
 }

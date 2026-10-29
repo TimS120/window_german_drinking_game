@@ -506,7 +506,7 @@ PolicyAction benchmarkOpponent(
     BenchmarkAgent.cautious => 0.95,
     _ => throw ArgumentError('An adviser is not a baseline opponent'),
   };
-  if (publicGame.turnCanEnd && random.nextDouble() < passChance) {
+  if (publicGame.canEndTurn && random.nextDouble() < passChance) {
     return const PolicyAction.pass();
   }
   if (agent == BenchmarkAgent.casual && random.nextDouble() < 0.6) {

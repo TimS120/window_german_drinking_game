@@ -6,6 +6,7 @@ from torch import nn
 
 from export_onnx import DeploymentPolicy
 from train import active_value_loss, calculate_competitive_gae, critic_explained_variance, evaluate
+from window_rl.contract import HISTORY_FEATURE_SIZE
 from window_rl.model import WindowPolicyValueNet
 
 
@@ -47,7 +48,7 @@ class TrainingScaleTest(unittest.TestCase):
 
     def test_export_restores_value_units_without_changing_policy(self):
         model = WindowPolicyValueNet(32, local_action_head=True).eval()
-        history = torch.randn(2, 16, 130)
+        history = torch.randn(2, 16, HISTORY_FEATURE_SIZE)
         logits, values = model(history)
         exported_logits, exported_value = DeploymentPolicy(model, .01)(history)
         torch.testing.assert_close(exported_logits, logits)

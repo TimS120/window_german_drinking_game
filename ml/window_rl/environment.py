@@ -68,8 +68,8 @@ class WindowTrainingEnv:
                 for orientation, guesses in self._valid_options(row, column):
                     for guess in guesses:
                         mask[self._action_index(row, column, orientation, guess)] = True
-        if self.turn_can_end:
-            mask[PASS_ACTION_INDEX] = True
+        # This reference simulator is solo: passing to oneself is not legal.
+        mask[PASS_ACTION_INDEX] = False
         return mask
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, StepInfo]:

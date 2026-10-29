@@ -9,7 +9,7 @@ from onnx.reference import ReferenceEvaluator
 import torch
 
 from export_onnx import DeploymentPolicy, load_checkpoint
-from window_rl.contract import HISTORY_FEATURE_SIZE
+from window_rl.deployment_fixtures import encode_fixture_history
 
 
 def main():
@@ -25,12 +25,10 @@ def main():
     onnx.checker.check_model(graph, full_check=True)
     runtime = ReferenceEvaluator(graph)
     fixtures = json.loads((Path(__file__).parent / 'fixtures/recurrent_contract.json').read_text())
+    fixtures += json.loads((Path(__file__).parent / 'fixtures/recurrent_contract_v5.json').read_text())
     max_error = 0.
     for fixture in fixtures:
-        records = np.array(fixture['history'], dtype=np.float32).reshape(-1, HISTORY_FEATURE_SIZE)
-        history = np.zeros((1, length, HISTORY_FEATURE_SIZE), dtype=np.float32)
-        count = min(length, records.shape[0])
-        history[0, -count:] = records[-count:]
+        history = encode_fixture_history(fixture, length, model.history_encoder.input_size)
         with torch.no_grad():
             expected = deployment(torch.from_numpy(history))
         actual = runtime.run(['policy_logits', 'state_value'], {'history': history})

@@ -8,7 +8,7 @@ part 'statistics/statistics_policy.dart';
 
 /// Versioned recurrent observation/action contract shared with the trainer.
 class WindowRlContract {
-  static const int checkpointFormat = 4;
+  static const int checkpointFormat = 5;
   static const int rows = 5;
   static const int columns = 6;
   static const int cardFeatures = 2;
@@ -17,12 +17,13 @@ class WindowRlContract {
   static const int outcomeFeatureSize = 3;
   static const int removedFeatureSize = rows * columns * cardFeatures;
   static const int flagFeatureSize = 2;
-  static const int historyFeatureSize =
+  static const int legacyHistoryFeatureSize =
       boardFeatureSize +
       actionFeatureSize +
       outcomeFeatureSize +
       removedFeatureSize +
       flagFeatureSize;
+  static const int historyFeatureSize = legacyHistoryFeatureSize + 4;
   static const int defaultHistoryLength = 16;
   static const int maxHistoryLength = maxPublicHistoryEvents + 1;
   static const int orientations = 2;
@@ -87,8 +88,10 @@ class AiMoveProposal {
     this.explanation,
     this.expectedDrinks,
     this.statisticsDiagnostics,
+    this.rank = 0,
   });
 
+  final int rank;
   final PolicyAction action;
   final double confidence;
   final String source;
@@ -96,13 +99,33 @@ class AiMoveProposal {
   final String? explanation;
   final double? expectedDrinks;
   final StatisticsDiagnostics? statisticsDiagnostics;
+
+  AiMoveProposal withRank(int rank) => AiMoveProposal(
+    action: action,
+    confidence: confidence,
+    source: source,
+    valueEstimate: valueEstimate,
+    explanation: explanation,
+    expectedDrinks: expectedDrinks,
+    statisticsDiagnostics: statisticsDiagnostics,
+    rank: rank,
+  );
 }
 
 class WindowRlCodec {
   static List<double> encodeHistory(
     WindowGameEngine game, {
     int historyLength = WindowRlContract.defaultHistoryLength,
+    int featureSize = WindowRlContract.historyFeatureSize,
   }) {
+    if (historyLength < 1 ||
+        historyLength > WindowRlContract.maxHistoryLength ||
+        (featureSize != WindowRlContract.historyFeatureSize &&
+            featureSize != WindowRlContract.legacyHistoryFeatureSize) ||
+        game.players.isEmpty ||
+        game.players.length > 4) {
+      throw ArgumentError("Unsupported RL history or player count");
+    }
     final List<PublicMoveEvent> events = game.recentEvents;
     final List<List<double>> records = <List<double>>[
       for (final PublicMoveEvent event in events) _eventFeatures(event),
@@ -113,12 +136,15 @@ class WindowRlCodec {
         : records;
     final List<double> result = <double>[
       for (int index = recent.length; index < historyLength; index++)
-        ...List<double>.filled(WindowRlContract.historyFeatureSize, 0),
-      for (final List<double> record in recent) ...record,
+        ...List<double>.filled(featureSize, 0),
+      for (final List<double> record in recent) ...<double>[
+        ...record,
+        if (featureSize == WindowRlContract.historyFeatureSize)
+          for (int count = 1; count <= 4; count++)
+            count == game.players.length ? 1 : 0,
+      ],
     ];
-    assert(
-      result.length == historyLength * WindowRlContract.historyFeatureSize,
-    );
+    assert(result.length == historyLength * featureSize);
     return result;
   }
 
@@ -208,7 +234,7 @@ class WindowRlCodec {
       }
     }
     result.addAll(<double>[mustSelect ? 1 : 0, canEnd ? 1 : 0]);
-    assert(result.length == WindowRlContract.historyFeatureSize);
+    assert(result.length == WindowRlContract.legacyHistoryFeatureSize);
     return result;
   }
 
@@ -230,7 +256,7 @@ class WindowRlCodec {
         }
       }
     }
-    if (game.turnCanEnd) actions.add(const PolicyAction.pass());
+    if (game.canEndTurn) actions.add(const PolicyAction.pass());
     return actions;
   }
 }

@@ -110,6 +110,7 @@ Map<String, dynamic> encodeSharedProposal(AiMoveProposal proposal) => {
     'guess': proposal.action.guess!.name,
   },
   'confidence': proposal.confidence,
+  'rank': proposal.rank,
   'source': proposal.source,
   if (proposal.valueEstimate != null) 'value': proposal.valueEstimate,
   if (proposal.expectedDrinks != null) 'drinks': proposal.expectedDrinks,
@@ -131,6 +132,7 @@ AiMoveProposal? decodeSharedProposal(Object? value) {
               guess: GuessType.values.byName(raw['guess'] as String),
             ),
       confidence: (raw['confidence'] as num).toDouble(),
+      rank: raw['rank'] == 1 ? 1 : 0,
       source: raw['source'] as String,
       valueEstimate: (raw['value'] as num?)?.toDouble(),
       expectedDrinks: (raw['drinks'] as num?)?.toDouble(),
@@ -230,7 +232,7 @@ Map<String, dynamic> socialRequestPatch({
         return {};
       }
       if (proposal.action.isPass) {
-        if (!game.turnCanEnd) return {};
+        if (!game.canEndTurn) return {};
       } else {
         final position = proposal.action.position!;
         if (!game.isValidSlot(position) ||

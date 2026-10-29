@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 from pathlib import Path
 
 import onnx
 import torch
 from torch import nn
 
-from window_rl.contract import ACTION_SIZE, CHECKPOINT_FORMAT, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, MAX_HISTORY_LENGTH
+from window_rl.contract import ACTION_SIZE, CHECKPOINT_FORMAT, HISTORY_FEATURE_SIZE, HISTORY_LENGTH, LEGACY_HISTORY_FEATURE_SIZE, MAX_HISTORY_LENGTH
 from window_rl.model import WindowPolicyValueNet
 
 
@@ -30,9 +31,9 @@ class DeploymentPolicy(nn.Module):
 
 def load_checkpoint(path: Path) -> tuple[WindowPolicyValueNet, dict]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    if payload.get("format") != CHECKPOINT_FORMAT:
+    if payload.get("format") not in (4, CHECKPOINT_FORMAT):
         raise ValueError("Unsupported checkpoint format; retrain/export with this pipeline.")
-    model = WindowPolicyValueNet(hidden_size=payload["hidden_size"], local_action_head=bool(payload.get("local_action_head", False)))
+    model = WindowPolicyValueNet(hidden_size=payload["hidden_size"], local_action_head=bool(payload.get("local_action_head", False)), history_attention=bool(payload.get("history_attention", False)), feature_size=payload.get("feature_size", LEGACY_HISTORY_FEATURE_SIZE if payload["format"] == 4 else HISTORY_FEATURE_SIZE))
     model.load_state_dict(payload["model_state_dict"])
     if model.policy.out_features != ACTION_SIZE:
         raise ValueError(
@@ -57,7 +58,7 @@ def main() -> None:
     history_length = int(payload.get("training", {}).get("history_length", HISTORY_LENGTH))
     if not 1 <= history_length <= MAX_HISTORY_LENGTH:
         raise ValueError(f"Checkpoint history_length must be between 1 and {MAX_HISTORY_LENGTH}.")
-    history = torch.zeros((1, history_length, HISTORY_FEATURE_SIZE), dtype=torch.float32)
+    history = torch.zeros((1, history_length, model.history_encoder.input_size), dtype=torch.float32)
     torch.onnx.export(
         DeploymentPolicy(model, payload.get("training", {}).get("reward_scale", 1.0)),
         (history,),
@@ -85,11 +86,23 @@ def main() -> None:
         raise ValueError(
             f"Exporter produced policy shape {policy_shape}; expected [1, {ACTION_SIZE}]."
         )
+    with args.checkpoint.open("rb") as source:
+        checkpoint_digest = hashlib.file_digest(source, "sha256").hexdigest()
+    with args.output.open("rb") as source:
+        model_digest = hashlib.file_digest(source, "sha256").hexdigest()
     metadata = {
-        "format": CHECKPOINT_FORMAT,
+        "trainingRun": args.checkpoint.parent.name,
+        "checkpointName": args.checkpoint.name,
+        "checkpointSha256": checkpoint_digest,
+        "modelSha256": model_digest,
+        "trainingTimesteps": payload.get("training", {}).get("timesteps"),
+        "trainingCumulativeTimesteps": payload.get("training", {}).get("cumulative_timesteps"),
+        "format": payload["format"],
         "actionSize": ACTION_SIZE,
         "historyLength": history_length,
-        "historyFeatureSize": HISTORY_FEATURE_SIZE,
+        "historyFeatureSize": model.history_encoder.input_size,
+        "historyAttention": bool(payload.get("history_attention", False)),
+        "trainingPlayerCounts": payload.get("training", {}).get("player_counts", [payload.get("training", {}).get("player_count", 4)]),
         "trained": payload.get("training", {}).get("status") == "trained",
         "observationRevision": payload.get("training", {}).get("observation_revision", 1),
         "trainingRewardScale": payload.get("training", {}).get("reward_scale", 1.0),

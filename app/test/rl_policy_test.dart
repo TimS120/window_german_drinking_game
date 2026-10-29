@@ -11,9 +11,14 @@ void main() {
     test(
       'matches Python histories and masks across events, wrapping and reset',
       () {
-        final List<dynamic> fixtures = jsonDecode(
-          File('../ml/fixtures/recurrent_contract.json').readAsStringSync(),
-        ) as List<dynamic>;
+        final List<dynamic> fixtures = <dynamic>[
+          for (final String name in [
+            'recurrent_contract',
+            'recurrent_contract_v5',
+          ])
+            ...(jsonDecode(File('../ml/fixtures/$name.json').readAsStringSync())
+                as List<dynamic>),
+        ];
         for (final dynamic fixture in fixtures) {
           final WindowGameEngine game = WindowGameEngine.fromState(
             GameStateCodec.decode(
@@ -23,6 +28,9 @@ void main() {
           final List<double> actual = WindowRlCodec.encodeHistory(
             game,
             historyLength: fixture['historyLength'] as int,
+            featureSize:
+                fixture['featureSize'] as int? ??
+                WindowRlContract.legacyHistoryFeatureSize,
           );
           final List<dynamic> expected = fixture['history'] as List<dynamic>;
           expect(

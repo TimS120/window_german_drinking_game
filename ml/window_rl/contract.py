@@ -10,13 +10,15 @@ REMOVED_FEATURE_SIZE = ROWS * COLUMNS * CARD_FEATURES
 ACTION_FEATURE_SIZE = 5
 OUTCOME_FEATURE_SIZE = 3
 FLAG_FEATURE_SIZE = 2
-HISTORY_FEATURE_SIZE = (
+LEGACY_HISTORY_FEATURE_SIZE = (
     BOARD_FEATURE_SIZE
     + ACTION_FEATURE_SIZE
     + OUTCOME_FEATURE_SIZE
     + REMOVED_FEATURE_SIZE
     + FLAG_FEATURE_SIZE
 )
+PLAYER_CONTEXT_SIZE = 4
+HISTORY_FEATURE_SIZE = LEGACY_HISTORY_FEATURE_SIZE + PLAYER_CONTEXT_SIZE
 HISTORY_LENGTH = 16
 MAX_HISTORY_LENGTH = 64
 # Fixed critic-head capacity; single-player training uses physical seat zero.
@@ -29,9 +31,9 @@ GUESS_TYPES = 5
 CARD_ACTION_SIZE = ROWS * COLUMNS * ORIENTATIONS * GUESS_TYPES
 PASS_ACTION_INDEX = CARD_ACTION_SIZE
 ACTION_SIZE = CARD_ACTION_SIZE + 1
-# Bumped when the model/checkpoint layout changes, so an old policy cannot be
-# mistakenly exported against the recurrent deployment contract.
-CHECKPOINT_FORMAT = 4
+# Format 5 adds public player-count context and optional history attention.
+# Format 4 remains loadable with its original 130-feature encoder.
+CHECKPOINT_FORMAT = 5
 
 
 def action_index(row: int, column: int, orientation: int, guess: int) -> int:
