@@ -2075,8 +2075,8 @@ class _GameShellState extends State<GameShell> {
                   children: <Widget>[
                     Align(
                       alignment: Alignment.centerRight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
                         children: [
                           _rulesIcon,
                           const ThemePicker(),
@@ -2355,8 +2355,8 @@ class _GameShellState extends State<GameShell> {
                     children: <Widget>[
                       Align(
                         alignment: Alignment.centerRight,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
                           children: [
                             _rulesIcon,
                             const ThemePicker(),
@@ -2629,14 +2629,9 @@ class _GameShellState extends State<GameShell> {
       advisorError: !_isOnline && statusMessage != advisorErrorText
           ? advisorErrorText
           : null,
-      portrait: portrait,
       roomCode: _room?.code,
-      deckSize: _isOnline && (!_isHost || _serverHosted)
-          ? _room!.deckSize
-          : snapshot.deckSize,
       busy: _busy,
       canControl: _canControlCurrentTurn,
-      onEndTurn: endTurn,
       onConfirmSame: () => _turnAction(<String, dynamic>{
         'type': 'confirmSame',
       }, 'confirmed the same-rank penalty'),
@@ -2644,9 +2639,6 @@ class _GameShellState extends State<GameShell> {
         'type': 'confirmRemovals',
       }, 'clicked Redeal marked cards'),
       proposal: _visibleProposal,
-      pressedTarget: _pressedTarget,
-      proposing: _proposing || _turnUi['stage'] == 'calculating',
-      onPropose: _proposeMove,
     );
     final Widget board = _Board(
       game: game,
@@ -2659,70 +2651,64 @@ class _GameShellState extends State<GameShell> {
           : null,
       pressedTarget: _pressedTarget,
       debugState: debugState,
-      deckCounter: portrait
-          ? Card(
-              key: const ValueKey('board-deck-counter'),
-              margin: EdgeInsets.zero,
-              child: Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.style, size: 18),
-                        Text(
-                          '${(_isOnline && (!_isHost || _serverHosted) ? _room!.deckSize : snapshot.deckSize) ?? '?'}',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          _l.deckShort,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ],
-                    ),
+      deckCounter: Card(
+        key: const ValueKey('board-deck-counter'),
+        margin: EdgeInsets.zero,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.style, size: 18),
+                  Text(
+                    '${(_isOnline && (!_isHost || _serverHosted) ? _room!.deckSize : snapshot.deckSize) ?? '?'}',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                ),
+                  Text(
+                    _l.deckShort,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
               ),
-            )
-          : null,
-      endTurnControl: portrait
-          ? _BoardAction(
-              key: const ValueKey('board-end-turn'),
-              label: _visibleProposal?.action.isPass == true
-                  ? _l.endTurnSuggested
-                  : _l.endTurn,
-              icon: Icons.skip_next,
-              suggested: _visibleProposal?.action.isPass == true,
-              pressed: _pressedTarget == 'endTurn',
-              onPressed:
-                  _canControlCurrentTurn &&
-                      snapshot.turnCanEnd &&
-                      !game.hasPendingAction &&
-                      !_busy &&
-                      !snapshot.gameEnded
-                  ? endTurn
-                  : null,
-            )
-          : null,
-      proposeControl: portrait
-          ? _BoardAction(
-              key: const ValueKey('board-propose'),
-              label: _proposing || _turnUi['stage'] == 'calculating'
-                  ? _l.findingMove
-                  : _l.proposeMove,
-              icon: Icons.psychology_outlined,
-              onPressed:
-                  _canControlCurrentTurn &&
-                      !_busy &&
-                      !_proposing &&
-                      !game.hasPendingAction &&
-                      !snapshot.gameEnded
-                  ? _proposeMove
-                  : null,
-            )
-          : null,
+            ),
+          ),
+        ),
+      ),
+      endTurnControl: _BoardAction(
+        key: const ValueKey('board-end-turn'),
+        label: _visibleProposal?.action.isPass == true
+            ? _l.endTurnSuggested
+            : _l.endTurn,
+        icon: Icons.skip_next,
+        suggested: _visibleProposal?.action.isPass == true,
+        pressed: _pressedTarget == 'endTurn',
+        onPressed:
+            _canControlCurrentTurn &&
+                snapshot.turnCanEnd &&
+                !game.hasPendingAction &&
+                !_busy &&
+                !snapshot.gameEnded
+            ? endTurn
+            : null,
+      ),
+      proposeControl: _BoardAction(
+        key: const ValueKey('board-propose'),
+        label: _proposing || _turnUi['stage'] == 'calculating'
+            ? _l.findingMove
+            : _l.proposeMove,
+        icon: Icons.psychology_outlined,
+        onPressed:
+            _canControlCurrentTurn &&
+                !_busy &&
+                !_proposing &&
+                !game.hasPendingAction &&
+                !snapshot.gameEnded
+            ? _proposeMove
+            : null,
+      ),
     );
     final scaffold = Scaffold(
       bottomNavigationBar: _isOnline && _chatBelow ? _roomFooter() : null,
@@ -2851,36 +2837,25 @@ class _Info extends StatelessWidget {
     required this.snapshot,
     required this.message,
     required this.roomCode,
-    required this.deckSize,
     required this.busy,
     required this.canControl,
-    required this.onEndTurn,
     required this.onConfirmSame,
     required this.onConfirmRemovals,
     required this.proposal,
-    required this.proposing,
-    this.portrait = false,
     this.error = false,
     this.advisorError,
-    required this.onPropose,
-    this.pressedTarget,
   });
   final WindowGameEngine game;
   final GameSnapshot snapshot;
   final String message;
   final String? roomCode;
-  final int? deckSize;
   final bool busy;
   final bool canControl;
-  final VoidCallback onEndTurn;
   final VoidCallback onConfirmSame;
   final VoidCallback onConfirmRemovals;
   final AiMoveProposal? proposal;
-  final bool proposing;
-  final bool portrait, error;
+  final bool error;
   final String? advisorError;
-  final VoidCallback onPropose;
-  final String? pressedTarget;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -2920,42 +2895,6 @@ class _Info extends StatelessWidget {
               padding: EdgeInsets.only(top: 8),
               child: Text(tr(context).handleRule),
             ),
-          const Divider(height: 30),
-          if (!portrait) ...[
-            Text(
-              deckSize == null
-                  ? tr(context).hostDeck
-                  : tr(context).deckCards(deckSize!),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed:
-                  snapshot.turnCanEnd &&
-                      !game.hasPendingAction &&
-                      canControl &&
-                      !busy
-                  ? onEndTurn
-                  : null,
-              style:
-                  pressedTarget == 'endTurn' || proposal?.action.isPass == true
-                  ? FilledButton.styleFrom(
-                      backgroundColor: pressedTarget == 'endTurn'
-                          ? Colors.amber
-                          : Colors.lightBlue,
-                      disabledBackgroundColor: pressedTarget == 'endTurn'
-                          ? Colors.amber
-                          : Colors.lightBlue,
-                      disabledForegroundColor: Colors.black,
-                      foregroundColor: Colors.black,
-                    )
-                  : null,
-              child: Text(
-                proposal?.action.isPass == true
-                    ? tr(context).endTurnSuggested
-                    : tr(context).endTurn,
-              ),
-            ),
-          ],
           if (roomCode != null &&
               snapshot.pendingSamePosition != null) ...<Widget>[
             const SizedBox(height: 8),
@@ -2972,22 +2911,8 @@ class _Info extends StatelessWidget {
               child: Text(tr(context).redealMarked),
             ),
           ],
-          const Divider(height: 30),
-          if (!portrait) ...[
-            OutlinedButton.icon(
-              onPressed:
-                  canControl && !busy && !proposing && !game.hasPendingAction
-                  ? onPropose
-                  : null,
-              icon: const Icon(Icons.psychology_outlined),
-              label: Text(
-                proposing ? tr(context).findingMove : tr(context).proposeMove,
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
           if (proposal != null) ...<Widget>[
-            const SizedBox(height: 8),
+            const Divider(height: 30),
             Text(
               proposal!.rank == 1
                   ? tr(

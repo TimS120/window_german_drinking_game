@@ -97,6 +97,61 @@ void main() {
     },
   );
 
+  for (final size in [const Size(1400, 1100), const Size(390, 844)]) {
+    testWidgets('board contains deck and action cards at $size', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        WindowGameApp(
+          languageController: LanguageController(
+            store: _Preferences(),
+            initialLocale: const Locale('en'),
+          ),
+          firebaseEnabled: false,
+          rlPolicy: _TestPolicy(),
+          browserGuest: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Start local game'));
+      await tester.tap(find.text('Start local game'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      final deck = find.byKey(const ValueKey('board-deck-counter'));
+      final end = find.byKey(const ValueKey('board-end-turn'));
+      final propose = find.byKey(const ValueKey('board-propose'));
+      expect(
+        find.descendant(of: deck, matching: find.text('14')),
+        findsOneWidget,
+      );
+      expect(tester.getCenter(deck).dx, closeTo(tester.getCenter(end).dx, 0.1));
+      expect(
+        tester.getCenter(end).dx,
+        closeTo(tester.getCenter(propose).dx, 0.1),
+      );
+      expect(tester.getCenter(deck).dy, lessThan(tester.getCenter(end).dy));
+      expect(tester.getCenter(end).dy, lessThan(tester.getCenter(propose).dy));
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.descendant(of: end, matching: find.byType(FilledButton)),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.ensureVisible(propose);
+      await tester.tap(propose);
+      await tester.pumpAndSettle();
+      expect(find.text('RL model'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets(
     'capitalization collisions are rejected before an offline game starts',
     (tester) async {

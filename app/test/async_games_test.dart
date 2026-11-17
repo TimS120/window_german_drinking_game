@@ -176,6 +176,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 3));
       expect(operations, ['start']);
+      final deck = find.byKey(const ValueKey('board-deck-counter'));
+      expect(
+        find.descendant(of: deck, matching: find.text('14')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('board-end-turn')), findsOneWidget);
+      expect(find.byKey(const ValueKey('board-propose')), findsOneWidget);
       expect(find.byKey(const ValueKey('restart-online-game')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('restart-online-game')));
       await tester.pumpAndSettle();
