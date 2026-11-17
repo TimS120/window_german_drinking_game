@@ -806,6 +806,15 @@ class AppLocalizationsEn extends AppLocalizations {
       'This resets the board and scores and keeps your players.';
 
   @override
+  String get settings => 'Settings';
+
+  @override
+  String get liveSection => 'Live games';
+
+  @override
+  String get joinSection => 'Join a live game';
+
+  @override
   String get asyncGames => 'Asynchronous games';
 
   @override
@@ -827,6 +836,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get asyncRefresh => 'Refresh saved games';
+
+  @override
+  String get asyncNotificationRestoreFailed =>
+      'Could not restore turn notifications. Tap Enable turn notifications to try again.';
 
   @override
   String get asyncNotificationsEnabled => 'Turn notifications enabled';

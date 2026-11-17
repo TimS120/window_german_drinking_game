@@ -1401,6 +1401,24 @@ abstract class AppLocalizations {
   /// **'This resets the board and scores and keeps your players.'**
   String get restartLocalExplanation;
 
+  /// No description provided for @settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settings;
+
+  /// No description provided for @liveSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Live games'**
+  String get liveSection;
+
+  /// No description provided for @joinSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Join a live game'**
+  String get joinSection;
+
   /// No description provided for @asyncGames.
   ///
   /// In en, this message translates to:
@@ -1442,6 +1460,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Refresh saved games'**
   String get asyncRefresh;
+
+  /// No description provided for @asyncNotificationRestoreFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not restore turn notifications. Tap Enable turn notifications to try again.'**
+  String get asyncNotificationRestoreFailed;
 
   /// No description provided for @asyncNotificationsEnabled.
   ///

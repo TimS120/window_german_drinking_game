@@ -819,6 +819,15 @@ class AppLocalizationsDe extends AppLocalizations {
       'Spielfeld und Punkte werden zurückgesetzt. Deine Spieler bleiben erhalten.';
 
   @override
+  String get settings => 'Einstellungen';
+
+  @override
+  String get liveSection => 'Live-Spiele';
+
+  @override
+  String get joinSection => 'Live-Spiel beitreten';
+
+  @override
   String get asyncGames => 'Zeitversetzte Spiele';
 
   @override
@@ -840,6 +849,10 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get asyncRefresh => 'Gespeicherte Spiele aktualisieren';
+
+  @override
+  String get asyncNotificationRestoreFailed =>
+      'Zugbenachrichtigungen konnten nicht wiederhergestellt werden. Tippe auf Zugbenachrichtigungen aktivieren, um es erneut zu versuchen.';
 
   @override
   String get asyncNotificationsEnabled => 'Zugbenachrichtigungen aktiviert';

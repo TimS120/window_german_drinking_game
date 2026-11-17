@@ -2081,6 +2081,7 @@ class _GameShellState extends State<GameShell> {
                           _rulesIcon,
                           const ThemePicker(),
                           const LanguagePicker(showName: true),
+                          _settingsIcon,
                         ],
                       ),
                     ),
@@ -2090,49 +2091,51 @@ class _GameShellState extends State<GameShell> {
                     ),
                     const SizedBox(height: 12),
                     Text(tr(context).browserDescription),
-                    _asyncButton,
-                    _developerSwitch,
-                    const SizedBox(height: 12),
-                    Text(tr(context).askHost),
-                    const SizedBox(height: 24),
-                    TextField(
-                      controller: _roomCode,
-                      enabled: widget.firebaseEnabled && !_busy,
-                      textCapitalization: TextCapitalization.characters,
-                      autocorrect: false,
-                      decoration: InputDecoration(
-                        labelText: tr(context).roomCode,
-                        hintText: 'ABC234',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _seatName,
-                      enabled: widget.firebaseEnabled && !_busy,
-                      decoration: InputDecoration(
-                        labelText: tr(context).devicePlayers,
-                        hintText: 'Anna, Ben',
-                        helperText: tr(context).namesHelper,
-                      ),
-                      onSubmitted: (_) {
-                        if (widget.firebaseEnabled && !_busy) _joinRoom();
-                      },
-                    ),
                     const SizedBox(height: 16),
-                    Text(
-                      _message(_l),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: widget.firebaseEnabled && !_busy
-                          ? _joinRoom
-                          : null,
-                      icon: const Icon(Icons.login),
-                      label: Text(
-                        _busy ? tr(context).joining : tr(context).joinOnline,
+                    _homeSection(_l.asyncGames, [_asyncButton]),
+                    const SizedBox(height: 12),
+                    _homeSection(_l.joinSection, [
+                      Text(tr(context).askHost),
+                      const SizedBox(height: 24),
+                      TextField(
+                        controller: _roomCode,
+                        enabled: widget.firebaseEnabled && !_busy,
+                        textCapitalization: TextCapitalization.characters,
+                        autocorrect: false,
+                        decoration: InputDecoration(
+                          labelText: tr(context).roomCode,
+                          hintText: 'ABC234',
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _seatName,
+                        enabled: widget.firebaseEnabled && !_busy,
+                        decoration: InputDecoration(
+                          labelText: tr(context).devicePlayers,
+                          hintText: 'Anna, Ben',
+                          helperText: tr(context).namesHelper,
+                        ),
+                        onSubmitted: (_) {
+                          if (widget.firebaseEnabled && !_busy) _joinRoom();
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _message(_l),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: widget.firebaseEnabled && !_busy
+                            ? _joinRoom
+                            : null,
+                        icon: const Icon(Icons.login),
+                        label: Text(
+                          _busy ? tr(context).joining : tr(context).joinOnline,
+                        ),
+                      ),
+                    ]),
                   ],
                 ),
               ),
@@ -2252,6 +2255,40 @@ class _GameShellState extends State<GameShell> {
     }
   }
 
+  Widget get _settingsIcon => IconButton(
+    key: const ValueKey('home-settings'),
+    tooltip: _l.settings,
+    icon: const Icon(Icons.settings_outlined),
+    onPressed: () => showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_l.settings),
+        content: _developerSwitch,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(MaterialLocalizations.of(context).closeButtonLabel),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _homeSection(String title, List<Widget> children) => Card.outlined(
+    margin: EdgeInsets.zero,
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    ),
+  );
+
   Widget get _developerSwitch => SwitchListTile(
     key: const ValueKey('developer-mode'),
     contentPadding: EdgeInsets.zero,
@@ -2259,6 +2296,7 @@ class _GameShellState extends State<GameShell> {
     subtitle: Text(_l.developerModeHelp),
     value: _developerMode,
     onChanged: (value) {
+      Navigator.pop(context);
       if (!value) {
         setState(() => _developerMode = false);
       } else {
@@ -2323,6 +2361,7 @@ class _GameShellState extends State<GameShell> {
                             _rulesIcon,
                             const ThemePicker(),
                             const LanguagePicker(showName: true),
+                            _settingsIcon,
                           ],
                         ),
                       ),
@@ -2337,61 +2376,65 @@ class _GameShellState extends State<GameShell> {
                         _l.browserReminder,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      _asyncButton,
-                      _developerSwitch,
-                      const SizedBox(height: 24),
-                      TextField(
-                        controller: _players,
-                        decoration: InputDecoration(
-                          labelText: tr(context).players,
-                          hintText: 'Anna, Ben, Carla',
+                      const SizedBox(height: 16),
+                      _homeSection(_l.asyncGames, [_asyncButton]),
+                      const SizedBox(height: 12),
+                      _homeSection(_l.liveSection, [
+                        TextField(
+                          controller: _players,
+                          decoration: InputDecoration(
+                            labelText: tr(context).players,
+                            hintText: 'Anna, Ben, Carla',
+                          ),
+                          onSubmitted: (_) => _start(),
                         ),
-                        onSubmitted: (_) => _start(),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _message(_l),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 20),
-                      FilledButton.icon(
-                        onPressed: _start,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(tr(context).startLocal),
-                      ),
-                      const SizedBox(height: 10),
-                      FilledButton.icon(
-                        onPressed: _busy ? null : _createRoom,
-                        icon: const Icon(Icons.group),
-                        label: Text(
-                          widget.firebaseEnabled
-                              ? tr(context).createLobby
-                              : tr(context).firebaseSetupNeeded,
+                        const SizedBox(height: 8),
+                        Text(
+                          _message(_l),
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
-                      ),
-                      const Divider(height: 32),
-                      TextField(
-                        controller: _roomCode,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: InputDecoration(
-                          labelText: tr(context).roomCode,
+                        const SizedBox(height: 20),
+                        FilledButton.icon(
+                          onPressed: _start,
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(tr(context).startLocal),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _seatName,
-                        decoration: InputDecoration(
-                          labelText: tr(context).devicePlayers,
-                          hintText: 'Anna, Ben',
-                          helperText: tr(context).separateNames,
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: _busy ? null : _createRoom,
+                          icon: const Icon(Icons.group),
+                          label: Text(
+                            widget.firebaseEnabled
+                                ? tr(context).createLobby
+                                : tr(context).firebaseSetupNeeded,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: _busy ? null : _joinRoom,
-                        icon: const Icon(Icons.login),
-                        label: Text(tr(context).joinOnline),
-                      ),
+                      ]),
+                      const SizedBox(height: 12),
+                      _homeSection(_l.joinSection, [
+                        TextField(
+                          controller: _roomCode,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: InputDecoration(
+                            labelText: tr(context).roomCode,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _seatName,
+                          decoration: InputDecoration(
+                            labelText: tr(context).devicePlayers,
+                            hintText: 'Anna, Ben',
+                            helperText: tr(context).separateNames,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: _busy ? null : _joinRoom,
+                          icon: const Icon(Icons.login),
+                          label: Text(tr(context).joinOnline),
+                        ),
+                      ]),
                     ],
                   ),
                 ),

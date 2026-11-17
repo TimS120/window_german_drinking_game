@@ -15,7 +15,11 @@ class AsyncNotifications {
   static const _sender = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
   static const _vapid = String.fromEnvironment('FIREBASE_VAPID_KEY');
   static Future<void>? _initializing;
-  static Future<void> initialize() => _initializing ??= _initialize();
+  static Future<void> initialize() => _initializing ??= _initialize()
+      .catchError((Object error, StackTrace stack) {
+        _initializing = null;
+        Error.throwWithStackTrace(error, stack);
+      });
   static Future<void> _initialize() async {
     if (!supported || _project.isEmpty) return;
     await Firebase.initializeApp(
@@ -43,30 +47,52 @@ class AsyncNotifications {
       _preferences.getString('window.async.notificationId');
   static Future<void> rememberEnabled() =>
       _preferences.setBool('window.async.notifications', true);
-  static Future<void> restoreRegistration() async {
-    if (!supported || _project.isEmpty || asyncBackendUrl.isEmpty) return;
-    if (await _preferences.getBool('window.async.notifications') != true) {
-      return;
-    }
-    await initialize();
-    Future<void> upload(String id) async {
-      final identity = AsyncIdentity();
-      await identity.load();
-      final client = AsyncGamesClient(identity: identity);
-      try {
-        await client.registerToken(id);
-        await _preferences.setString('window.async.notificationId', id);
-      } finally {
-        client.close();
-      }
-    }
+  static Future<void>? _restoring;
+  static Future<void> restoreRegistration() {
+    final existing = _restoring;
+    if (existing != null) return existing;
+    final future = _restoreRegistration();
+    _restoring = future;
+    return future.whenComplete(() => _restoring = null);
+  }
 
+  static Future<void> _uploadRegistration(String id) async {
+    final identity = AsyncIdentity();
+    await identity.load();
+    final client = AsyncGamesClient(identity: identity);
+    try {
+      await client.registerToken(id);
+      await _preferences.setString('window.async.notificationId', id);
+    } finally {
+      client.close();
+    }
+  }
+
+  static Future<void> _restoreRegistration() async {
+    if (!supported || _project.isEmpty || asyncBackendUrl.isEmpty) return;
+    if (!await enabled) return;
+    await initialize();
+    final settings = await FirebaseMessaging.instance.getNotificationSettings();
+    if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+        settings.authorizationStatus != AuthorizationStatus.provisional) {
+      throw StateError('Notification permission was not granted.');
+    }
     _registrations ??= FirebaseMessaging.instance.onRegistered.listen((id) {
-      unawaited(upload(id).catchError((Object _) {}));
+      unawaited(_uploadRegistration(id).catchError((Object _) {}));
     });
-    await FirebaseMessaging.instance.register(
-      vapidKey: kIsWeb && _vapid.isNotEmpty ? _vapid : null,
-    );
+    final registration = Completer<String>();
+    final listener = FirebaseMessaging.instance.onRegistered.listen((id) {
+      if (!registration.isCompleted) registration.complete(id);
+    });
+    try {
+      await FirebaseMessaging.instance
+          .register(vapidKey: kIsWeb && _vapid.isNotEmpty ? _vapid : null)
+          .timeout(const Duration(seconds: 30));
+      final id = await registration.future.timeout(const Duration(seconds: 30));
+      await _uploadRegistration(id);
+    } finally {
+      await listener.cancel();
+    }
   }
 
   static Future<String> enable() async {

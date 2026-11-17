@@ -51,6 +51,7 @@ void main() {
         find.widgetWithText(TextField, 'Players'),
         'tim, élise',
       );
+      await tester.ensureVisible(find.text('Start local game'));
       await tester.tap(find.text('Start local game'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 3));
@@ -115,6 +116,7 @@ void main() {
         find.widgetWithText(TextField, 'Players'),
         'tim, Tim',
       );
+      await tester.ensureVisible(find.text('Start local game'));
       await tester.tap(find.text('Start local game'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('restart-local-game')), findsNothing);
@@ -152,6 +154,8 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-settings')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('developer-mode')));
       await tester.pumpAndSettle();
@@ -294,6 +298,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Start local game'), findsOneWidget);
     expect(find.text('Create online lobby'), findsOneWidget);
+    expect(find.text('Live games'), findsOneWidget);
+    expect(find.text('Join a live game'), findsOneWidget);
+    expect(find.byKey(const ValueKey('async-games')), findsOneWidget);
+    expect(find.byKey(const ValueKey('developer-mode')), findsNothing);
+    expect(find.byKey(const ValueKey('home-settings')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets('statistics hint displays future drinks and a short reason', (

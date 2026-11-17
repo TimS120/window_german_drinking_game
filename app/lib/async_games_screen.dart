@@ -79,10 +79,15 @@ class _AsyncGamesScreenState extends State<AsyncGamesScreen>
         _notifications = await AsyncNotifications.enabled;
       }
       await _refreshList();
-      if (AsyncNotifications.supported) {
-        unawaited(
-          AsyncNotifications.restoreRegistration().catchError((Object _) {}),
-        );
+      if (widget.client == null &&
+          AsyncNotifications.supported &&
+          _notifications) {
+        try {
+          await AsyncNotifications.restoreRegistration();
+        } catch (_) {
+          _notifications = false;
+          _error = l.asyncNotificationRestoreFailed;
+        }
       }
       if (widget.initialCode != null) {
         final existing = _games
